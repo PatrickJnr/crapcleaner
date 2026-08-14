@@ -447,7 +447,6 @@ def _prepare_linux_qt_environment() -> None:
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 
-
 def run_gui() -> int:
     _prepare_linux_qt_environment()
 

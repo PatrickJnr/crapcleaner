@@ -184,7 +184,9 @@ def _trash_put(path: str) -> bool:
     if trash_cli:
         result = subprocess.run([trash_cli, path], capture_output=True, text=True)
         return result.returncode == 0
-    return remove_tree(path) if os.path.isdir(path) and not os.path.islink(path) else remove_file(path)
+    return (
+        remove_tree(path) if os.path.isdir(path) and not os.path.islink(path) else remove_file(path)
+    )
 
 
 def _empty_linux_trash() -> bool:

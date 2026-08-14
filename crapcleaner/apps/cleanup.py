@@ -28,6 +28,7 @@ def _electron_subtargets(
 def _get_windows_categories(
     appdata: str, local: str, user: str, program_data: str
 ) -> list[CleanupCategory]:
+    _ = is_windows
     categories: list[CleanupCategory] = []
 
     discord_root = os.path.join(appdata, "discord")
@@ -134,19 +135,19 @@ def _get_linux_categories(
     categories: list[CleanupCategory] = []
 
     categories.append(
-            CleanupCategory(
-                id="discord_cache",
-                name="Discord cache",
-                group="Applications",
-                description="Cached media, avatars, and Electron runtime data for Discord. Re-downloaded as needed.",
-                safety_level=SafetyLevel.LOW_RISK,
-                targets=_electron_subtargets(
-                    os.path.join(appdata, "discord"),
-                    ("Cache", "GPUCache", "Code Cache", "Service Worker", "Partitions"),
-                    existing_only=False,
-                ),
-            )
+        CleanupCategory(
+            id="discord_cache",
+            name="Discord cache",
+            group="Applications",
+            description="Cached media, avatars, and Electron runtime data for Discord. Re-downloaded as needed.",
+            safety_level=SafetyLevel.LOW_RISK,
+            targets=_electron_subtargets(
+                os.path.join(appdata, "discord"),
+                ("Cache", "GPUCache", "Code Cache", "Service Worker", "Partitions"),
+                existing_only=False,
+            ),
         )
+    )
 
     categories.append(
         CleanupCategory(
@@ -188,9 +189,7 @@ def _get_linux_categories(
             group="Package managers",
             description="Downloaded package files cached by APT. Safe to remove; packages can be downloaded again later.",
             safety_level=SafetyLevel.SAFE,
-            targets=_targets(
-                [os.path.join(program_data, "apt", "archives")], existing_only=False
-            ),
+            targets=_targets([os.path.join(program_data, "apt", "archives")], existing_only=False),
         )
     )
 
@@ -259,6 +258,7 @@ def _get_linux_categories(
     )
 
     return categories
+
 
 def get_categories() -> list[CleanupCategory]:
     appdata = get_appdata()

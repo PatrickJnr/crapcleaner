@@ -6,7 +6,6 @@ import os
 import shutil
 import subprocess
 
-_MAX_LARGE_FILE_ROWS = 500
 _MAX_DUPLICATE_GROUP_ROWS = 150
 _MAX_DUPLICATE_TOOLTIP_FILES = 20
 
@@ -78,6 +77,10 @@ from crapcleaner.utils.platform import (
     is_windows,
     list_drives,
 )
+
+_MAX_LARGE_FILE_ROWS = 500
+_MAX_DUPLICATE_GROUP_ROWS = 150
+_MAX_DUPLICATE_TOOLTIP_FILES = 20
 
 
 def _c(theme: str, name: str) -> str:

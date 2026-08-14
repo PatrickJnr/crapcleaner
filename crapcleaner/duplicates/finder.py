@@ -6,8 +6,8 @@ Stages:
 3. Full SHA-256 hashing: Only computed for files sharing both identical size and prefix hash.
 """
 
-import heapq
 import hashlib
+import heapq
 import os
 import threading
 from collections.abc import Callable
