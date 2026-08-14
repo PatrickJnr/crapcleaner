@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from crapcleaner.utils.format import format_size
-from crapcleaner.utils.platform import get_drive_info, is_linux, list_drives, which
+from crapcleaner.utils.platform import get_drive_info, is_linux, is_windows, list_drives, which
 
 
 @dataclass
@@ -388,7 +388,7 @@ def _get_gpu_specs() -> list[GpuSpec]:
 
 def _get_drive_specs() -> list[DriveSpec]:
     drive_specs: list[DriveSpec] = []
-    drives = [d.rstrip("\\") for d in list_drives()]
+    drives = [d.rstrip("\\") if is_windows() else d for d in list_drives()]
     for d in drives:
         try:
             info = get_drive_info(d)

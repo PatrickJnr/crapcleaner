@@ -5,6 +5,7 @@ from collections.abc import Callable
 from crapcleaner.ai import get_categories as ai_categories
 from crapcleaner.apps.cleanup import get_categories as apps_categories
 from crapcleaner.browsers import get_categories as browser_categories
+from crapcleaner.developer import get_categories as developer_categories
 from crapcleaner.docker import get_categories as docker_categories
 from crapcleaner.models.category import CleanupCategory
 from crapcleaner.node import get_categories as node_categories
@@ -12,7 +13,6 @@ from crapcleaner.python import get_categories as python_categories
 from crapcleaner.utils.platform import is_windows
 
 if is_windows():
-    from crapcleaner.developer import get_categories as developer_categories
     from crapcleaner.dotnet import get_categories as dotnet_categories
     from crapcleaner.gaming import get_categories as gaming_categories
     from crapcleaner.gpu import get_categories as gpu_categories
@@ -34,6 +34,7 @@ else:
     providers = [
         ("Browsers", browser_categories),
         ("Node.js", node_categories),
+        ("Developer tools", developer_categories),
         ("Applications", apps_categories),
         ("AI", ai_categories),
         ("Docker", docker_categories),

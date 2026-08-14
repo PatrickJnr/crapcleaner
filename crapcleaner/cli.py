@@ -247,7 +247,7 @@ def _print_duplicates(groups: list[DuplicateGroup], json_output: bool = False) -
 
 
 def _run_health_check(json_output: bool = False) -> int:
-    drives = [d.rstrip("\\") for d in list_drives()]
+    drives = list_drives()
     drive_stats: list[dict[str, Any]] = []
     total_capacity: int = 0
     total_free: int = 0

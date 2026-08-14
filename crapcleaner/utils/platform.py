@@ -2,6 +2,7 @@
 
 import ctypes
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,40 +21,79 @@ def resolve_paths(paths: list[str]) -> list[str]:
     return out
 
 
-def get_drive_info(drive: str = "C:") -> dict[str, int]:
-    import shutil
-
-    total, used, free = shutil.disk_usage(f"{drive}\\")
+def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
+    path = f"{drive}\\" if is_windows() else drive
+    total, used, free = shutil.disk_usage(path)
     return {"total": total, "used": used, "free": free}
 
 
 def list_drives() -> list[str]:
-    """Return roots of all drives with a letter, e.g. ['C:\\', 'D:\\'].
-
-    Enumerates via the process drive map (GetLogicalDrives bitmask plus
-    GetLogicalDriveStringsW as a fallback). Drives that are temporarily
-    inaccessible are still listed - callers must handle OSError from
-    get_drive_info.
-    """
-    if not sys.platform.startswith("win"):
-        return ["C:\\"]
-    import ctypes
-
-    try:
-        mask = ctypes.windll.kernel32.GetLogicalDrives()
-        letters = [chr(65 + i) for i in range(26) if mask >> i & 1]
-    except Exception:  # pragma: no cover - defensive
-        letters = []
-
-    if not letters:
+    """Return mounted filesystem roots for the current platform."""
+    if is_windows():
         try:
-            buf = ctypes.create_unicode_buffer(256)
-            ctypes.windll.kernel32.GetLogicalDriveStringsW(256, buf)
-            letters = [r.rstrip("\\") for r in buf.value.split("\x00") if r]
+            mask = ctypes.windll.kernel32.GetLogicalDrives()
+            letters = [chr(65 + i) for i in range(26) if mask >> i & 1]
         except Exception:  # pragma: no cover - defensive
             letters = []
 
-    return [f"{letter}:\\" for letter in letters] or ["C:\\"]
+        if not letters:
+            try:
+                buf = ctypes.create_unicode_buffer(256)
+                ctypes.windll.kernel32.GetLogicalDriveStringsW(256, buf)
+                letters = [r.rstrip("\\") for r in buf.value.split("\x00") if r]
+            except Exception:  # pragma: no cover - defensive
+                letters = []
+
+        return [f"{letter}:\\" for letter in letters] or ["C:\\"]
+
+    mounts: list[str] = []
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mount_point = parts[1]
+                fs_type = parts[2]
+                if fs_type in {
+                    "proc",
+                    "sysfs",
+                    "tmpfs",
+                    "devtmpfs",
+                    "devpts",
+                    "cgroup",
+                    "cgroup2",
+                    "overlay",
+                    "squashfs",
+                    "nsfs",
+                    "tracefs",
+                    "debugfs",
+                    "securityfs",
+                    "pstore",
+                    "autofs",
+                    "mqueue",
+                    "hugetlbfs",
+                    "rpc_pipefs",
+                    "fusectl",
+                    "efivarfs",
+                    "bpf",
+                    "configfs",
+                    "selinuxfs",
+                    "binfmt_misc",
+                }:
+                    continue
+                if mount_point.startswith("/run/"):
+                    continue
+                if mount_point.startswith("/home/") and "/.git" in mount_point:
+                    continue
+                if mount_point.startswith("/home/") and "/CrapCleaner/" in mount_point:
+                    continue
+                if mount_point not in mounts:
+                    mounts.append(mount_point)
+    except OSError:
+        mounts = ["/"]
+
+    return mounts or ["/"]
 
 
 def is_admin() -> bool:

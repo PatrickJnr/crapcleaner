@@ -4,8 +4,11 @@ import ctypes
 import os
 import shutil
 import stat
+import subprocess
 from collections.abc import Iterable
 from ctypes import wintypes
+
+from crapcleaner.utils.platform import get_user_profile, is_linux, which
 
 
 class _SHFILEOPSTRUCTW(ctypes.Structure):
@@ -104,17 +107,21 @@ def remove_tree(path: str) -> bool:
 
 
 def recycle_file(path: str) -> bool:
-    """Move a single file to the Recycle Bin. Permanent delete on non-Windows."""
-    if os.name != "nt":
-        return remove_file(path)
-    return _shfile_op_delete([path])
+    """Move a single file to the platform trash/recycle bin."""
+    if os.name == "nt":
+        return _shfile_op_delete([path])
+    if is_linux():
+        return _trash_put(path)
+    return remove_file(path)
 
 
 def recycle_tree(path: str) -> bool:
-    """Move a whole directory tree to the Recycle Bin. Permanent delete on non-Windows."""
-    if os.name != "nt":
-        return remove_tree(path)
-    return _shfile_op_delete([path])
+    """Move a whole directory tree to the platform trash/recycle bin."""
+    if os.name == "nt":
+        return _shfile_op_delete([path])
+    if is_linux():
+        return _trash_put(path)
+    return remove_tree(path)
 
 
 def _shfile_op_delete(paths: Iterable[str]) -> bool:
@@ -143,22 +150,56 @@ def move_to_recycle_bin(paths: list[str]) -> tuple[bool, list[str]]:
     for p in paths:
         if not os.path.exists(p):
             continue
-        if not _shfile_op_delete([p]):
+        ok = _shfile_op_delete([p]) if os.name == "nt" else (_trash_put(p) if is_linux() else False)
+        if not ok:
             failed.append(p)
     return not failed, failed
 
 
 def empty_recycle_bin() -> bool:
-    """Empty the Windows Recycle Bin on all drives."""
-    if os.name != "nt":
-        return False
-    try:
-        result = ctypes.windll.shell32.SHEmptyRecycleBinW(
-            None, None, _SHERB_NOCONFIRMATION | _SHERB_NOPROGRESSUI | _SHERB_NOSOUND
-        )
-        return result == 0
-    except OSError:
-        return False
+    """Empty the platform recycle bin/trash."""
+    if os.name == "nt":
+        try:
+            result = ctypes.windll.shell32.SHEmptyRecycleBinW(
+                None, None, _SHERB_NOCONFIRMATION | _SHERB_NOPROGRESSUI | _SHERB_NOSOUND
+            )
+            return result == 0
+        except OSError:
+            return False
+    if is_linux():
+        return _empty_linux_trash()
+    return False
+
+
+def _trash_put(path: str) -> bool:
+    trash_put = which("gio")
+    if trash_put:
+        result = subprocess.run([trash_put, "trash", path], capture_output=True, text=True)
+        return result.returncode == 0
+    trash_cli = which("trash-put")
+    if trash_cli:
+        result = subprocess.run([trash_cli, path], capture_output=True, text=True)
+        return result.returncode == 0
+    return False
+
+
+def _empty_linux_trash() -> bool:
+    user = get_user_profile()
+    candidates = [
+        os.path.join(user, ".local", "share", "Trash", "files"),
+        os.path.join(user, ".local", "share", "Trash", "info"),
+    ]
+    ok = True
+    for path in candidates:
+        if not os.path.isdir(path):
+            continue
+        for entry in os.listdir(path):
+            full = os.path.join(path, entry)
+            if os.path.isdir(full) and not os.path.islink(full):
+                ok = remove_tree(full) and ok
+            else:
+                ok = remove_file(full) and ok
+    return ok
 
 
 def path_is_locked(path: str) -> bool:
