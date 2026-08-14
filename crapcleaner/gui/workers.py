@@ -4,11 +4,11 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-_MAX_GUI_LARGE_FILES = 5000
-_MAX_GUI_DUPLICATE_GROUPS = 1000
-
 from crapcleaner.cleaners.cleaner import clean_categories
 from crapcleaner.scanner.scanner import ScanEngine
+
+_MAX_GUI_LARGE_FILES = 5000
+_MAX_GUI_DUPLICATE_GROUPS = 1000
 
 
 class ScanWorker(QThread):

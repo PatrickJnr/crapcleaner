@@ -6,10 +6,6 @@ import os
 import shutil
 import subprocess
 
-_MAX_DUPLICATE_GROUP_ROWS = 150
-_MAX_DUPLICATE_TOOLTIP_FILES = 20
-
-
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
@@ -316,7 +312,11 @@ class DriveCard(QFrame):
 
         self.type_badge = QLabel(
             "SYSTEM"
-            if (drive.upper().startswith("C") if is_windows() else drive in ("/", "/boot", "/boot/efi"))
+            if (
+                drive.upper().startswith("C")
+                if is_windows()
+                else drive in ("/", "/boot", "/boot/efi")
+            )
             else "LOCAL"
         )
         self.type_badge.setProperty("badge", "true")
@@ -605,7 +605,9 @@ class DashboardView(QWidget):
                 extra.append(label)
             if fs_name:
                 extra.append(fs_name)
-            extra_line = f"<br><span style='font-size:11px'>{' · '.join(extra)}</span>" if extra else ""
+            extra_line = (
+                f"<br><span style='font-size:11px'>{' · '.join(extra)}</span>" if extra else ""
+            )
             self.drive_detail.setText(
                 f"<b>{drive}</b><br>"
                 f"Used: {format_size(info['used'])} · Free: {format_size(info['free'])} · Total: {format_size(info['total'])}"
