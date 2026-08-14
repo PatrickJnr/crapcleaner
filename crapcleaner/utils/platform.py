@@ -21,9 +21,12 @@ def resolve_paths(paths: list[str]) -> list[str]:
     return out
 
 
-def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
-    path = f"{drive}\\" if is_windows() else drive
-    total, used, free = shutil.disk_usage(path)
+def get_drive_info(drive: str = "C:") -> dict[str, int]:
+    if is_windows():
+        target = f"{drive}\\" if not drive.endswith(("\\", "/")) else drive
+    else:
+        target = drive if drive and drive != "C:" else "/"
+    total, used, free = shutil.disk_usage(target)
     return {"total": total, "used": used, "free": free}
 
 

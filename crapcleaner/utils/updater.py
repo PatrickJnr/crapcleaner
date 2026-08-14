@@ -5,7 +5,7 @@ import logging
 import re
 import urllib.error
 import urllib.request
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from crapcleaner import __version__
 
@@ -13,6 +13,8 @@ _logger = logging.getLogger(__name__)
 
 GITHUB_REPO = "PatrickJnr/crapcleaner"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+ALL_RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
+TAGS_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/tags"
 
 
 class UpdateInfo(NamedTuple):
@@ -30,37 +32,77 @@ def _parse_version(v: str) -> tuple[int, ...]:
     return tuple(int(n) for n in nums) or (0,)
 
 
-def check_for_updates(timeout_seconds: float = 4.0) -> UpdateInfo | None:
-    """Check GitHub Releases API for latest published version."""
+def _fetch_json(url: str, timeout_seconds: float = 5.0) -> Any:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": f"CrapCleaner/{__version__}",
+            "Accept": "application/vnd.github.v3+json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+        if resp.status == 200:
+            return json.loads(resp.read().decode("utf-8"))
+    return None
+
+
+def check_for_updates(timeout_seconds: float = 5.0) -> UpdateInfo | None:
+    """Check GitHub API for latest published version with multi-endpoint fallback."""
+    current_parsed = _parse_version(__version__)
+
+    # 1. Try latest published release
     try:
-        req = urllib.request.Request(
-            RELEASES_API_URL,
-            headers={
-                "User-Agent": f"CrapCleaner/{__version__}",
-                "Accept": "application/vnd.github.v3+json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-            if resp.status != 200:
-                return None
-            data = json.loads(resp.read().decode("utf-8"))
+        data = _fetch_json(RELEASES_API_URL, timeout_seconds=timeout_seconds)
+        if isinstance(data, dict) and data.get("tag_name"):
+            tag = str(data["tag_name"])
+            latest_ver = tag.lstrip("vV")
+            return UpdateInfo(
+                current_version=__version__,
+                latest_version=latest_ver,
+                is_newer=_parse_version(latest_ver) > current_parsed,
+                release_name=str(data.get("name") or tag),
+                html_url=str(data.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases"),
+                published_at=str(data.get("published_at") or ""),
+                body=str(data.get("body") or ""),
+            )
+    except Exception as exc:
+        _logger.debug("Latest release check failed: %s", exc)
 
-        tag = data.get("tag_name", "")
-        latest_ver = tag.lstrip("vV")
-        current_parsed = _parse_version(__version__)
-        latest_parsed = _parse_version(latest_ver)
+    # 2. Fallback: try release list
+    try:
+        data = _fetch_json(ALL_RELEASES_URL, timeout_seconds=timeout_seconds)
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            first = data[0]
+            tag = str(first.get("tag_name", ""))
+            latest_ver = tag.lstrip("vV")
+            return UpdateInfo(
+                current_version=__version__,
+                latest_version=latest_ver,
+                is_newer=_parse_version(latest_ver) > current_parsed,
+                release_name=str(first.get("name") or tag),
+                html_url=str(first.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases"),
+                published_at=str(first.get("published_at") or ""),
+                body=str(first.get("body") or ""),
+            )
+    except Exception as exc:
+        _logger.debug("All releases fallback check failed: %s", exc)
 
-        is_newer = latest_parsed > current_parsed
+    # 3. Fallback: try repository tags
+    try:
+        data = _fetch_json(TAGS_API_URL, timeout_seconds=timeout_seconds)
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            first_tag = str(data[0].get("name", ""))
+            latest_ver = first_tag.lstrip("vV")
+            return UpdateInfo(
+                current_version=__version__,
+                latest_version=latest_ver,
+                is_newer=_parse_version(latest_ver) > current_parsed,
+                release_name=f"Release {first_tag}",
+                html_url=f"https://github.com/{GITHUB_REPO}/releases/tag/{first_tag}",
+                published_at="",
+                body="",
+            )
+    except Exception as exc:
+        _logger.debug("Tags fallback check failed: %s", exc)
 
-        return UpdateInfo(
-            current_version=__version__,
-            latest_version=latest_ver,
-            is_newer=is_newer,
-            release_name=data.get("name", tag),
-            html_url=data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases"),
-            published_at=data.get("published_at", ""),
-            body=data.get("body", ""),
-        )
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-        _logger.debug("Failed to check for updates: %s", exc)
-        return None
+    return None

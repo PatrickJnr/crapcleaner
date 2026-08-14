@@ -1,3 +1,3 @@
-"""CrapCleaner - modern Windows cleanup and disk-analysis utility."""
+"""CrapCleaner - modern cleanup and disk-analysis utility."""
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
