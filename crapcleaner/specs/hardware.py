@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from crapcleaner.utils.format import format_size
-from crapcleaner.utils.platform import get_drive_info, list_drives
+from crapcleaner.utils.platform import get_drive_info, is_linux, list_drives, which
 
 
 @dataclass
@@ -100,6 +100,15 @@ class SystemSpecs:
         return json.dumps(self.to_dict(), indent=indent)
 
 
+def _format_uptime(seconds: int) -> str:
+    days, rem = divmod(max(seconds, 0), 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, secs = divmod(rem, 60)
+    if days > 0:
+        return f"{days}d {hours}h {mins}m"
+    return f"{hours}h {mins}m {secs}s"
+
+
 def _get_windows_uptime() -> str:
     if os.name != "nt":
         return "N/A"
@@ -108,15 +117,40 @@ def _get_windows_uptime() -> str:
 
         lib = ctypes.windll.kernel32
         ticks = lib.GetTickCount64()
-        seconds = int(ticks / 1000)
-        days, rem = divmod(seconds, 86400)
-        hours, rem = divmod(rem, 3600)
-        mins, secs = divmod(rem, 60)
-        if days > 0:
-            return f"{days}d {hours}h {mins}m"
-        return f"{hours}h {mins}m {secs}s"
+        return _format_uptime(int(ticks / 1000))
     except Exception:
         return "N/A"
+
+
+def _get_linux_uptime() -> str:
+    try:
+        with open("/proc/uptime", encoding="utf-8") as fh:
+            seconds = int(float(fh.read().split()[0]))
+        return _format_uptime(seconds)
+    except Exception:
+        return "N/A"
+
+
+def _read_text(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _read_key_value_file(path: str, sep: str = ":") -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if sep not in line:
+                    continue
+                key, value = line.split(sep, 1)
+                values[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return values
 
 
 def _get_os_specs() -> OsSpec:
@@ -125,10 +159,10 @@ def _get_os_specs() -> OsSpec:
     build = version
     arch = platform.machine()
     computer = platform.node()
-    user = os.environ.get("USERNAME", "")
-
-    # Try registry for precise Windows 10/11 edition
+    user = os.environ.get("USERNAME") or os.environ.get("USER", "")
     edition = ""
+    uptime = _get_windows_uptime() if os.name == "nt" else "N/A"
+
     if os.name == "nt":
         try:
             import winreg
@@ -147,6 +181,16 @@ def _get_os_specs() -> OsSpec:
                     pass
         except Exception:
             pass
+    elif is_linux():
+        os_release = _read_key_value_file("/etc/os-release", sep="=")
+        pretty = os_release.get("PRETTY_NAME", "").strip('"')
+        os_version = os_release.get("VERSION", "").strip('"')
+        version_id = os_release.get("VERSION_ID", "").strip('"')
+        edition = pretty or os_release.get("NAME", "").strip('"')
+        os_name = edition or os_name
+        version = version_id or os_version or version
+        build = f"Kernel {platform.release()}"
+        uptime = _get_linux_uptime()
 
     return OsSpec(
         name=edition or os_name,
@@ -154,7 +198,7 @@ def _get_os_specs() -> OsSpec:
         version=version,
         build_number=build,
         architecture=arch,
-        uptime=_get_windows_uptime(),
+        uptime=uptime,
         computer_name=computer,
         user_name=user,
     )
@@ -164,6 +208,7 @@ def _get_cpu_specs() -> CpuSpec:
     cpu_name = platform.processor() or "Unknown CPU"
     cores_logical = os.cpu_count() or 1
     cores_physical = max(1, cores_logical // 2)
+    clock_speed = 0
 
     if os.name == "nt":
         try:
@@ -189,12 +234,41 @@ def _get_cpu_specs() -> CpuSpec:
                 )
         except Exception:
             pass
+    elif is_linux():
+        cpuinfo = _read_key_value_file("/proc/cpuinfo")
+        cpu_name = cpuinfo.get("model name") or cpuinfo.get("Hardware") or cpu_name
+        mhz = cpuinfo.get("cpu MHz", "")
+        try:
+            clock_speed = int(float(mhz)) if mhz else 0
+        except ValueError:
+            clock_speed = 0
+        physical_ids: set[str] = set()
+        core_pairs: set[tuple[str, str]] = set()
+        current_physical = "0"
+        for line in _read_text("/proc/cpuinfo").splitlines():
+            if ":" not in line:
+                continue
+            key, value = [part.strip() for part in line.split(":", 1)]
+            if key == "physical id":
+                current_physical = value
+                physical_ids.add(value)
+            elif key == "core id":
+                core_pairs.add((current_physical, value))
+        if core_pairs:
+            cores_physical = len(core_pairs)
+        elif physical_ids:
+            cpu_cores = cpuinfo.get("cpu cores", "")
+            try:
+                cores_physical = max(1, int(cpu_cores) * len(physical_ids))
+            except ValueError:
+                pass
 
     return CpuSpec(
         name=cpu_name,
         architecture=platform.machine(),
         cores_physical=cores_physical,
         cores_logical=cores_logical,
+        max_clock_speed_mhz=clock_speed,
     )
 
 
@@ -232,6 +306,21 @@ def _get_memory_specs() -> MemorySpec:
                 )
         except Exception:
             pass
+    elif is_linux():
+        meminfo = _read_key_value_file("/proc/meminfo")
+        try:
+            total = int(meminfo.get("MemTotal", "0 kB").split()[0]) * 1024
+            avail = int(meminfo.get("MemAvailable", "0 kB").split()[0]) * 1024
+            used = max(0, total - avail)
+            pct = round((used / total * 100) if total else 0.0, 1)
+            return MemorySpec(
+                total_bytes=total,
+                available_bytes=avail,
+                used_bytes=used,
+                percent_used=pct,
+            )
+        except (ValueError, IndexError):
+            pass
 
     return MemorySpec()
 
@@ -239,7 +328,6 @@ def _get_memory_specs() -> MemorySpec:
 def _get_gpu_specs() -> list[GpuSpec]:
     gpus: list[GpuSpec] = []
     if os.name == "nt":
-        # Fast query via PowerShell Get-CimInstance or registry
         cmd = [
             "powershell",
             "-NoProfile",
@@ -266,6 +354,32 @@ def _get_gpu_specs() -> list[GpuSpec]:
                     )
         except Exception:
             pass
+    elif is_linux():
+        lspci = which("lspci")
+        if lspci:
+            try:
+                res = subprocess.run([lspci], capture_output=True, text=True, timeout=5)
+                if res.returncode == 0:
+                    for line in res.stdout.splitlines():
+                        lowered = line.lower()
+                        if "vga compatible controller" in lowered or "3d controller" in lowered:
+                            name = line.split(": ", 1)[1].strip() if ": " in line else line.strip()
+                            gpus.append(GpuSpec(name=name))
+            except Exception:
+                pass
+        if not gpus:
+            drm_cards = "/sys/class/drm"
+            try:
+                for entry in sorted(os.listdir(drm_cards)):
+                    if not entry.startswith("card") or "-" in entry:
+                        continue
+                    device_path = os.path.join(drm_cards, entry, "device")
+                    vendor = _read_text(os.path.join(device_path, "vendor"))
+                    device = _read_text(os.path.join(device_path, "device"))
+                    if vendor or device:
+                        gpus.append(GpuSpec(name=f"GPU {entry} ({vendor} {device})".strip()))
+            except OSError:
+                pass
 
     if not gpus:
         gpus.append(GpuSpec(name="Standard Display Adapter"))
@@ -334,6 +448,15 @@ def _get_motherboard_specs() -> MotherboardSpec:
                     pass
         except Exception:
             pass
+    elif is_linux():
+        mfg = _read_text("/sys/class/dmi/id/board_vendor") or _read_text(
+            "/sys/class/dmi/id/sys_vendor"
+        )
+        prod = _read_text("/sys/class/dmi/id/board_name") or _read_text(
+            "/sys/class/dmi/id/product_name"
+        )
+        bios_ver = _read_text("/sys/class/dmi/id/bios_version")
+        bios_date = _read_text("/sys/class/dmi/id/bios_date")
 
     return MotherboardSpec(
         manufacturer=mfg or "Unknown Manufacturer",

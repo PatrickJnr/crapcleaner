@@ -1,4 +1,4 @@
-"""Windows platform helpers: env resolution, drives, admin detection, elevation."""
+"""Cross-platform helpers for paths, storage, and process execution."""
 
 import ctypes
 import os
@@ -98,28 +98,46 @@ def relaunch_as_admin(argv: list[str] | None = None) -> bool:
     return True
 
 
+def is_windows() -> bool:
+    return sys.platform.startswith("win")
+
+
+def is_linux() -> bool:
+    return sys.platform.startswith("linux")
+
+
 def get_user_profile() -> str:
     return os.environ.get("USERPROFILE", os.path.expanduser("~"))
 
 
 def get_local_appdata() -> str:
-    return os.environ.get("LOCALAPPDATA", "")
+    if is_windows():
+        return os.environ.get("LOCALAPPDATA", "")
+    return os.environ.get("XDG_CACHE_HOME", os.path.join(get_user_profile(), ".cache"))
 
 
 def get_appdata() -> str:
-    return os.environ.get("APPDATA", "")
+    if is_windows():
+        return os.environ.get("APPDATA", "")
+    return os.environ.get("XDG_CONFIG_HOME", os.path.join(get_user_profile(), ".config"))
 
 
 def get_program_data() -> str:
-    return os.environ.get("PROGRAMDATA", "C:\\ProgramData")
+    if is_windows():
+        return os.environ.get("PROGRAMDATA", "C:\\ProgramData")
+    return "/var/cache"
 
 
 def get_program_files_x86() -> str:
-    return os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+    if is_windows():
+        return os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+    return "/usr/local"
 
 
 def get_windows_dir() -> str:
-    return os.environ.get("SystemRoot", "C:\\Windows")
+    if is_windows():
+        return os.environ.get("SystemRoot", "C:\\Windows")
+    return "/"
 
 
 def which(program: str) -> str | None:

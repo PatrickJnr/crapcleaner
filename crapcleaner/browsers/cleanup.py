@@ -1,10 +1,10 @@
-"""Browser cache cleanup categories (Chrome, Edge, Brave, Firefox)."""
+"""Browser cache cleanup categories (Windows and Linux)."""
 
 import glob
 import os
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import get_local_appdata
+from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_linux, is_windows
 
 
 def _chromium_profiles(root: str) -> list[str]:
@@ -24,7 +24,7 @@ def _build_browser_categories(browser_id: str, display: str, root: str) -> list[
     if not profiles:
         return []
 
-    def _targets(subpaths: tuple) -> list[CacheTarget]:
+    def _targets(subpaths: tuple[str, ...]) -> list[CacheTarget]:
         targets = []
         for profile in profiles:
             for sub in subpaths:
@@ -69,7 +69,7 @@ def _build_browser_categories(browser_id: str, display: str, root: str) -> list[
     ]
 
 
-def _firefox_categories(display: str, profiles_root: str) -> list[CleanupCategory]:
+def _firefox_categories(_display: str, profiles_root: str) -> list[CleanupCategory]:
     profiles = []
     if profiles_root and os.path.isdir(profiles_root):
         for entry in glob.glob(os.path.join(profiles_root, "*.default*")):
@@ -100,34 +100,79 @@ def _firefox_categories(display: str, profiles_root: str) -> list[CleanupCategor
 
 def get_categories() -> list[CleanupCategory]:
     local = get_local_appdata()
+    user = get_user_profile()
     categories: list[CleanupCategory] = []
 
-    categories.extend(
-        _build_browser_categories(
-            "chrome",
-            "Chrome",
-            os.path.join(local, "Google", "Chrome", "User Data"),
+    if is_windows():
+        categories.extend(
+            _build_browser_categories(
+                "chrome",
+                "Chrome",
+                os.path.join(local, "Google", "Chrome", "User Data"),
+            )
         )
-    )
-    categories.extend(
-        _build_browser_categories(
-            "edge",
-            "Edge",
-            os.path.join(local, "Microsoft", "Edge", "User Data"),
+        categories.extend(
+            _build_browser_categories(
+                "edge",
+                "Edge",
+                os.path.join(local, "Microsoft", "Edge", "User Data"),
+            )
         )
-    )
-    categories.extend(
-        _build_browser_categories(
-            "brave",
-            "Brave",
-            os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data"),
+        categories.extend(
+            _build_browser_categories(
+                "brave",
+                "Brave",
+                os.path.join(local, "BraveSoftware", "Brave-Browser", "User Data"),
+            )
         )
-    )
-    categories.extend(
-        _firefox_categories(
-            "Firefox",
-            os.path.join(local, "Mozilla", "Firefox", "Profiles"),
+        categories.extend(
+            _firefox_categories(
+                "Firefox",
+                os.path.join(local, "Mozilla", "Firefox", "Profiles"),
+            )
         )
-    )
+
+    elif is_linux():
+        categories.extend(
+            _build_browser_categories(
+                "chrome",
+                "Chrome",
+                os.path.join(user, ".config", "google-chrome"),
+            )
+        )
+        categories.extend(
+            _build_browser_categories(
+                "chrome_beta",
+                "Chrome Beta",
+                os.path.join(user, ".config", "google-chrome-beta"),
+            )
+        )
+        categories.extend(
+            _build_browser_categories(
+                "chromium",
+                "Chromium",
+                os.path.join(user, ".config", "chromium"),
+            )
+        )
+        categories.extend(
+            _build_browser_categories(
+                "edge",
+                "Edge",
+                os.path.join(user, ".config", "microsoft-edge"),
+            )
+        )
+        categories.extend(
+            _build_browser_categories(
+                "brave",
+                "Brave",
+                os.path.join(user, ".config", "BraveSoftware", "Brave-Browser"),
+            )
+        )
+        categories.extend(
+            _firefox_categories(
+                "Firefox",
+                os.path.join(user, ".mozilla", "firefox"),
+            )
+        )
 
     return categories

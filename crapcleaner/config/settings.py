@@ -1,4 +1,4 @@
-"""Local settings persistence (JSON, stored under %APPDATA%/CrapCleaner)."""
+"""Local settings persistence stored in the platform config directory."""
 
 import json
 import os

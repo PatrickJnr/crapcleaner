@@ -5,28 +5,41 @@ from collections.abc import Callable
 from crapcleaner.ai import get_categories as ai_categories
 from crapcleaner.apps.cleanup import get_categories as apps_categories
 from crapcleaner.browsers import get_categories as browser_categories
-from crapcleaner.developer import get_categories as developer_categories
 from crapcleaner.docker import get_categories as docker_categories
-from crapcleaner.dotnet import get_categories as dotnet_categories
-from crapcleaner.gaming import get_categories as gaming_categories
-from crapcleaner.gpu import get_categories as gpu_categories
 from crapcleaner.models.category import CleanupCategory
 from crapcleaner.node import get_categories as node_categories
 from crapcleaner.python import get_categories as python_categories
-from crapcleaner.windows import get_categories as windows_categories
+from crapcleaner.utils.platform import is_windows
 
-SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = [
-    ("Windows", windows_categories),
-    ("Browsers", browser_categories),
-    ("Node.js", node_categories),
-    (".NET", dotnet_categories),
-    ("Developer tools", developer_categories),
-    ("Applications", apps_categories),
-    ("GPU", gpu_categories),
-    ("Gaming", gaming_categories),
-    ("AI", ai_categories),
-    ("Docker", docker_categories),
-]
+if is_windows():
+    from crapcleaner.developer import get_categories as developer_categories
+    from crapcleaner.dotnet import get_categories as dotnet_categories
+    from crapcleaner.gaming import get_categories as gaming_categories
+    from crapcleaner.gpu import get_categories as gpu_categories
+    from crapcleaner.windows import get_categories as windows_categories
+
+    providers = [
+        ("Windows", windows_categories),
+        ("Browsers", browser_categories),
+        ("Node.js", node_categories),
+        (".NET", dotnet_categories),
+        ("Developer tools", developer_categories),
+        ("Applications", apps_categories),
+        ("GPU", gpu_categories),
+        ("Gaming", gaming_categories),
+        ("AI", ai_categories),
+        ("Docker", docker_categories),
+    ]
+else:
+    providers = [
+        ("Browsers", browser_categories),
+        ("Node.js", node_categories),
+        ("Applications", apps_categories),
+        ("AI", ai_categories),
+        ("Docker", docker_categories),
+    ]
+
+SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = providers
 
 
 def get_all_categories() -> list[CleanupCategory]:
@@ -65,8 +78,8 @@ def find_categories(name_substring: str) -> list[CleanupCategory]:
     return [c for c in get_all_categories() if needle in c.name.lower() or needle in c.id.lower()]
 
 
-def group_categories(categories: list[CleanupCategory]) -> dict:
-    groups: dict = {}
+def group_categories(categories: list[CleanupCategory]) -> dict[str, list[CleanupCategory]]:
+    groups: dict[str, list[CleanupCategory]] = {}
     for category in categories:
         groups.setdefault(category.group, []).append(category)
     return groups

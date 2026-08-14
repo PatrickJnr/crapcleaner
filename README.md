@@ -1,18 +1,18 @@
 # CrapCleaner
 
-A fast, transparent Windows cleanup and disk analysis utility built for power users, developers, and gamers.
+A fast, transparent cleanup and disk analysis utility built for power users, developers, and gamers, with Windows and Linux support from a single codebase.
 
 [![CI](https://github.com/PatrickJnr/crapcleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/PatrickJnr/crapcleaner/actions/workflows/ci.yml)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3b82f6.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-blue.svg)](https://microsoft.com/windows)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue.svg)](#)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 ---
 
 ## Overview
 
-CrapCleaner is a local Windows disk cleaner and storage analyzer. It targets temporary files, developer build caches, package manager stores, gaming caches, browser caches, and system telemetry logs while keeping critical project files, saved credentials, and user data intact.
+CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It targets temporary files, developer build caches, package manager stores, browser caches, and application caches while keeping critical project files, saved credentials, and user data intact. Windows-specific cleanup modules remain available on Windows builds, while Linux builds use Linux-appropriate paths from the same codebase.
 
 ## Features
 
@@ -26,7 +26,8 @@ CrapCleaner is a local Windows disk cleaner and storage analyzer. It targets tem
 - **Developer Tools**: VS Code, Cursor, Windsurf, Zed, JetBrains IDEs (IntelliJ, PyCharm, WebStorm, Rider, CLion), Android SDK build caches, Gradle daemon logs, Bun cache, and Unreal Engine Derived Data Cache (DDC).
 - **Package Managers**: npm, yarn, pnpm store, pip, uv, poetry, conda, NuGet, Cargo/Rust cache, Go build cache, Maven, WinGet, Chocolatey, and Scoop.
 - **Gaming & Launchers**: Steam shader and depot caches, EA Desktop and Origin logs/caches, Ubisoft Connect caches, Riot Games and Valorant crash logs, DirectX shader caches, and FiveM cache.
-- **Browsers & Desktop Apps**: Chrome, Edge, Brave, and Firefox HTTP/GPU caches (leaving bookmarks, passwords, history, and active sessions intact), Discord, Slack, and Spotify caches.
+- **Browsers & Desktop Apps**: Chrome, Chromium, Edge, Brave, and Firefox HTTP/GPU caches (leaving bookmarks, passwords, history, and active sessions intact), Discord, Slack, and Spotify caches.
+- **Linux Package Managers**: APT, DNF, pacman, Flatpak, and Snap caches from Linux builds.
 
 ### 3. Multi-Stage Duplicate File Finder
 - Three-stage identification pipeline: exact size matching -> 8 KB header hashing -> full SHA-256 validation.
@@ -60,7 +61,7 @@ CrapCleaner is a local Windows disk cleaner and storage analyzer. It targets tem
 ## Installation
 
 ### Prerequisites
-- Windows 10 or Windows 11 (64-bit)
+- Windows 10 / 11 or a modern Linux distribution
 - Python 3.10, 3.11, or 3.12
 
 ### Option 1: Run from Source
@@ -70,13 +71,25 @@ git clone https://github.com/PatrickJnr/crapcleaner.git
 cd crapcleaner
 
 python -m venv .venv
+```
+
+On Windows:
+
+```powershell
 .venv\Scripts\activate
 pip install -e .
-
 crapcleaner
 ```
 
-### Option 2: Batch Launcher
+On Linux:
+
+```bash
+. .venv/bin/activate
+pip install -e .
+crapcleaner
+```
+
+### Option 2: Windows Batch Launcher
 
 Double-click `run_crapcleaner.bat` in the project root, or execute:
 
@@ -84,13 +97,23 @@ Double-click `run_crapcleaner.bat` in the project root, or execute:
 run_crapcleaner.bat
 ```
 
-### Option 3: Build Standalone Executable (.exe)
+### Option 3: Build Platform Package
+
+Windows build:
 
 ```cmd
 build.bat
 ```
 
 The compiled standalone executable will be placed in `dist\CrapCleaner.exe`.
+
+Linux builds use the same Python source tree and can be packaged into a Linux binary with:
+
+```bash
+./scripts/build_linux.sh
+```
+
+The Linux executable will be written to `dist/crapcleaner`.
 
 ---
 

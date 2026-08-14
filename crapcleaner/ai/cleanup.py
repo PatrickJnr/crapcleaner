@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import get_local_appdata, get_user_profile
+from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_windows
 
 MODEL_EXTENSIONS = (
     ".gguf",
@@ -42,20 +42,21 @@ def _ai_roots() -> list[tuple[str, str]]:
     local = get_local_appdata()
     roots = {
         "Ollama": os.path.join(user, ".ollama"),
-        "Ollama (local)": os.path.join(local, "Ollama"),
         "LM Studio": os.path.join(user, ".lmstudio"),
-        "LM Studio (local)": os.path.join(local, "LM Studio"),
-        "Hugging Face": os.path.join(user, ".cache", "huggingface"),
-        "Torch Hub": os.path.join(user, ".cache", "torch"),
+        "Hugging Face": os.path.join(local, "huggingface"),
+        "Torch Hub": os.path.join(local, "torch"),
     }
+    if is_windows():
+        roots["Ollama (local)"] = os.path.join(local, "Ollama")
+        roots["LM Studio (local)"] = os.path.join(local, "LM Studio")
     return [(app, path) for app, path in roots.items() if os.path.isdir(path)]
 
 
-def _classify(path: str, app: str, size: int) -> str:
+def _classify(path: str, _app: str, size: int) -> str:
     lowered = path.lower()
     if any(lowered.endswith(ext) for ext in MODEL_EXTENSIONS):
         return "model"
-    name_parts = lowered.replace("/", "\\").split("\\")
+    name_parts = os.path.normpath(lowered).split(os.sep)
     if any(part in ("models", "blobs", "snapshots", "hub", "weights") for part in name_parts):
         return "model"
     if "cache" in name_parts or "temp" in name_parts:
@@ -96,7 +97,7 @@ def get_ai_data(min_size: int = INSPECT_MIN_SIZE) -> list[AiDataItem]:
 
 
 def find_ai_model_dirs() -> list[str]:
-    found = []
+    found: list[str] = []
     for _app, root in _ai_roots():
         for sub in ("models", "hub", "blobs"):
             p = os.path.join(root, sub)
@@ -109,13 +110,14 @@ def find_ai_model_dirs() -> list[str]:
 
 def get_categories() -> list[CleanupCategory]:
     user = get_user_profile()
+    local = get_local_appdata()
 
     categories: list[CleanupCategory] = []
 
     lm_cache = os.path.join(user, ".lmstudio", "cache")
-    hf_refs = os.path.join(user, ".cache", "huggingface", "hub", ".cache")
+    hf_refs = os.path.join(local, "huggingface", "hub", ".cache")
 
-    cache_targets = []
+    cache_targets: list[CacheTarget] = []
     if os.path.isdir(lm_cache):
         cache_targets.append(CacheTarget(path=lm_cache))
     if os.path.isdir(hf_refs):

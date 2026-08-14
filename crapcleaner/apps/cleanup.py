@@ -1,4 +1,4 @@
-"""Desktop application cache categories (Discord, Slack, Spotify, WinGet, Scoop, Chocolatey)."""
+"""Desktop application cache categories for Windows and Linux."""
 
 import os
 
@@ -8,7 +8,21 @@ from crapcleaner.utils.platform import (
     get_local_appdata,
     get_program_data,
     get_user_profile,
+    is_linux,
+    is_windows,
 )
+
+
+def _targets(paths: list[str], existing_only: bool = True) -> list[CacheTarget]:
+    if existing_only:
+        return [CacheTarget(path=path) for path in paths if os.path.isdir(path)]
+    return [CacheTarget(path=path) for path in paths]
+
+
+def _electron_subtargets(
+    root: str, subs: tuple[str, ...], existing_only: bool = True
+) -> list[CacheTarget]:
+    return _targets([os.path.join(root, sub) for sub in subs], existing_only=existing_only)
 
 
 def get_categories() -> list[CleanupCategory]:
@@ -19,106 +33,223 @@ def get_categories() -> list[CleanupCategory]:
 
     categories: list[CleanupCategory] = []
 
-    # Discord Cache
-    discord_targets = []
-    discord_root = os.path.join(appdata, "discord")
-    for sub in ("Cache", "GPUCache", "Code Cache"):
-        discord_targets.append(CacheTarget(path=os.path.join(discord_root, sub)))
-    categories.append(
-        CleanupCategory(
-            id="discord_cache",
-            name="Discord cache",
-            group="Applications",
-            description="Cached media, avatars, and electron runtime data for Discord. Re-downloaded as needed.",
-            safety_level=SafetyLevel.LOW_RISK,
-            targets=discord_targets,
-        )
-    )
-
-    # Slack Cache
-    slack_targets = []
-    slack_root = os.path.join(appdata, "Slack")
-    for sub in ("Cache", "GPUCache", "Service Worker"):
-        slack_targets.append(CacheTarget(path=os.path.join(slack_root, sub)))
-    categories.append(
-        CleanupCategory(
-            id="slack_cache",
-            name="Slack cache",
-            group="Applications",
-            description="Cached web resources and logs for Slack desktop.",
-            safety_level=SafetyLevel.LOW_RISK,
-            targets=slack_targets,
-        )
-    )
-
-    # Spotify Cache
-    spotify_targets = [
-        CacheTarget(path=os.path.join(local, "Spotify", "Data")),
-        CacheTarget(path=os.path.join(local, "Spotify", "Storage")),
-    ]
-    categories.append(
-        CleanupCategory(
-            id="spotify_cache",
-            name="Spotify cache",
-            group="Applications",
-            description="Locally cached songs and album artwork. Does not delete playlists, offline downloads, or user settings.",
-            safety_level=SafetyLevel.LOW_RISK,
-            targets=spotify_targets,
-        )
-    )
-
-    # WinGet package manager cache
-    winget_targets = [
-        CacheTarget(path=os.path.join(local, "Microsoft", "WinGet", "Packages")),
-        CacheTarget(
-            path=os.path.join(
-                local,
-                "Packages",
-                "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
-                "LocalCache",
+    if is_windows():
+        discord_root = os.path.join(appdata, "discord")
+        categories.append(
+            CleanupCategory(
+                id="discord_cache",
+                name="Discord cache",
+                group="Applications",
+                description="Cached media, avatars, and electron runtime data for Discord. Re-downloaded as needed.",
+                safety_level=SafetyLevel.LOW_RISK,
+                targets=_electron_subtargets(
+                    discord_root, ("Cache", "GPUCache", "Code Cache"), existing_only=False
+                ),
             )
-        ),
-    ]
-    categories.append(
-        CleanupCategory(
-            id="winget_cache",
-            name="WinGet package cache",
-            group="Package managers",
-            description="Downloaded installer payloads cached by Windows Package Manager (winget). Safe to remove.",
-            safety_level=SafetyLevel.SAFE,
-            targets=winget_targets,
         )
-    )
 
-    # Chocolatey cache
-    choco_targets = [
-        CacheTarget(path=os.path.join(program_data, "chocolatey", "cache")),
-        CacheTarget(path=os.path.join(program_data, "chocolatey", "lib-bad")),
-    ]
-    categories.append(
-        CleanupCategory(
-            id="chocolatey_cache",
-            name="Chocolatey cache",
-            group="Package managers",
-            description="Downloaded package installer cache for Chocolatey.",
-            safety_level=SafetyLevel.SAFE,
-            targets=choco_targets,
+        slack_root = os.path.join(appdata, "Slack")
+        categories.append(
+            CleanupCategory(
+                id="slack_cache",
+                name="Slack cache",
+                group="Applications",
+                description="Cached web resources and logs for Slack desktop.",
+                safety_level=SafetyLevel.LOW_RISK,
+                targets=_electron_subtargets(
+                    slack_root, ("Cache", "GPUCache", "Service Worker"), existing_only=False
+                ),
+            )
         )
-    )
 
-    # Scoop cache
-    scoop_targets = [
-        CacheTarget(path=os.path.join(user, "scoop", "cache")),
-    ]
-    categories.append(
-        CleanupCategory(
-            id="scoop_cache",
-            name="Scoop cache",
-            group="Package managers",
-            description="Downloaded installer archives for Scoop package manager.",
-            safety_level=SafetyLevel.SAFE,
-            targets=scoop_targets,
+        categories.append(
+            CleanupCategory(
+                id="spotify_cache",
+                name="Spotify cache",
+                group="Applications",
+                description="Locally cached songs and album artwork. Does not delete playlists, offline downloads, or user settings.",
+                safety_level=SafetyLevel.LOW_RISK,
+                targets=_targets(
+                    [
+                        os.path.join(local, "Spotify", "Data"),
+                        os.path.join(local, "Spotify", "Storage"),
+                    ],
+                    existing_only=False,
+                ),
+            )
         )
-    )
 
-    return categories
+        categories.append(
+            CleanupCategory(
+                id="winget_cache",
+                name="WinGet package cache",
+                group="Package managers",
+                description="Downloaded installer payloads cached by Windows Package Manager (winget). Safe to remove.",
+                safety_level=SafetyLevel.SAFE,
+                targets=_targets(
+                    [
+                        os.path.join(local, "Microsoft", "WinGet", "Packages"),
+                        os.path.join(
+                            local,
+                            "Packages",
+                            "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
+                            "LocalCache",
+                        ),
+                    ],
+                    existing_only=False,
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="chocolatey_cache",
+                name="Chocolatey cache",
+                group="Package managers",
+                description="Downloaded package installer cache for Chocolatey.",
+                safety_level=SafetyLevel.SAFE,
+                targets=_targets(
+                    [
+                        os.path.join(program_data, "chocolatey", "cache"),
+                        os.path.join(program_data, "chocolatey", "lib-bad"),
+                    ],
+                    existing_only=False,
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="scoop_cache",
+                name="Scoop cache",
+                group="Package managers",
+                description="Downloaded installer archives for Scoop package manager.",
+                safety_level=SafetyLevel.SAFE,
+                targets=_targets([os.path.join(user, "scoop", "cache")], existing_only=False),
+            )
+        )
+
+    elif is_linux():
+        categories.append(
+            CleanupCategory(
+                id="discord_cache",
+                name="Discord cache",
+                group="Applications",
+                description="Cached media, avatars, and Electron runtime data for Discord. Re-downloaded as needed.",
+                safety_level=SafetyLevel.LOW_RISK,
+                targets=_electron_subtargets(
+                    os.path.join(appdata, "discord"),
+                    ("Cache", "GPUCache", "Code Cache", "Service Worker", "Partitions"),
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="slack_cache",
+                name="Slack cache",
+                group="Applications",
+                description="Cached web resources and logs for Slack desktop.",
+                safety_level=SafetyLevel.LOW_RISK,
+                targets=_electron_subtargets(
+                    os.path.join(appdata, "Slack"),
+                    ("Cache", "GPUCache", "Code Cache", "Service Worker"),
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="spotify_cache",
+                name="Spotify cache",
+                group="Applications",
+                description="Locally cached songs and album artwork. Does not delete playlists, offline downloads, or user settings.",
+                safety_level=SafetyLevel.LOW_RISK,
+                targets=_targets(
+                    [
+                        os.path.join(appdata, "spotify", "Storage"),
+                        os.path.join(local, "spotify", "Data"),
+                        os.path.join(local, "spotify", "Storage"),
+                    ]
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="apt_cache",
+                name="APT package cache",
+                group="Package managers",
+                description="Downloaded package files cached by APT. Safe to remove; packages can be downloaded again later.",
+                safety_level=SafetyLevel.SAFE,
+                targets=_targets(
+                    [os.path.join(program_data, "apt", "archives")], existing_only=False
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="dnf_cache",
+                name="DNF package cache",
+                group="Package managers",
+                description="Downloaded package metadata and payloads cached by DNF. Safe to remove; DNF will refresh what it needs.",
+                safety_level=SafetyLevel.SAFE,
+                targets=_targets(
+                    [
+                        os.path.join(program_data, "dnf"),
+                        os.path.join(program_data, "libdnf5"),
+                    ],
+                    existing_only=False,
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="pacman_cache",
+                name="Pacman package cache",
+                group="Package managers",
+                description="Downloaded package archives cached by pacman. Safe to remove, though Arch users may prefer to keep some versions for rollback.",
+                safety_level=SafetyLevel.REVIEW,
+                targets=_targets(["/var/cache/pacman/pkg"], existing_only=False),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="flatpak_cache",
+                name="Flatpak cache",
+                group="Package managers",
+                description="User and system Flatpak temporary cache data. Installed applications and runtimes are not targeted.",
+                safety_level=SafetyLevel.SAFE,
+                targets=_targets(
+                    [
+                        os.path.join(local, "flatpak"),
+                        "/var/tmp/flatpak-cache",
+                        "/var/lib/flatpak/repo/tmp",
+                    ],
+                    existing_only=False,
+                ),
+            )
+        )
+
+        categories.append(
+            CleanupCategory(
+                id="snap_cache",
+                name="Snap cache",
+                group="Package managers",
+                description="Downloaded assertions and temporary package cache files used by snapd. Installed snaps are not removed.",
+                safety_level=SafetyLevel.SAFE,
+                targets=_targets(
+                    [
+                        "/var/lib/snapd/cache",
+                        "/var/cache/snapd",
+                        os.path.join(user, "snap"),
+                    ],
+                    existing_only=False,
+                ),
+            )
+        )
+
+    return [category for category in categories if category.targets or category.finder]
