@@ -140,6 +140,7 @@ def get_categories() -> list[CleanupCategory]:
                 targets=_electron_subtargets(
                     os.path.join(appdata, "discord"),
                     ("Cache", "GPUCache", "Code Cache", "Service Worker", "Partitions"),
+                    existing_only=False,
                 ),
             )
         )
@@ -154,6 +155,7 @@ def get_categories() -> list[CleanupCategory]:
                 targets=_electron_subtargets(
                     os.path.join(appdata, "Slack"),
                     ("Cache", "GPUCache", "Code Cache", "Service Worker"),
+                    existing_only=False,
                 ),
             )
         )
@@ -170,7 +172,8 @@ def get_categories() -> list[CleanupCategory]:
                         os.path.join(appdata, "spotify", "Storage"),
                         os.path.join(local, "spotify", "Data"),
                         os.path.join(local, "spotify", "Storage"),
-                    ]
+                    ],
+                    existing_only=False,
                 ),
             )
         )

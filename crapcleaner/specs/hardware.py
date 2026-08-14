@@ -248,12 +248,12 @@ def _get_cpu_specs() -> CpuSpec:
         for line in _read_text("/proc/cpuinfo").splitlines():
             if ":" not in line:
                 continue
-            key, value = [part.strip() for part in line.split(":", 1)]
-            if key == "physical id":
-                current_physical = value
-                physical_ids.add(value)
-            elif key == "core id":
-                core_pairs.add((current_physical, value))
+            k, val = [part.strip() for part in line.split(":", 1)]
+            if k == "physical id":
+                current_physical = val
+                physical_ids.add(val)
+            elif k == "core id":
+                core_pairs.add((current_physical, val))
         if core_pairs:
             cores_physical = len(core_pairs)
         elif physical_ids:

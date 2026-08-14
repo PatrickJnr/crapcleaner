@@ -2849,7 +2849,7 @@ class AboutView(QWidget):
         app_items = [
             ("Version", f"v{__version__} (Stable)"),
             ("License", "MIT License (100% Free & Open Source)"),
-            ("Platform", "Windows 10 / 11 (64-bit)"),
+            ("Platform", "Windows 10 / 11 / Linux (64-bit)"),
             ("GUI Framework", "PySide6 (Qt 6) & Fluent 2 Dark Theme"),
             ("Python Core", "Python 3.12 (Strict Type Safe)"),
         ]

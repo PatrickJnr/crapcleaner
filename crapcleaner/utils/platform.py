@@ -23,7 +23,11 @@ def resolve_paths(paths: list[str]) -> list[str]:
 def get_drive_info(drive: str = "C:") -> dict[str, int]:
     import shutil
 
-    total, used, free = shutil.disk_usage(f"{drive}\\")
+    if is_windows():
+        target = f"{drive}\\" if not drive.endswith(("\\", "/")) else drive
+    else:
+        target = drive if drive and drive != "C:" else "/"
+    total, used, free = shutil.disk_usage(target)
     return {"total": total, "used": used, "free": free}
 
 
@@ -31,12 +35,10 @@ def list_drives() -> list[str]:
     """Return roots of all drives with a letter, e.g. ['C:\\', 'D:\\'].
 
     Enumerates via the process drive map (GetLogicalDrives bitmask plus
-    GetLogicalDriveStringsW as a fallback). Drives that are temporarily
-    inaccessible are still listed - callers must handle OSError from
-    get_drive_info.
+    GetLogicalDriveStringsW as a fallback). On Linux, returns ['/'].
     """
     if not sys.platform.startswith("win"):
-        return ["C:\\"]
+        return ["/"]
     import ctypes
 
     try:
