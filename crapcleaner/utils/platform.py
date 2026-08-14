@@ -1,0 +1,167 @@
+"""Windows platform helpers: env resolution, drives, admin detection, elevation."""
+
+import ctypes
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def expand_env(path: str) -> str:
+    return os.path.expandvars(os.path.expanduser(path))
+
+
+def resolve_paths(paths: list[str]) -> list[str]:
+    out = []
+    for p in paths:
+        resolved = expand_env(p)
+        if resolved:
+            out.append(resolved)
+    return out
+
+
+def get_drive_info(drive: str = "C:") -> dict[str, int]:
+    import shutil
+
+    total, used, free = shutil.disk_usage(f"{drive}\\")
+    return {"total": total, "used": used, "free": free}
+
+
+def list_drives() -> list[str]:
+    """Return roots of all drives with a letter, e.g. ['C:\\', 'D:\\'].
+
+    Enumerates via the process drive map (GetLogicalDrives bitmask plus
+    GetLogicalDriveStringsW as a fallback). Drives that are temporarily
+    inaccessible are still listed - callers must handle OSError from
+    get_drive_info.
+    """
+    if not sys.platform.startswith("win"):
+        return ["C:\\"]
+    import ctypes
+
+    try:
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+        letters = [chr(65 + i) for i in range(26) if mask >> i & 1]
+    except Exception:  # pragma: no cover - defensive
+        letters = []
+
+    if not letters:
+        try:
+            buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.kernel32.GetLogicalDriveStringsW(256, buf)
+            letters = [r.rstrip("\\") for r in buf.value.split("\x00") if r]
+        except Exception:  # pragma: no cover - defensive
+            letters = []
+
+    return [f"{letter}:\\" for letter in letters] or ["C:\\"]
+
+
+def is_admin() -> bool:
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def elevate() -> bool:
+    if is_admin():
+        return True
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, _elevation_args(), None, 1
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _elevation_args() -> str:
+    if getattr(sys, "frozen", False):
+        return " ".join(f'"{a}"' for a in sys.argv[1:])
+    script = Path(sys.argv[0]).resolve()
+    args = [f'"{script}"'] + [f'"{a}"' for a in sys.argv[1:]]
+    return " ".join(args)
+
+
+def relaunch_as_admin(argv: list[str] | None = None) -> bool:
+    if is_admin():
+        return True
+    if not sys.platform.startswith("win"):
+        return False
+    argv = argv or sys.argv
+    params = " ".join(f'"{a}"' for a in argv[1:])
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", argv[0], params, None, 1)
+    return True
+
+
+def get_user_profile() -> str:
+    return os.environ.get("USERPROFILE", os.path.expanduser("~"))
+
+
+def get_local_appdata() -> str:
+    return os.environ.get("LOCALAPPDATA", "")
+
+
+def get_appdata() -> str:
+    return os.environ.get("APPDATA", "")
+
+
+def get_program_data() -> str:
+    return os.environ.get("PROGRAMDATA", "C:\\ProgramData")
+
+
+def get_program_files_x86() -> str:
+    return os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+
+
+def get_windows_dir() -> str:
+    return os.environ.get("SystemRoot", "C:\\Windows")
+
+
+def which(program: str) -> str | None:
+    for base in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = os.path.join(base, program)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+        if os.path.isfile(candidate + ".exe"):
+            return candidate + ".exe"
+    return None
+
+
+def run_command(
+    args: list[str],
+    timeout: float = 120.0,
+    cwd: str | None = None,
+) -> dict[str, object]:
+    try:
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0),
+        )
+        return {
+            "returncode": proc.returncode,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "error": None,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "returncode": -1,
+            "stdout": exc.stdout or "",
+            "stderr": "timed out",
+            "error": "timed out",
+        }
+    except FileNotFoundError as exc:
+        return {"returncode": -2, "stdout": "", "stderr": str(exc), "error": str(exc)}
+
+
+def is_frozen() -> bool:
+    return getattr(sys, "frozen", False)

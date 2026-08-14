@@ -1,0 +1,70 @@
+"""Tests for duplicate finder."""
+
+from crapcleaner.duplicates.finder import DuplicateGroup, find_duplicates
+
+
+def _write(tmp_path, rel, data):
+    full = tmp_path / rel
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(data)
+    return str(full)
+
+
+class TestDuplicateGroup:
+    def test_counts(self):
+        group = DuplicateGroup(size=100, files=["a", "b", "c"])
+        assert group.duplicate_count == 2
+        assert group.reclaimable == 200
+
+    def test_single_file_no_dupe(self):
+        group = DuplicateGroup(size=100, files=["a"])
+        assert group.duplicate_count == 0
+        assert group.reclaimable == 0
+
+
+class TestFindDuplicates:
+    def test_finds_same_content(self, tmp_path):
+        f1 = _write(tmp_path, "a/f1.bin", b"same content")
+        f2 = _write(tmp_path, "b/f2.bin", b"same content")
+        groups = find_duplicates([str(tmp_path)], min_size_bytes=1)
+        assert len(groups) == 1
+        assert set(groups[0].files) == {f1, f2}
+
+    def test_different_content_not_grouped(self, tmp_path):
+        _write(tmp_path, "a/f1.bin", b"content A")
+        _write(tmp_path, "b/f2.bin", b"content B")
+        assert find_duplicates([str(tmp_path)], min_size_bytes=1) == []
+
+    def test_min_size_filter(self, tmp_path):
+        _write(tmp_path, "a/small.txt", b"x")
+        _write(tmp_path, "b/small.txt", b"x")
+        assert find_duplicates([str(tmp_path)], min_size_bytes=1024) == []
+
+    def test_three_copies(self, tmp_path):
+        _write(tmp_path, "a/f.bin", b"data")
+        _write(tmp_path, "b/f.bin", b"data")
+        _write(tmp_path, "c/f.bin", b"data")
+        groups = find_duplicates([str(tmp_path)], min_size_bytes=1)
+        assert groups[0].duplicate_count == 2
+
+    def test_same_size_different_prefix(self, tmp_path):
+        # 16 KB files: same size, different 8 KB prefix
+        _write(tmp_path, "a/f1.bin", b"A" * 16384)
+        _write(tmp_path, "b/f2.bin", b"B" * 16384)
+        assert find_duplicates([str(tmp_path)], min_size_bytes=1) == []
+
+    def test_same_prefix_different_body(self, tmp_path):
+        # 16 KB files: same 8 KB prefix, different remainder
+        prefix = b"P" * 8192
+        _write(tmp_path, "a/f1.bin", prefix + b"X" * 8192)
+        _write(tmp_path, "b/f2.bin", prefix + b"Y" * 8192)
+        assert find_duplicates([str(tmp_path)], min_size_bytes=1) == []
+
+    def test_same_prefix_same_body(self, tmp_path):
+        prefix = b"P" * 8192
+        body = b"B" * 8192
+        f1 = _write(tmp_path, "a/f1.bin", prefix + body)
+        f2 = _write(tmp_path, "b/f2.bin", prefix + body)
+        groups = find_duplicates([str(tmp_path)], min_size_bytes=1)
+        assert len(groups) == 1
+        assert set(groups[0].files) == {f1, f2}

@@ -1,0 +1,43 @@
+name: 🧹 Cleanup Category Request
+description: Propose a new application cache, developer tool, or temporary folder to clean
+labels: [enhancement, new-category]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Suggest a new safe cleanup category for CrapCleaner!
+  - type: input
+    id: app_name
+    attributes:
+      label: Application / Tool Name
+      placeholder: e.g. Cursor IDE, Unreal Engine, Deno, Blender
+    validations:
+      required: true
+  - type: textarea
+    id: cache_paths
+    attributes:
+      label: Target Path(s) on Windows
+      description: Where are the junk/cache files stored? (e.g. `%LOCALAPPDATA%\Tool\Cache`)
+      placeholder: |
+        %LOCALAPPDATA%\MyTool\cache
+        %APPDATA%\MyTool\GPUCache
+    validations:
+      required: true
+  - type: dropdown
+    id: safety
+    attributes:
+      label: Recommended Safety Level
+      options:
+        - Safe (Always safe to remove, auto-regenerated without delay)
+        - Low Risk (Safe, but first launch after cleanup may recompile or redownload)
+        - Review Required (User should review before deleting)
+        - Dangerous (Protected data)
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Description & Behavior
+      description: Explain why these files are safe to delete and what happens on next launch.
+    validations:
+      required: true

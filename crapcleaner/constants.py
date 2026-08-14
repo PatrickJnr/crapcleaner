@@ -1,0 +1,29 @@
+"""Application-wide constants."""
+
+APP_NAME = "CrapCleaner"
+APP_DISPLAY_NAME = "CrapCleaner [CCleaner]"
+VERSION = "1.0.0"
+COMPANY_NAME = "CrapCleaner"
+APP_URL = ""
+
+CONFIG_DIR_NAME = "CrapCleaner"
+CONFIG_FILE = "config.json"
+HISTORY_FILE = "history.jsonl"
+LOG_FILE = "crapcleaner.log"
+
+DEFAULT_CONFIG = {
+    "theme": "dark",
+    "scan_roots": [],
+    "scan_all_drives": True,
+    "scan_cache_ttl": 300,
+    "duplicate_min_size_mb": 1,
+    "large_file_default_threshold_mb": 1024,
+    "dry_run_default": True,
+    "confirm_cleanup": True,
+    "use_recycle_bin": True,
+    "max_scan_files": 200000,
+    "recent_categories": [],
+    "large_file_default_root": "",
+    "disabled_categories": [],
+    "window_geometry": "",
+}

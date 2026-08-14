@@ -1,0 +1,60 @@
+name: Release & Build Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+      - name: Build Standalone Windows Executable
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name CrapCleaner --add-data "crapcleaner/gui/assets;crapcleaner/gui/assets" --add-data "crapcleaner/assets;crapcleaner/assets" build_launcher.py
+      - name: Generate SHA-256 Checksum
+        run: |
+          cd dist
+          Get-FileHash CrapCleaner.exe -Algorithm SHA256 | Format-List > checksum.txt
+          Get-Content checksum.txt
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrapCleaner-Windows-x64
+          path: |
+            dist/CrapCleaner.exe
+            dist/checksum.txt
+
+  publish-release:
+    needs: build-windows-exe
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CrapCleaner-Windows-x64
+          path: release-dist
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-dist/CrapCleaner.exe
+            release-dist/checksum.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true

@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.spec
+release/
+artifacts/
+
+# Test and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Local runtime data
+*.log

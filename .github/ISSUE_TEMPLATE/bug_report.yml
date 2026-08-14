@@ -1,0 +1,52 @@
+name: 🐛 Bug Report
+description: Report unexpected behavior, scanner crashes, or visual defects
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue with **CrapCleaner**!
+  - type: input
+    id: version
+    attributes:
+      label: CrapCleaner Version
+      placeholder: e.g. v1.0.0 (or commit hash)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Windows OS Version
+      options:
+        - Windows 11 (23H2 / 24H2)
+        - Windows 11 (22H2 or older)
+        - Windows 10 (22H2 / 21H2)
+        - Windows Server
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      description: How can we reproduce the behavior?
+      placeholder: |
+        1. Open CrapCleaner GUI or run CLI with args `...`
+        2. Click on 'Cleanup' tab
+        3. Scan and click 'Clean Selected'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal / Error Logs
+      description: Paste any error messages or CLI output here.
+      render: shell
