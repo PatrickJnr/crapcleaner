@@ -6,6 +6,7 @@ Stages:
 3. Full SHA-256 hashing: Only computed for files sharing both identical size and prefix hash.
 """
 
+import heapq
 import hashlib
 import os
 import threading
@@ -74,6 +75,7 @@ def find_duplicates(
     stop_event: threading.Event | None = None,
     progress_cb: Callable[[int, int], None] | None = None,
     max_workers: int = 4,
+    max_groups: int | None = None,
 ) -> list[DuplicateGroup]:
     """Find duplicate files across one or more root folders using multi-stage hashing."""
     by_size: dict[int, list[str]] = {}
@@ -169,4 +171,8 @@ def find_duplicates(
         if len(paths) > 1
     ]
     groups.sort(key=lambda g: g.reclaimable, reverse=True)
+    if max_groups is not None and max_groups > 0 and len(groups) > max_groups:
+        top_groups = heapq.nlargest(max_groups, groups, key=lambda g: g.reclaimable)
+        top_groups.sort(key=lambda g: g.reclaimable, reverse=True)
+        return top_groups
     return groups

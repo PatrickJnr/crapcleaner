@@ -1,5 +1,6 @@
 """CrapCleaner main window and GUI entry point."""
 
+import os
 import sys
 
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -381,7 +382,7 @@ class MainWindow(QMainWindow):
 
     def scan_duplicates(self, folders, min_size):
         worker = DuplicatesWorker(folders, min_size)
-        worker.done.connect(self.duplicates_view.show_groups)
+        worker.done.connect(lambda: self.duplicates_view.show_groups(worker.result_groups))
         worker.failed.connect(lambda msg: QMessageBox.critical(self, "Scan Failed", msg))
         self._register_worker(worker)
         worker.start()
@@ -432,7 +433,24 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def _prepare_linux_qt_environment() -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    if os.environ.get("QT_QPA_PLATFORM"):
+        return
+    if os.environ.get("WAYLAND_DISPLAY"):
+        os.environ["QT_QPA_PLATFORM"] = "wayland"
+        return
+    if os.environ.get("DISPLAY"):
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        return
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+
+
 def run_gui() -> int:
+    _prepare_linux_qt_environment()
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)

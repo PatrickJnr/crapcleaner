@@ -2,6 +2,9 @@
 
 import threading
 
+_MAX_GUI_LARGE_FILES = 5000
+_MAX_GUI_DUPLICATE_GROUPS = 1000
+
 from PySide6.QtCore import QThread, Signal
 
 from crapcleaner.cleaners.cleaner import clean_categories
@@ -90,6 +93,7 @@ class LargeFilesWorker(QThread):
                 self._threshold,
                 stop_event=self._stop,
                 progress_cb=lambda n: self.progress.emit(n),
+                max_results=_MAX_GUI_LARGE_FILES,
             )
             self.done.emit(files)
         except Exception as exc:  # pragma: no cover - defensive
@@ -98,7 +102,7 @@ class LargeFilesWorker(QThread):
 
 class DuplicatesWorker(QThread):
     progress = Signal(int, int)
-    done = Signal(list)
+    done = Signal()
     failed = Signal(str)
 
     def __init__(self, folders, min_size, parent=None):
@@ -106,6 +110,7 @@ class DuplicatesWorker(QThread):
         self._folders = folders
         self._min_size = min_size
         self._stop = threading.Event()
+        self.result_groups = []
 
     def request_stop(self):
         self._stop.set()
@@ -114,13 +119,14 @@ class DuplicatesWorker(QThread):
         from crapcleaner.duplicates.finder import find_duplicates
 
         try:
-            groups = find_duplicates(
+            self.result_groups = find_duplicates(
                 self._folders,
                 self._min_size,
                 stop_event=self._stop,
                 progress_cb=lambda a, b: self.progress.emit(a, b),
+                max_groups=_MAX_GUI_DUPLICATE_GROUPS,
             )
-            self.done.emit(groups)
+            self.done.emit()
         except Exception as exc:  # pragma: no cover - defensive
             self.failed.emit(str(exc))
 

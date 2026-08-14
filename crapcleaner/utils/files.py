@@ -37,8 +37,10 @@ _SHERB_NOSOUND = 0x00000004
 
 def normalize_long_path(path: str) -> str:
     """Ensure path handles Windows 260-character MAX_PATH limit safely."""
-    if os.name != "nt" or not path:
+    if not path:
         return path
+    if os.name != "nt":
+        return os.path.abspath(path)
     if path.startswith("\\\\?\\") or path.startswith("\\\\.\\"):
         return path
     abs_path = os.path.abspath(path)
@@ -57,6 +59,8 @@ def _clear_readonly(path: str) -> None:
             attr = getattr(os.stat(norm), "st_file_attributes", None)
             if attr is not None and attr & getattr(stat, "FILE_ATTRIBUTE_READONLY", 1):
                 os.chmod(norm, stat.S_IWRITE | stat.S_IREAD)
+        elif os.path.isdir(norm):
+            os.chmod(norm, 0o777)
         else:
             os.chmod(norm, 0o666)
     except OSError:
@@ -180,7 +184,7 @@ def _trash_put(path: str) -> bool:
     if trash_cli:
         result = subprocess.run([trash_cli, path], capture_output=True, text=True)
         return result.returncode == 0
-    return False
+    return remove_tree(path) if os.path.isdir(path) and not os.path.islink(path) else remove_file(path)
 
 
 def _empty_linux_trash() -> bool:

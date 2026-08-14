@@ -7,40 +7,26 @@ from crapcleaner.apps.cleanup import get_categories as apps_categories
 from crapcleaner.browsers import get_categories as browser_categories
 from crapcleaner.developer import get_categories as developer_categories
 from crapcleaner.docker import get_categories as docker_categories
+from crapcleaner.dotnet import get_categories as dotnet_categories
+from crapcleaner.gaming import get_categories as gaming_categories
+from crapcleaner.gpu import get_categories as gpu_categories
 from crapcleaner.models.category import CleanupCategory
 from crapcleaner.node import get_categories as node_categories
 from crapcleaner.python import get_categories as python_categories
-from crapcleaner.utils.platform import is_windows
+from crapcleaner.windows import get_categories as windows_categories
 
-if is_windows():
-    from crapcleaner.dotnet import get_categories as dotnet_categories
-    from crapcleaner.gaming import get_categories as gaming_categories
-    from crapcleaner.gpu import get_categories as gpu_categories
-    from crapcleaner.windows import get_categories as windows_categories
-
-    providers = [
-        ("Windows", windows_categories),
-        ("Browsers", browser_categories),
-        ("Node.js", node_categories),
-        (".NET", dotnet_categories),
-        ("Developer tools", developer_categories),
-        ("Applications", apps_categories),
-        ("GPU", gpu_categories),
-        ("Gaming", gaming_categories),
-        ("AI", ai_categories),
-        ("Docker", docker_categories),
-    ]
-else:
-    providers = [
-        ("Browsers", browser_categories),
-        ("Node.js", node_categories),
-        ("Developer tools", developer_categories),
-        ("Applications", apps_categories),
-        ("AI", ai_categories),
-        ("Docker", docker_categories),
-    ]
-
-SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = providers
+SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = [
+    ("Windows", windows_categories),
+    ("Browsers", browser_categories),
+    ("Node.js", node_categories),
+    (".NET", dotnet_categories),
+    ("Developer tools", developer_categories),
+    ("Applications", apps_categories),
+    ("GPU", gpu_categories),
+    ("Gaming", gaming_categories),
+    ("AI", ai_categories),
+    ("Docker", docker_categories),
+]
 
 
 def get_all_categories() -> list[CleanupCategory]:

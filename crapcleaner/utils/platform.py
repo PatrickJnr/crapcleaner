@@ -21,13 +21,108 @@ def resolve_paths(paths: list[str]) -> list[str]:
     return out
 
 
-def get_drive_info(drive: str = "C:") -> dict[str, int]:
+def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
     if is_windows():
         target = f"{drive}\\" if not drive.endswith(("\\", "/")) else drive
-    else:
-        target = drive if drive and drive != "C:" else "/"
+        total, used, free = shutil.disk_usage(target)
+        return {"total": total, "used": used, "free": free}
+
+    target = drive if drive and drive != "C:" else "/"
     total, used, free = shutil.disk_usage(target)
-    return {"total": total, "used": used, "free": free}
+    mount_meta = get_mount_metadata().get(target, {})
+    return {
+        "total": total,
+        "used": used,
+        "free": free,
+        "label": mount_meta.get("source", ""),
+        "filesystem": mount_meta.get("filesystem", ""),
+    }
+
+
+def get_mount_metadata() -> dict[str, dict[str, str]]:
+    metadata: dict[str, dict[str, str]] = {}
+    if is_windows():
+        return metadata
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                source = parts[0].replace("\\040", " ")
+                mount_point = parts[1].replace("\\040", " ")
+                fs_type = parts[2]
+                metadata[mount_point] = {"source": source, "filesystem": fs_type}
+    except OSError:
+        pass
+    return metadata
+
+
+def _is_visible_linux_mount(mount_point: str, fs_type: str) -> bool:
+    if fs_type in {
+        "proc",
+        "sysfs",
+        "tmpfs",
+        "devtmpfs",
+        "devpts",
+        "cgroup",
+        "cgroup2",
+        "overlay",
+        "squashfs",
+        "nsfs",
+        "tracefs",
+        "debugfs",
+        "securityfs",
+        "pstore",
+        "autofs",
+        "mqueue",
+        "hugetlbfs",
+        "rpc_pipefs",
+        "fusectl",
+        "efivarfs",
+        "bpf",
+        "configfs",
+        "selinuxfs",
+        "binfmt_misc",
+    }:
+        return False
+    if mount_point.startswith("/run/"):
+        return False
+    if mount_point.startswith("/home/") and "/.git" in mount_point:
+        return False
+    if mount_point.startswith("/home/") and "/CrapCleaner/" in mount_point:
+        return False
+    return True
+
+
+def _linux_mount_sort_key(mount_point: str) -> tuple[int, int, str]:
+    priority = 0 if mount_point == "/" else 1
+    return (priority, len(mount_point), mount_point)
+
+
+def _dedupe_linux_mounts(mounts: list[str], metadata: dict[str, dict[str, str]]) -> list[str]:
+    deduped: list[str] = []
+    seen_signatures: set[tuple[str, str, int, int, int]] = set()
+
+    for mount_point in sorted(mounts, key=_linux_mount_sort_key):
+        info = metadata.get(mount_point, {})
+        source = info.get("source", "")
+        fs_type = info.get("filesystem", "")
+        try:
+            usage = shutil.disk_usage(mount_point)
+        except OSError:
+            deduped.append(mount_point)
+            continue
+
+        signature = (source, fs_type, usage.total, usage.used, usage.free)
+        if source and signature in seen_signatures:
+            continue
+
+        deduped.append(mount_point)
+        if source:
+            seen_signatures.add(signature)
+
+    return deduped
 
 
 def list_drives() -> list[str]:
@@ -50,53 +145,18 @@ def list_drives() -> list[str]:
         return [f"{letter}:\\" for letter in letters] or ["C:\\"]
 
     mounts: list[str] = []
+    metadata = get_mount_metadata()
     try:
-        with open("/proc/mounts", encoding="utf-8") as fh:
-            for line in fh:
-                parts = line.split()
-                if len(parts) < 3:
-                    continue
-                mount_point = parts[1]
-                fs_type = parts[2]
-                if fs_type in {
-                    "proc",
-                    "sysfs",
-                    "tmpfs",
-                    "devtmpfs",
-                    "devpts",
-                    "cgroup",
-                    "cgroup2",
-                    "overlay",
-                    "squashfs",
-                    "nsfs",
-                    "tracefs",
-                    "debugfs",
-                    "securityfs",
-                    "pstore",
-                    "autofs",
-                    "mqueue",
-                    "hugetlbfs",
-                    "rpc_pipefs",
-                    "fusectl",
-                    "efivarfs",
-                    "bpf",
-                    "configfs",
-                    "selinuxfs",
-                    "binfmt_misc",
-                }:
-                    continue
-                if mount_point.startswith("/run/"):
-                    continue
-                if mount_point.startswith("/home/") and "/.git" in mount_point:
-                    continue
-                if mount_point.startswith("/home/") and "/CrapCleaner/" in mount_point:
-                    continue
-                if mount_point not in mounts:
-                    mounts.append(mount_point)
+        for mount_point, info in metadata.items():
+            fs_type = info.get("filesystem", "")
+            if not _is_visible_linux_mount(mount_point, fs_type):
+                continue
+            if mount_point not in mounts:
+                mounts.append(mount_point)
     except OSError:
         mounts = ["/"]
 
-    return mounts or ["/"]
+    return _dedupe_linux_mounts(mounts, metadata) or ["/"]
 
 
 def is_admin() -> bool:

@@ -306,8 +306,16 @@ def _run_health_check(json_output: bool = False) -> int:
         free_sz = format_size(float(stat_item["free"]))
         pct_used = stat_item["used_pct"]
         drive_name = stat_item["drive"]
+        extra = []
+        label = str(stat_item.get("label", ""))
+        filesystem = str(stat_item.get("filesystem", ""))
+        if label:
+            extra.append(label)
+        if filesystem:
+            extra.append(filesystem)
+        suffix = f" [{' · '.join(extra)}]" if extra else ""
         print(
-            f"  - Drive {drive_name}: {used_sz} used / {total_sz} ({pct_used}% full) · Free: {free_sz}"
+            f"  - Drive {drive_name}{suffix}: {used_sz} used / {total_sz} ({pct_used}% full) · Free: {free_sz}"
         )
     print("-" * 60)
     print(f"Total Storage:     {format_size(total_capacity)} (Free: {format_size(total_free)})")

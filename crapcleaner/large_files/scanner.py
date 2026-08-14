@@ -1,5 +1,6 @@
 """Large file scanner ("Find Big Crap")."""
 
+import heapq
 import os
 import threading
 from collections.abc import Callable
@@ -97,6 +98,7 @@ def scan_large_files(
     threshold_bytes: int,
     stop_event: threading.Event | None = None,
     progress_cb: Callable[[int], None] | None = None,
+    max_results: int | None = 5000,
 ) -> list[LargeFile]:
     if not root or not os.path.isdir(root):
         return []
@@ -127,17 +129,24 @@ def scan_large_files(
                 mtime = datetime.fromtimestamp(st.st_mtime)
             except (OSError, ValueError, OverflowError):
                 mtime = datetime.fromtimestamp(0)
-            results.append(
-                LargeFile(
-                    path=full,
-                    size=st.st_size,
-                    last_modified=mtime,
-                    extension=os.path.splitext(name)[1].lower(),
-                    file_type=_file_type(full),
-                )
+            item = LargeFile(
+                path=full,
+                size=st.st_size,
+                last_modified=mtime,
+                extension=os.path.splitext(name)[1].lower(),
+                file_type=_file_type(full),
             )
+            if max_results is None or max_results <= 0:
+                results.append(item)
+            elif len(results) < max_results:
+                heapq.heappush(results, (item.size, len(results), item))
+            elif item.size > results[0][0]:
+                heapq.heapreplace(results, (item.size, visited, item))
         if progress_cb is not None and visited % 2000 == 0:
             progress_cb(visited)
 
-    results.sort(key=lambda item: item.size, reverse=True)
+    if max_results is not None and max_results > 0:
+        results = [item for _size, _idx, item in sorted(results, reverse=True)]
+    else:
+        results.sort(key=lambda item: item.size, reverse=True)
     return results

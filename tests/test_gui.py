@@ -182,4 +182,18 @@ def test_large_files_and_duplicates_views(app):
     dp.show_groups([DummyGroup()])
     assert dp.table.rowCount() == 1
 
+    many_files = [f"C:\\path{i}.bin" for i in range(30)]
+
+    class VerboseGroup:
+        size = 1048576
+        duplicate_count = len(many_files) - 1
+        reclaimable = (len(many_files) - 1) * size
+        files = many_files
+
+    dp.show_groups([VerboseGroup() for _ in range(200)])
+    assert dp.table.rowCount() <= 150
+    tooltip_item = dp.table.item(0, 3)
+    assert tooltip_item is not None
+    assert "... and" in tooltip_item.toolTip()
+
     window.close()

@@ -6,6 +6,11 @@ import os
 import shutil
 import subprocess
 
+_MAX_LARGE_FILE_ROWS = 500
+_MAX_DUPLICATE_GROUP_ROWS = 150
+_MAX_DUPLICATE_TOOLTIP_FILES = 20
+
+
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
@@ -70,6 +75,7 @@ from crapcleaner.utils.platform import (
     get_drive_info,
     get_user_profile,
     is_admin,
+    is_windows,
     list_drives,
 )
 
@@ -297,7 +303,7 @@ class DriveCard(QFrame):
         lay.setSpacing(6)
 
         top_row = QHBoxLayout()
-        self.title = QLabel(f"Drive {drive}")
+        self.title = QLabel(f"Drive {drive}" if is_windows() else drive)
         font = self.title.font()
         font.setPointSize(13)
         font.setBold(True)
@@ -305,7 +311,11 @@ class DriveCard(QFrame):
         top_row.addWidget(self.title)
         top_row.addStretch(1)
 
-        self.type_badge = QLabel("SYSTEM" if drive.upper().startswith("C") else "LOCAL")
+        self.type_badge = QLabel(
+            "SYSTEM"
+            if (drive.upper().startswith("C") if is_windows() else drive in ("/", "/boot", "/boot/efi"))
+            else "LOCAL"
+        )
         self.type_badge.setProperty("badge", "true")
         self.type_badge.setStyleSheet("font-size: 9px; padding: 1px 5px;")
         top_row.addWidget(self.type_badge)
@@ -329,9 +339,12 @@ class DriveCard(QFrame):
         open_action = menu.addAction("Open in File Explorer")
         action = menu.exec(self.mapToGlobal(pos))
         if action == open_action:
-            path = f"{self.drive}\\"
-            if os.path.exists(path):
-                subprocess.Popen(["explorer", path])
+            if is_windows():
+                path = f"{self.drive}\\"
+                if os.path.exists(path):
+                    subprocess.Popen(["explorer", path])
+            elif os.path.exists(self.drive):
+                subprocess.Popen(["xdg-open", self.drive])
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
@@ -513,8 +526,8 @@ class DashboardView(QWidget):
         # Bottom: Drives carousel
         layout.addWidget(section_label("Drives & Partitions"))
 
-        self.drives = [d.rstrip("\\") for d in list_drives()]
-        self._selected_drive = self.drives[0] if self.drives else "C:"
+        self.drives = [d.rstrip("\\") if is_windows() else d for d in list_drives()]
+        self._selected_drive = self.drives[0] if self.drives else ("C:" if is_windows() else "/")
         self._cards = {}
 
         cards_scroll = QScrollArea()
@@ -582,14 +595,23 @@ class DashboardView(QWidget):
             total = info["total"]
             self._used_fraction = info["used"] / total if total else 0.0
             self.donut.set_usage(self._used_fraction, self._theme)
+            label = str(info.get("label", ""))
+            fs_name = str(info.get("filesystem", ""))
+            extra = []
+            if label:
+                extra.append(label)
+            if fs_name:
+                extra.append(fs_name)
+            extra_line = f"<br><span style='font-size:11px'>{' · '.join(extra)}</span>" if extra else ""
             self.drive_detail.setText(
-                f"<b>{drive} Volume</b><br>"
-                f"Total: {format_size(info['total'])} · Free: {format_size(info['free'])}"
+                f"<b>{drive}</b><br>"
+                f"Used: {format_size(info['used'])} · Free: {format_size(info['free'])} · Total: {format_size(info['total'])}"
+                f"{extra_line}"
             )
         except OSError:
             self._used_fraction = 0.0
             self.donut.set_usage(0.0, self._theme)
-            self.drive_detail.setText(f"{drive} drive<br>Unavailable")
+            self.drive_detail.setText(f"{drive}<br>Unavailable")
         self.drive_detail.setStyleSheet(f"color: {_c(self._theme, 'muted')};")
 
     def set_scan(self, report: ScanReport):
@@ -1400,9 +1422,9 @@ class LargeFilesView(QWidget):
         self.scan_button.setEnabled(True)
         self.cancel_button.hide()
         self._files = files
-        self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
-        for file in files[:1000]:
+        shown_files = files[:_MAX_LARGE_FILE_ROWS]
+        for file in shown_files:
             row = self.table.rowCount()
             self.table.insertRow(row)
             size_item = NumericItem(format_size(file.size), file.size)
@@ -1419,16 +1441,16 @@ class LargeFilesView(QWidget):
             self.table.setItem(row, 2, type_item)
             self.table.setItem(row, 3, mtime_item)
             self.table.setItem(row, 4, path_item)
-        self.table.setSortingEnabled(True)
         self.table.refresh_placeholder()
         self.table.resizeColumnToContents(0)
         self.table.resizeColumnToContents(2)
         self.table.resizeColumnToContents(3)
         total = sum(f.size for f in files)
-        shown = len(files)
+        found = len(files)
+        shown = len(shown_files)
         self.status_label.setText(
-            f"Found {shown} file(s) larger than {format_size(self._threshold())} — "
-            f"Total {format_size(total)} (showing {min(shown, 1000)} results)"
+            f"Found {found} file(s) larger than {format_size(self._threshold())} — "
+            f"Total {format_size(total)} (showing top {shown} results)"
         )
 
     def _filter_table(self, text: str):
@@ -1673,9 +1695,9 @@ class DuplicatesView(QWidget):
         self.scan_button.setEnabled(True)
         self.cancel_button.hide()
         self._groups = groups
-        self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
-        for group in groups[:300]:
+        shown_groups = groups[:_MAX_DUPLICATE_GROUP_ROWS]
+        for group in shown_groups:
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, NumericItem(format_size(group.size), group.size))
@@ -1686,17 +1708,21 @@ class DuplicatesView(QWidget):
                 row, 2, NumericItem(format_size(group.reclaimable), group.reclaimable)
             )
             files_item = QTableWidgetItem(f"{len(group.files)} copies — {group.files[0]}")
-            files_item.setToolTip("\n".join(group.files))
+            preview_files = group.files[:_MAX_DUPLICATE_TOOLTIP_FILES]
+            tooltip = "\n".join(preview_files)
+            remaining = len(group.files) - len(preview_files)
+            if remaining > 0:
+                tooltip += f"\n... and {remaining} more"
+            files_item.setToolTip(tooltip)
             self.table.setItem(row, 3, files_item)
-        self.table.setSortingEnabled(True)
         self.table.refresh_placeholder()
         self.table.resizeColumnToContents(0)
         self.table.resizeColumnToContents(1)
         self.table.resizeColumnToContents(2)
         total = sum(g.reclaimable for g in groups)
         self.status_label.setText(
-            f"Found {len(groups)} duplicate group(s) — up to {format_size(total)} reclaimable. "
-            f"Double-click any row to review and recycle duplicate copies."
+            f"Found {len(groups)} duplicate group(s) — up to {format_size(total)} reclaimable "
+            f"(showing top {len(shown_groups)} groups). Double-click any row to review and recycle duplicate copies."
         )
 
     def _open_group(self, item):

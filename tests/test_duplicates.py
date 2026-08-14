@@ -68,3 +68,11 @@ class TestFindDuplicates:
         groups = find_duplicates([str(tmp_path)], min_size_bytes=1)
         assert len(groups) == 1
         assert set(groups[0].files) == {f1, f2}
+
+    def test_max_groups_limit(self, tmp_path):
+        for i in range(3):
+            payload = bytes([65 + i]) * 4096
+            _write(tmp_path, f"g{i}/a.bin", payload)
+            _write(tmp_path, f"g{i}/b.bin", payload)
+        groups = find_duplicates([str(tmp_path)], min_size_bytes=1, max_groups=2)
+        assert len(groups) == 2
