@@ -10,6 +10,14 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 
 ---
 
+## Screenshots
+
+<img width="1262" height="845" alt="image" src="https://github.com/user-attachments/assets/4f227648-df10-426d-9000-73ecec879afe" />
+<img width="1262" height="845" alt="image" src="https://github.com/user-attachments/assets/bafe415b-6809-41f7-9e83-35a04bd9640b" />
+<img width="1262" height="845" alt="image" src="https://github.com/user-attachments/assets/16942ba4-ebcb-4064-818c-a1695c80b876" />
+
+---
+
 ## Overview
 
 CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It targets temporary files, developer build caches, package manager stores, browser caches, and application caches while keeping critical project files, saved credentials, and user data intact. Windows-specific cleanup modules remain available on Windows builds, while Linux builds use Linux-appropriate paths from the same codebase.
