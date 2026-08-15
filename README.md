@@ -113,7 +113,7 @@ Linux builds use the same Python source tree and can be packaged into a Linux bi
 ./scripts/build_linux.sh
 ```
 
-The Linux executable will be written to `dist/crapcleaner`.
+The Linux executable will be written to `dist/crapcleaner-linux-x86_64`.
 
 ---
 

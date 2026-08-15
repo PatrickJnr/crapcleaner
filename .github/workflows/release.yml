@@ -26,18 +26,55 @@ jobs:
       - name: Generate SHA-256 Checksum
         run: |
           cd dist
-          Get-FileHash CrapCleaner.exe -Algorithm SHA256 | Format-List > checksum.txt
-          Get-Content checksum.txt
+          Get-FileHash CrapCleaner.exe -Algorithm SHA256 | Format-List > checksum-windows.txt
+          Get-Content checksum-windows.txt
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CrapCleaner-Windows-x64
           path: |
             dist/CrapCleaner.exe
-            dist/checksum.txt
+            dist/checksum-windows.txt
+
+  build-linux-bin:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xfixes0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+      - name: Build Standalone Linux Binary
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --add-data "crapcleaner/gui/assets:crapcleaner/gui/assets" --add-data "crapcleaner/assets:crapcleaner/assets" build_launcher.py
+          chmod +x dist/crapcleaner-linux-x86_64
+      - name: Package Tarball and Checksum
+        run: |
+          cd dist
+          tar -czvf crapcleaner-linux-x86_64.tar.gz crapcleaner-linux-x86_64
+          sha256sum crapcleaner-linux-x86_64 > checksum-linux.txt
+          sha256sum crapcleaner-linux-x86_64.tar.gz >> checksum-linux.txt
+          cat checksum-linux.txt
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrapCleaner-Linux-x64
+          path: |
+            dist/crapcleaner-linux-x86_64
+            dist/crapcleaner-linux-x86_64.tar.gz
+            dist/checksum-linux.txt
 
   publish-release:
-    needs: build-windows-exe
+    needs: [build-windows-exe, build-linux-bin]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -48,13 +85,29 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: CrapCleaner-Windows-x64
-          path: release-dist
+          path: release-dist/windows
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CrapCleaner-Linux-x64
+          path: release-dist/linux
+      - name: Consolidate Release Assets and Compute Checksums
+        run: |
+          mkdir -p release-assets
+          cp release-dist/windows/CrapCleaner.exe release-assets/
+          cp release-dist/linux/crapcleaner-linux-x86_64 release-assets/
+          cp release-dist/linux/crapcleaner-linux-x86_64.tar.gz release-assets/
+          cd release-assets
+          sha256sum CrapCleaner.exe crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums.txt
+          cat checksums.txt
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-dist/CrapCleaner.exe
-            release-dist/checksum.txt
+            release-assets/CrapCleaner.exe
+            release-assets/crapcleaner-linux-x86_64
+            release-assets/crapcleaner-linux-x86_64.tar.gz
+            release-assets/checksums.txt
           draft: false
           prerelease: false
           generate_release_notes: true
