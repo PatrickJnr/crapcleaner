@@ -108,10 +108,10 @@ def _vram_action() -> MemoryAction:
         name="Inspect graphics memory",
         kind=VRAM,
         description=(
-            "Reports VRAM usage and, on NVIDIA hardware, which processes are holding it. "
-            "Graphics drivers expose no public API to flush another application's VRAM, "
-            "so CrapCleaner reports instead of forcing anything. Closing the listed "
-            "application is the only safe way to release its graphics memory."
+            "Reports per-adapter VRAM capacity and, where the driver exposes a reliable "
+            "counter, live usage. Graphics drivers expose no public API to flush another "
+            "application's VRAM, so CrapCleaner reports instead of forcing anything. "
+            "Closing the application that owns the memory is the only safe way to release it."
         ),
         effect="Read-only driver query. Nothing is freed, reset, or terminated.",
     )

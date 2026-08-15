@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4] - 2026-08-15
+
+Linux-focused hotfix release.
+
+### Added
+- **FreeDesktop Trash fallback**: when neither `gio` nor `trash-put` is available, deletions are written to `~/.local/share/Trash` following the FreeDesktop specification, complete with `.trashinfo` metadata and collision-safe naming. Previously a Linux system without those tools silently fell back to permanent deletion even when the Recycle Bin option was selected.
+- **Descriptive Linux drive names**: mount points are presented as *System Root (/)*, *Home*, *Mounted Volume (name)*, *External Drive (name)*, and *Service Storage (name)*, each with a matching category badge, while the underlying path stays visible.
+
+### Improved
+- Skips `/proc`, `/sys`, `/dev`, `/run`, and container storage roots during Linux storage scans, so pseudo-filesystems no longer inflate or stall a breakdown.
+- Restricts the Linux drive list to real user-facing storage (`/`, `/home`, `/mnt`, `/media`, `/srv`, `/var/home`) and hides pseudo, container, and boot mounts.
+- Deduplicates Linux mounts by device and inode instead of by disk-usage totals, so bind mounts and symlinked aliases collapse to a single entry rather than being matched by coincidence.
+- Adds the user home directory to the Storage Breakdown path selector on Linux and widens the selector for longer paths.
+- Reports storage device type per mount on Linux in the PC Specs drive list.
+
+### Fixed
+- Preserves NVIDIA adapter capacity when the driver reports `N/A` for live VRAM usage, instead of discarding the adapter entirely.
+- Stops reporting per-process VRAM attribution. The driver interfaces that expose it omit graphics contexts while surfacing unrelated helper processes, which made the list misleading rather than useful.
+
+---
+
 ## [1.0.3] - 2026-08-15
 
 ### Added
@@ -62,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - *Release CrapCleaner's own memory* trims only this application's working set (Windows) or heap (Linux `malloc_trim`), with no elevation required.
     - *Purge the Windows standby list* discards cached file data through `NtSetSystemInformation` and requires administrator rights.
     - *Drop the Linux filesystem cache* runs `sync` followed by `drop_caches` and requires root; it touches filesystem cache only.
-    - *Inspect graphics memory* is a read-only VRAM report listing the processes holding VRAM where the driver exposes them.
+    - *Inspect graphics memory* is a read-only VRAM report covering adapter capacity and live usage where the driver exposes it.
   - States the exact system call each action performs, confirms before running, and reports before/after available memory plus the amount actually reclaimed. Failed or refused operations are reported honestly instead of being shown as successful.
   - Never terminates processes, changes process priorities, modifies pagefile configuration, resets the GPU, or allocates memory as a placebo.
   - Adds `--memory` (with `--json`) for statistics and `--memory-clean <action>`, which dry-runs until `--execute` is passed; `--memory-clean list` shows what the current system supports.

@@ -3,6 +3,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from crapcleaner.apps.cleanup import get_categories as get_apps_categories
 from crapcleaner.browsers.cleanup import get_categories as get_browser_categories
 from crapcleaner.specs.hardware import (
@@ -122,7 +124,10 @@ def test_dedupe_linux_mounts_drops_duplicate_aliases(tmp_path):
     from crapcleaner.utils.platform import _dedupe_linux_mounts
 
     alias = tmp_path / "alias"
-    os.symlink(tmp_path, alias)
+    try:
+        os.symlink(tmp_path, alias, target_is_directory=True)
+    except (OSError, NotImplementedError, AttributeError):
+        pytest.skip("symlink creation is not permitted in this environment")
     mounts = [str(tmp_path), str(alias)]
     metadata = {
         str(tmp_path): {"source": "/dev/nvme0n1p2", "filesystem": "btrfs"},

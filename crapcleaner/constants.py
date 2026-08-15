@@ -2,7 +2,7 @@
 
 APP_NAME = "CrapCleaner"
 APP_DISPLAY_NAME = "CrapCleaner [CCleaner]"
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 COMPANY_NAME = "CrapCleaner"
 APP_URL = ""
 

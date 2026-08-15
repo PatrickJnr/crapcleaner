@@ -338,11 +338,11 @@ class DriveCard(QFrame):
         top_row.addWidget(self.title)
         top_row.addStretch(1)
 
-        self.type_badge = QLabel(
-            "SYSTEM"
-            if (drive.upper().startswith("C") if is_windows() else False)
-            else (linux_drive_display_kind(drive) if not is_windows() else "LOCAL")
-        )
+        if is_windows():
+            badge_text = "SYSTEM" if drive.upper().startswith("C") else "LOCAL"
+        else:
+            badge_text = linux_drive_display_kind(drive)
+        self.type_badge = QLabel(badge_text)
         self.type_badge.setProperty("badge", "true")
         self.type_badge.setStyleSheet("font-size: 9px; padding: 1px 5px;")
         top_row.addWidget(self.type_badge)

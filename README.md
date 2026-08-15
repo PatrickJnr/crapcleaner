@@ -108,9 +108,9 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
   - **Release CrapCleaner's own memory** - trims only this application's working set (Windows) or heap (Linux `malloc_trim`).
   - **Purge the Windows standby list** - discards cached file data (administrator required).
   - **Drop the Linux filesystem cache** - `sync` + `drop_caches`, filesystem cache only (root required).
-  - **Inspect graphics memory** - read-only VRAM report including the processes holding VRAM.
+  - **Inspect graphics memory** - read-only VRAM report covering adapter capacity and, where the driver exposes a reliable counter, live usage.
 - Windows and Linux already manage memory automatically; this is optional maintenance, not an optimization. No process is ever terminated, no process priority is changed, no other application's memory is touched, and no GPU is reset. CrapCleaner does not claim that freeing RAM or VRAM improves FPS or system speed.
-- **VRAM limitation, stated plainly**: graphics drivers expose no public API that lets a normal desktop application flush another application's VRAM. CrapCleaner therefore ships a VRAM *diagnostic* - usage, capacity, and the processes holding VRAM - and does not fake a flush. Closing the application that owns the memory is the only safe way to release it.
+- **VRAM limitation, stated plainly**: graphics drivers expose no public API that lets a normal desktop application flush another application's VRAM. CrapCleaner therefore ships a VRAM *diagnostic* - capacity and, where available, live usage - and does not fake a flush. Closing the application that owns the memory is the only safe way to release it. Per-process VRAM attribution is not reported, because the driver interfaces that expose it omit graphics contexts and surface unrelated helper processes, which made the list misleading.
 - **Windows privileges**: purging the standby list needs `SeProfileSingleProcessPrivilege`, which an elevated CrapCleaner normally holds. If Windows refuses it, the exact reason is reported (privilege missing from the token, token access failure, or lookup failure) rather than a generic "run as administrator".
 - CrapCleaner contains **no registry cleaning, registry optimization, or registry defragmentation** - neither here nor anywhere else in the application.
 
@@ -120,7 +120,13 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - Themes apply instantly and cross-fade smoothly; a *Reduce motion* preference disables the transition.
 - All colours come from the central palette definitions in `crapcleaner.gui.theme`, so new themes need no per-widget changes.
 
-### 13. Settings Persistence
+### 13. Linux Storage Handling
+- Mount points are shown with descriptive names (*System Root (/)*, *Home*, *Mounted Volume*, *External Drive*) alongside their real paths.
+- The drive list covers real user storage (`/`, `/home`, `/mnt`, `/media`, `/srv`, `/var/home`) and hides pseudo, container, and boot mounts; aliases of the same device collapse into one entry.
+- Storage scans skip `/proc`, `/sys`, `/dev`, `/run`, and container storage roots.
+- Deletions fall back to a FreeDesktop-compliant `~/.local/share/Trash` implementation when `gio` and `trash-put` are unavailable, so choosing the Recycle Bin never silently means permanent deletion.
+
+### 14. Settings Persistence
 - Preferences, theme, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
 - The config file is versioned, so future releases can migrate older files; unknown, malformed, or wrongly typed entries fall back to defaults instead of preventing startup.
 - Settings are local only. No credentials or secrets are ever written to configuration.

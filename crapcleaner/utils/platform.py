@@ -157,7 +157,7 @@ def linux_drive_display_name(mount_point: str) -> str:
         return mount_point
     normalized = mount_point.rstrip("/") or "/"
     if normalized == "/":
-        return "System Root (/ )".replace(" /", "/")
+        return "System Root (/)"
     if normalized == "/home":
         return "Home"
     if normalized.startswith("/mnt/"):
