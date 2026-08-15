@@ -32,7 +32,7 @@ from crapcleaner.utils.platform import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="crapcleaner",
-        description="CrapCleaner - modern Windows cleanup, disk-analysis, and duplicate finder utility.",
+        description="CrapCleaner - modern cleanup, disk-analysis, and duplicate finder utility.",
     )
     parser.add_argument("--version", action="version", version=f"CrapCleaner {__version__}")
     parser.add_argument("--gui", action="store_true", help="Launch the graphical interface.")
