@@ -21,6 +21,7 @@ NAV_SECTIONS = [
         [
             ("dashboard", "Dashboard", "home"),
             ("cleanup", "Cleanup", "delete"),
+            ("storage", "Storage Breakdown", "pie_chart"),
         ],
     ),
     (
@@ -36,8 +37,10 @@ NAV_SECTIONS = [
         "SYSTEM",
         [
             ("specs", "PC Specs", "specs"),
+            ("memory", "Memory Cleaner", "memory"),
             ("history", "History", "history"),
             ("settings", "Settings", "settings"),
+            ("help", "Help & Safety", "help"),
             ("about", "About", "about"),
         ],
     ),
@@ -50,9 +53,10 @@ class NavButton(QPushButton):
     """Navigation button using native Qt icon + text with dynamic badge text."""
 
     def __init__(self, key: str, label: str, icon_name: str, parent=None):
-        super().__init__(label, parent)
+        clean_label = label.replace("&", "&&") if "&&" not in label else label
+        super().__init__(clean_label, parent)
         self.key = key
-        self.base_label = label
+        self.base_label = clean_label
         self._icon_name = icon_name
         self.setProperty("nav", "true")
         self.setProperty("active", "false")

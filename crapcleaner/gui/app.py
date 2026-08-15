@@ -25,10 +25,13 @@ from crapcleaner.gui.views import (
     DashboardView,
     DockerView,
     DuplicatesView,
+    HelpSafetyView,
     HistoryView,
     LargeFilesView,
+    MemoryView,
     SettingsView,
     SpecsView,
+    StorageBreakdownView,
 )
 from crapcleaner.gui.workers import (
     AiDataWorker,
@@ -36,8 +39,11 @@ from crapcleaner.gui.workers import (
     DockerPruneWorker,
     DockerWorker,
     DuplicatesWorker,
+    HealthWorker,
     LargeFilesWorker,
     ScanWorker,
+    SpecsWorker,
+    StorageAnalysisWorker,
 )
 from crapcleaner.history.store import append as history_append
 from crapcleaner.models.history import HistoryEntry
@@ -50,13 +56,16 @@ class MainWindow(QMainWindow):
     _PAGE_KEYS = [
         "dashboard",
         "cleanup",
+        "storage",
         "large",
         "duplicates",
         "ai",
         "docker",
         "specs",
+        "memory",
         "history",
         "settings",
+        "help",
         "about",
     ]
 
@@ -72,6 +81,7 @@ class MainWindow(QMainWindow):
         self._workers = []
         self._scan_cache = None
         self._restore_geometry()
+        self._last_highlighted: str = ""
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -85,24 +95,30 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.dashboard = DashboardView(self)
         self.cleanup_view = CleanupView(self)
+        self.storage_view = StorageBreakdownView(self)
         self.large_files_view = LargeFilesView(self)
         self.duplicates_view = DuplicatesView(self)
         self.ai_view = AiDataView(self)
         self.docker_view = DockerView(self)
         self.specs_view = SpecsView(self)
+        self.memory_view = MemoryView(self)
         self.history_view = HistoryView(self)
         self.settings_view = SettingsView(self)
+        self.help_view = HelpSafetyView(self)
         self.about_view = AboutView(self)
         for page in (
             self.dashboard,
             self.cleanup_view,
+            self.storage_view,
             self.large_files_view,
             self.duplicates_view,
             self.ai_view,
             self.docker_view,
             self.specs_view,
+            self.memory_view,
             self.history_view,
             self.settings_view,
+            self.help_view,
             self.about_view,
         ):
             self.stack.addWidget(page)
@@ -149,6 +165,10 @@ class MainWindow(QMainWindow):
                 self.refresh_docker()
             elif key == "specs":
                 self.specs_view.refresh_specs()
+            elif key == "storage":
+                self.storage_view.refresh_health()
+            elif key == "memory":
+                self.memory_view.refresh()
 
     def navigate(self, key: str):
         if key not in self._PAGE_KEYS:
@@ -162,6 +182,10 @@ class MainWindow(QMainWindow):
         elif key == "specs":
             if self.specs_view._specs is None:
                 self.specs_view.refresh_specs()
+        elif key == "storage":
+            self.storage_view.refresh_health()
+        elif key == "memory":
+            self.memory_view.refresh()
 
     def review_and_clean(self):
         self.navigate("cleanup")
@@ -172,13 +196,16 @@ class MainWindow(QMainWindow):
         for view in (
             self.dashboard,
             self.cleanup_view,
+            self.storage_view,
             self.large_files_view,
             self.duplicates_view,
             self.ai_view,
             self.docker_view,
             self.specs_view,
+            self.memory_view,
             self.history_view,
             self.settings_view,
+            self.help_view,
             self.about_view,
         ):
             apply = getattr(view, "apply_theme", None)
@@ -196,13 +223,23 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def switch_theme(self, theme: str):
+        """Cross-fade the whole window into the given theme."""
+        from crapcleaner.gui.theme import fade_theme_change
+
+        def swap():
+            app_inst = QApplication.instance()
+            if isinstance(app_inst, QApplication):
+                apply_theme(app_inst, theme)
+            self._apply_theme_to_views(theme)
+
+        duration = 0 if self._settings.get("reduce_motion", False) else 180
+        fade_theme_change(self, swap, duration_ms=duration)
+
     def apply_settings(self):
         self._settings = load_settings()
         theme = self._settings.get("theme", "dark")
-        app_inst = QApplication.instance()
-        if isinstance(app_inst, QApplication):
-            apply_theme(app_inst, theme)
-        self._apply_theme_to_views(theme)
+        self.switch_theme(theme)
         disabled = set(self._settings.get("disabled_categories", []))
         self._categories = [c for c in get_all_categories() if c.id not in disabled]
         self.cleanup_view.populate(self._categories)
@@ -252,7 +289,11 @@ class MainWindow(QMainWindow):
 
     def _on_scan_progress(self, name, stage, state):
         self.cleanup_view.status_label.setText(f"Scanning: {name} ({stage})")
-        self.cleanup_view.highlight_category(name)
+        # Only repaint the tree highlight when the category actually changes —
+        # avoids a UI-thread backlog when 8 worker threads emit rapidly.
+        if name != self._last_highlighted:
+            self._last_highlighted = name
+            self.cleanup_view.highlight_category(name)
         self.dashboard.set_scan_progress(name, self._scan_pct(stage, state))
 
     def _on_scan_done(self, report):
@@ -372,6 +413,9 @@ class MainWindow(QMainWindow):
             parent=self,
         ).exec()
 
+        if not report.dry_run and self._settings.get("auto_rescan_after_cleanup", True):
+            self.start_scan()
+
     def scan_large_files(self, root, threshold):
         worker = LargeFilesWorker(root, threshold)
         worker.progress.connect(self.large_files_view.show_progress)
@@ -406,6 +450,21 @@ class MainWindow(QMainWindow):
         self.docker_view.show_wsl_report(wsl_rows)
 
     def run_docker_prune(self, action_name):
+        if self._settings.get("show_command_preview", True):
+            cmd = (
+                "docker system prune -f"
+                if action_name == "prune_all"
+                else f"docker {action_name.replace('_', ' ')} -f"
+            )
+            ans = QMessageBox.question(
+                self,
+                "Command Preview",
+                f"The following external command will be executed:\n\n    {cmd}\n\nDo you want to proceed?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+
         worker = DockerPruneWorker(action_name)
         worker.done.connect(
             lambda result: ReportDialog(

@@ -59,6 +59,8 @@ class CleanupResult:
     space_recovered: int
     skipped: int
     errors: list[str] = field(default_factory=list)
+    permission_errors: list[str] = field(default_factory=list)
+    skip_reasons: list[str] = field(default_factory=list)
     dry_run: bool = False
 
 
@@ -83,6 +85,14 @@ class CleanupReport:
     def total_skipped(self) -> int:
         return sum(r.skipped for r in self.results)
 
+    @property
+    def permission_errors(self) -> list[str]:
+        return [msg for r in self.results for msg in r.permission_errors]
+
+    @property
+    def skip_reasons(self) -> list[str]:
+        return [msg for r in self.results for msg in r.skip_reasons]
+
     def to_dict(self) -> dict:
         return {
             "started": self.started.isoformat(timespec="seconds"),
@@ -92,5 +102,6 @@ class CleanupReport:
             "total_files_deleted": self.total_files_deleted,
             "total_space_recovered": self.total_space_recovered,
             "total_skipped": self.total_skipped,
+            "permission_errors": self.permission_errors,
             "categories": [r.__dict__ for r in self.results],
         }

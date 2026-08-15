@@ -12,6 +12,7 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 
 ## Table of Contents
 - [Overview](#overview)
+- [Core Principles & Safety](#core-principles--safety)
 - [Screenshots](#screenshots)
 - [Features](#features)
 - [Installation](#installation)
@@ -25,6 +26,16 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 ## Overview
 
 CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It targets temporary files, developer build caches, package manager stores, browser caches, and application caches while keeping critical project files, saved credentials, and user data intact. Windows-specific cleanup modules remain available on Windows builds, while Linux builds use Linux-appropriate paths from the same codebase.
+
+---
+
+## Core Principles & Safety
+
+1. **Only Technical Defensible Cleanups**: Every cleanup target has a documented reason for existing and why deleting it is safe.
+2. **Absolute Prohibition on Registry Cleaning**: In strict adherence to system stability principles, CrapCleaner **does not** clean, optimize, defrag, or repair the Windows Registry.
+3. **Protected Paths Centralized Safety Layer**: Hard-coded safety rules guarantee that OS system files, user document roots, `.git` repositories, SSH keys, browser credentials, and game saves are never deleted.
+4. **Reversible by Default**: Deletions are sent to the Windows Recycle Bin or Linux FreeDesktop Trash by default.
+5. **Zero Telemetry**: No tracking, analytics, ads, or network telemetry. 100% local execution.
 
 ---
 
@@ -49,45 +60,70 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 
 ## Features
 
-### 1. Storage Dashboard
+### 1. Storage Dashboard & Hierarchical Breakdown
 - Real-time disk capacity and reclaimable space calculation across all mounted drives.
-- Storage partition breakdown with visual capacity gauges and warning indicators.
-- Quick scan triggering with lifetime cleanup history metrics.
+- Storage Breakdown: proportional storage grid where each cell's area maps to its size, so the largest consumers stand out immediately. Drill into folders, navigate with the keyboard (arrows, Enter, Backspace), and hover for full paths; junction, symlink, and loop protection is preserved throughout.
+- Drive health, media type, and TRIM diagnostics are cached briefly and shared across views, so switching views does not re-run the underlying platform query.
+- Storage Breakdown by functional file types (Videos, Images, Audio, Code, Archives, Documents, Executables, Databases, Disk Images).
 
-### 2. Deep Cleanup Categories (65+ targets)
-- **Windows System**: User and system TEMP directories, crash dumps, Delivery Optimization cache, Font Cache, Cryptnet SSL certificate cache, DirectX and GPU shader caches, and Prefetch traces.
-- **Developer Tools**: VS Code, Cursor, Windsurf, Zed, JetBrains IDEs (IntelliJ, PyCharm, WebStorm, Rider, CLion), Android SDK build caches, Gradle daemon logs, Bun cache, and Unreal Engine Derived Data Cache (DDC).
+### 2. Deep Cleanup Categories (75+ targets)
+- **Windows System**: User and system TEMP directories, CBS servicing logs (`C:\Windows\Logs\CBS`), Delivery Optimization cache, Font Cache, Cryptnet SSL certificate cache, DirectX and GPU shader caches, and Prefetch traces.
+- **Developer Tools**: VS Code, Cursor, Windsurf, Zed, JetBrains IDEs (IntelliJ, PyCharm, WebStorm, Rider, CLion), Android SDK build caches, Gradle daemon logs, Bun cache, Unity Editor caches & ShaderCache, Godot Engine caches, Unreal Engine DDC, and CMake build packages.
 - **Package Managers**: npm, yarn, pnpm store, pip, uv, poetry, conda, NuGet, Cargo/Rust cache, Go build cache, Maven, WinGet, Chocolatey, and Scoop.
-- **Gaming & Launchers**: Steam shader and depot caches, EA Desktop and Origin logs/caches, Ubisoft Connect caches, Riot Games and Valorant crash logs, DirectX shader caches, and FiveM cache.
-- **Browsers & Desktop Apps**: Chrome, Chromium, Edge, Brave, and Firefox HTTP/GPU caches (leaving bookmarks, passwords, history, and active sessions intact), Discord, Slack, and Spotify caches.
-- **Linux Package Managers**: APT, DNF, pacman, Flatpak, and Snap caches from Linux builds.
+- **Gaming & Launchers**: Steam shader and depot caches, Epic Games Launcher, EA Desktop / Origin, Ubisoft Connect, Battle.net, GOG Galaxy, Riot Games / Valorant crash logs, and FiveM cache.
+- **Browsers**: Chrome, Edge, Brave, Opera, Opera GX, Vivaldi, Arc, Firefox, LibreWolf, Waterfox, and Floorp HTTP/GPU/Code caches (leaving bookmarks, passwords, history, and active sessions intact).
+- **Linux Package Managers**: APT, DNF, pacman, Flatpak, and Snap caches.
 
-### 3. Multi-Stage Duplicate File Finder
+### 3. Recycle Bin & Trash Inspector
+- Platform-native Recycle Bin inspection (Windows `SHQueryRecycleBinW` & Linux FreeDesktop Trash).
+- View recoverable space, total items, and oldest/newest item timestamps.
+
+### 4. Storage Device Health & TRIM Diagnostics
+- Physical drive detection (NVMe SSD, SATA SSD, HDD), bus type, filesystem, and capacity.
+- TRIM support and enablement diagnostics (`fsutil` / `Get-PhysicalDisk` / `lsblk`).
+
+### 5. Memory & Crash Dump Analyzer
+- Identifies user-mode crash dumps (`%LOCALAPPDATA%\CrashDumps`), kernel minidumps (`C:\Windows\Minidump`), memory dumps, and core dumps with application attribution.
+
+### 6. Old Installer Detector
+- Scans user folders for potentially removable installers (`.msi`, `.exe`, `.iso`, `.deb`, `.rpm`, `.dmg`, `.pkg`).
+
+### 7. Virtual Machine & Container Storage
+- WSL2 VHDX virtual disk detection, Docker desktop storage metrics, and VM disk images (VirtualBox VDI, VMware VMDK, Hyper-V VHDX).
+
+### 8. Multi-Stage Duplicate File Finder
 - Three-stage identification pipeline: exact size matching -> 8 KB header hashing -> full SHA-256 validation.
-- Multi-threaded traversal optimized for fast SSD/NVMe disk I/O.
 - Smart duplicate resolution helpers: Keep Oldest, Keep Newest, Keep Shortest Path, and Keep First.
 
-### 4. Large Files Scanner
-- Pre-configured search targets (User Profile, Downloads, AppData, Temp) or custom root directory scanning.
-- Live file size and extension filters with right-click Explorer reveal.
+### 9. Pre-Cleanup Preview Engine
+- Manifest generation displaying every candidate item, size, safety level, reversibility, and administrator requirement before execution.
 
-### 5. AI Models and Weights Explorer
-- Read-only inspection for local machine learning model weights (Ollama, LM Studio, Hugging Face, PyTorch).
-- Protected by default to prevent accidental deletion of large model files.
+### 10. Multi-Format Report Exporter
+- Export storage breakdown, scan results, disk health diagnostics, and audit history to structured JSON, CSV, or TXT.
 
-### 6. Docker and WSL2 Storage Inspector
-- Live Docker container and volume disk usage breakdown (`docker system df`).
-- WSL2 virtual disk (`.vhdx`) file size detection and manual compaction instructions.
+### 11. Memory Cleaner
+- Live RAM report: total, in use, available, utilization percentage, cached/standby memory, committed memory against the commit limit, coarse memory pressure, and swap / pagefile usage. Counters a platform does not expose are shown as *unknown*, never as zero.
+- Graphics memory report per adapter: capacity, and live VRAM usage where the driver exposes it (NVIDIA via `nvidia-smi`, AMD on Linux via `amdgpu` sysfs). Adapters without a reliable counter are shown as *unknown*, never as zero.
+- Separate, individually explained reclamation actions - each states the exact system call it performs and reports before/after memory plus the amount reclaimed:
+  - **Release CrapCleaner's own memory** - trims only this application's working set (Windows) or heap (Linux `malloc_trim`).
+  - **Purge the Windows standby list** - discards cached file data (administrator required).
+  - **Drop the Linux filesystem cache** - `sync` + `drop_caches`, filesystem cache only (root required).
+  - **Inspect graphics memory** - read-only VRAM report including the processes holding VRAM.
+- Windows and Linux already manage memory automatically; this is optional maintenance, not an optimization. No process is ever terminated, no process priority is changed, no other application's memory is touched, and no GPU is reset. CrapCleaner does not claim that freeing RAM or VRAM improves FPS or system speed.
+- **VRAM limitation, stated plainly**: graphics drivers expose no public API that lets a normal desktop application flush another application's VRAM. CrapCleaner therefore ships a VRAM *diagnostic* - usage, capacity, and the processes holding VRAM - and does not fake a flush. Closing the application that owns the memory is the only safe way to release it.
+- **Windows privileges**: purging the standby list needs `SeProfileSingleProcessPrivilege`, which an elevated CrapCleaner normally holds. If Windows refuses it, the exact reason is reported (privilege missing from the token, token access failure, or lookup failure) rather than a generic "run as administrator".
+- CrapCleaner contains **no registry cleaning, registry optimization, or registry defragmentation** - neither here nor anywhere else in the application.
 
-### 7. Hardware and OS Specifications Inspector
-- Speccy-style hardware diagnostics: CPU cores and frequency, GPU name and dedicated VRAM, Motherboard model and BIOS version, RAM utilization and capacity, active network interfaces, and OS kernel/build details.
-- One-click copy or JSON export (`crapcleaner --specs --json`).
+### 12. Themes
+- Ten built-in themes: **Dark** (default), **Light**, **OLED Black**, **Midnight Blue**, **Slate**, **Forest**, **Graphite**, **Arctic Light**, **Solarized Dark**, and **High Contrast**.
+- **OLED Black** uses true black (`#000000`) backgrounds with near-black panels so OLED panels can switch pixels off, while keeping text, borders, and disabled states readable.
+- Themes apply instantly and cross-fade smoothly; a *Reduce motion* preference disables the transition.
+- All colours come from the central palette definitions in `crapcleaner.gui.theme`, so new themes need no per-widget changes.
 
-### 8. Safety Guarantees
-- Scans are read-only and never modify files.
-- Cleanup operations send files to the Windows Recycle Bin or Linux FreeDesktop Trash by default.
-- Directory traversal uses Windows long-path prefixing (`\\?\`) and cycle detection to prevent infinite junction loops.
-- Zero advertisements, zero third-party telemetry, and 100% local execution.
+### 13. Settings Persistence
+- Preferences, theme, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
+- The config file is versioned, so future releases can migrate older files; unknown, malformed, or wrongly typed entries fall back to defaults instead of preventing startup.
+- Settings are local only. No credentials or secrets are ever written to configuration.
 
 ---
 
@@ -97,103 +133,78 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 
 Download the latest standalone executable from the [GitHub Releases](https://github.com/PatrickJnr/crapcleaner/releases/latest) page:
 
-- **Windows (64-bit)**: [`CrapCleaner.exe`](https://github.com/PatrickJnr/crapcleaner/releases/latest) (single portable binary, no Python or installation required).
-- **Linux (x86_64)**: [`crapcleaner-linux-x86_64`](https://github.com/PatrickJnr/crapcleaner/releases/latest) or `crapcleaner-linux-x86_64.tar.gz`.
+- **Windows (64-bit)**: `CrapCleaner.exe` (portable binary, no Python or installation required).
+- **Linux (64-bit)**: `crapcleaner` (ELF executable, compatible with Ubuntu, Fedora, Arch, Debian).
 
-### Option 2: Run from Source
-
-#### Prerequisites
-- Windows 10 / 11 or a modern Linux distribution
-- Python 3.10, 3.11, or 3.12
+### Option 2: Run via uv / pip
 
 ```bash
 git clone https://github.com/PatrickJnr/crapcleaner.git
 cd crapcleaner
-
-python -m venv .venv
-```
-
-On Windows:
-
-```powershell
-.venv\Scripts\activate
 pip install -e .
-crapcleaner
+crapcleaner --gui
 ```
-
-On Linux:
-
-```bash
-. .venv/bin/activate
-pip install -e .
-crapcleaner
-```
-
-### Option 3: Windows Batch Launcher
-
-Double-click `run_crapcleaner.bat` in the project root, or execute:
-
-```cmd
-run_crapcleaner.bat
-```
-
-### Option 4: Build Platform Package
-
-Windows build:
-
-```cmd
-build.bat
-```
-
-The compiled standalone executable will be placed in `dist\CrapCleaner.exe`.
-
-Linux build:
-
-```bash
-./scripts/build_linux.sh
-```
-
-The Linux executable will be written to `dist/crapcleaner-linux-x86_64`.
 
 ---
 
 ## Command Line Interface (CLI)
 
-CrapCleaner provides a full CLI for scripted and headless execution:
-
 ```bash
-# Scan system for reclaimable space
+# Launch the graphical interface
+crapcleaner --gui
+
+# Scan for reclaimable space
 crapcleaner --scan
 
-# Output scan report in machine-readable JSON format
+# Output machine-readable JSON
 crapcleaner --scan --json
 
-# List all registered cleanup categories
-crapcleaner --list-categories
+# Display pre-cleanup preview manifest
+crapcleaner --cleanup-preview
 
-# Perform a dry-run cleanup of safe categories
-crapcleaner --clean-safe
+# Inspect Recycle Bin / Trash storage
+crapcleaner --recycle-bin
 
-# Execute cleanup with Recycle Bin / Trash protection
+# Inspect physical storage device health and TRIM status
+crapcleaner --disk-health
+
+# Hierarchical storage breakdown of user profile or specific path
+crapcleaner --storage C:\Users\Username
+
+# Analyze storage by file type
+crapcleaner --file-types C:\Users\Username
+
+# Detect old installers in Downloads and User folders
+crapcleaner --installers
+
+# Report RAM, swap/pagefile, and graphics memory (add --json for machine-readable output)
+crapcleaner --memory
+
+# List the memory actions this system supports
+crapcleaner --memory-clean list
+
+# Run a memory action (dry run by default; add --execute to perform it)
+crapcleaner --memory-clean working_set --execute
+
+# List active protected filesystem rules and safety layer
+crapcleaner --protected-paths
+
+# Export report to JSON, CSV, or TXT
+crapcleaner --scan --export csv --output scan_report.csv
+crapcleaner --disk-health --export json --output health.json
+crapcleaner --storage --export txt --output storage.txt
+
+# Perform dry-run cleanup of safe categories
+crapcleaner --clean-safe --dry-run
+
+# Execute cleanup of safe categories with Recycle Bin protection
 crapcleaner --clean-safe --execute
 
-# Clean specific categories by name or pattern
-crapcleaner --clean-category "pip" "npm" --execute
+# Find duplicates larger than 10MB
+crapcleaner --duplicates "C:\Users\Username\Downloads" --min-dup-size 10MB
 
-# Find files larger than 1 GB in a directory
-crapcleaner --large-files 1GB --root C:\Users\Username       # Windows
-crapcleaner --large-files 1GB --root /home/username          # Linux
-
-# Find duplicate files in a directory
-crapcleaner --duplicates "C:\Users\Username\Downloads"      # Windows
-crapcleaner --duplicates "/home/username/Downloads"          # Linux
-
-# Print hardware and operating system specifications
+# Hardware and OS specifications
 crapcleaner --specs
-crapcleaner --specs --json
-
-# Run disk traversal performance benchmark
-crapcleaner --benchmark
 ```
 
 ---
@@ -202,19 +213,24 @@ crapcleaner --benchmark
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl + 1` to `9`, `Ctrl + 0` | Switch view tabs (Dashboard, Cleanup, Deep Scans, System, About) |
-| `Ctrl + R` | Start scan |
-| `F5` | Refresh active view data |
-| `Escape` | Cancel active scan |
+| `Ctrl+1` ... `Ctrl+9`, `Ctrl+0` | Jump to a sidebar view in order (Dashboard, Cleanup, Storage, Large Files, Duplicates, AI Data, Docker, PC Specs, Memory Cleaner, History) |
+| `Ctrl+R` | Start a scan |
+| `F5` | Refresh the active view |
+| `Ctrl+F` | Focus the search box in views that have one |
+| `Esc` | Cancel the running scan |
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup, code formatting standards, and testing procedures.
+1. Fork the repository on GitHub.
+2. Create a feature branch: `git checkout -b feature/new-cleanup-category`.
+3. Ensure all tests pass: `pytest`.
+4. Commit your changes: `git commit -m "Add new category"`.
+5. Open a Pull Request.
 
 ---
 
 ## License
 
-Distributed under the [MIT License](LICENSE). Copyright (c) 2026 Patrick Jr.
+This project is licensed under the [MIT License](LICENSE).

@@ -8,6 +8,7 @@ from datetime import datetime
 from crapcleaner.cleaners.actions import run_action
 from crapcleaner.models.category import CacheTarget, CleanupCategory
 from crapcleaner.models.report import CleanupReport, CleanupResult
+from crapcleaner.safety.protected_paths import validate_cleanup_path
 from crapcleaner.utils.files import (
     recycle_file,
     recycle_tree,
@@ -33,9 +34,30 @@ def _delete_target_files(
     recovered = 0
     skipped = 0
     errors: list[str] = []
+    permission_errors: list[str] = []
+    skip_reasons: list[str] = []
+
+    def outcome() -> tuple:
+        return deleted, recovered, skipped, errors, permission_errors, skip_reasons
+
+    def record_failure(path: str, exc: OSError) -> None:
+        if isinstance(exc, PermissionError):
+            permission_errors.append(f"{path}: {exc.strerror or exc}")
+        else:
+            errors.append(f"{path}: {exc}")
+
+    is_safe, msg = validate_cleanup_path(target_path)
+    if not is_safe:
+        skip_reasons.append(msg)
+        return outcome()
 
     def handle_file(path: str) -> None:
         nonlocal deleted, recovered, skipped
+        is_safe_file, reason = validate_cleanup_path(path)
+        if not is_safe_file:
+            skipped += 1
+            skip_reasons.append(reason)
+            return
         try:
             size = os.path.getsize(path)
         except OSError:
@@ -51,12 +73,18 @@ def _delete_target_files(
                 recovered += size
             else:
                 skipped += 1
+                skip_reasons.append(f"{path}: in use or locked by another process")
         except OSError as exc:
             skipped += 1
-            errors.append(f"{path}: {exc}")
+            record_failure(path, exc)
 
     def handle_tree(path: str) -> None:
         nonlocal deleted, recovered, skipped
+        is_safe_tree, reason = validate_cleanup_path(path)
+        if not is_safe_tree:
+            skipped += 1
+            skip_reasons.append(reason)
+            return
         if dry_run:
             for root, dirs, files in os.walk(path):
                 if stop_event is not None and stop_event.is_set():
@@ -85,6 +113,7 @@ def _delete_target_files(
                 recovered += size
             else:
                 skipped += 1
+                skip_reasons.append(f"{path}: could not be moved to the Recycle Bin")
             return
         total_size = 0
         total_files = 0
@@ -104,9 +133,10 @@ def _delete_target_files(
                         total_files += 1
                     else:
                         skipped += 1
+                        skip_reasons.append(f"{full}: in use or locked by another process")
                 except OSError as exc:
                     skipped += 1
-                    errors.append(f"{full}: {exc}")
+                    record_failure(full, exc)
             for name in dirs:
                 full = os.path.join(root, name)
                 if recycle_tree(full) if use_recycle_bin else remove_tree(full):
@@ -121,10 +151,10 @@ def _delete_target_files(
     try:
         if only_files and os.path.isfile(target_path):
             handle_file(target_path)
-            return deleted, recovered, skipped, errors
+            return outcome()
 
         if not os.path.isdir(target_path):
-            return deleted, recovered, skipped, errors
+            return outcome()
 
         if patterns:
             try:
@@ -138,7 +168,7 @@ def _delete_target_files(
                             if _name_matches(entry.name, patterns):
                                 handle_file(entry.path)
             except OSError as exc:
-                errors.append(f"{target_path}: {exc}")
+                record_failure(target_path, exc)
         elif recurse:
             handle_tree(target_path)
         else:
@@ -150,11 +180,11 @@ def _delete_target_files(
                         if entry.is_file(follow_symlinks=False):
                             handle_file(entry.path)
             except OSError as exc:
-                errors.append(f"{target_path}: {exc}")
+                record_failure(target_path, exc)
     except _Stopped:
         raise
 
-    return deleted, recovered, skipped, errors
+    return outcome()
 
 
 def _name_matches(name: str, patterns: tuple) -> bool:
@@ -230,6 +260,8 @@ def clean_categories(
         recovered = 0
         skipped = 0
         errors: list[str] = []
+        permission_errors: list[str] = []
+        skip_reasons: list[str] = []
         try:
             targets = list(category.targets)
             if category.finder is not None:
@@ -239,7 +271,7 @@ def clean_categories(
                     raise _Stopped
                 if not os.path.exists(target.path) and not os.path.islink(target.path):
                     continue
-                d, r, s, e = _delete_target_files(
+                d, r, s, e, pe, sr = _delete_target_files(
                     target.path,
                     target.patterns,
                     target.recurse,
@@ -252,6 +284,8 @@ def clean_categories(
                 recovered += r
                 skipped += s
                 errors.extend(e)
+                permission_errors.extend(pe)
+                skip_reasons.extend(sr)
         except _Stopped:
             report.errors.append("Cleanup stopped by user.")
         except Exception as exc:
@@ -265,6 +299,8 @@ def clean_categories(
                 space_recovered=recovered,
                 skipped=skipped,
                 errors=errors,
+                permission_errors=permission_errors,
+                skip_reasons=skip_reasons,
                 dry_run=dry_run,
             )
         )

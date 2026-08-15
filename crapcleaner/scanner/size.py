@@ -88,6 +88,12 @@ def compute_dir_size(
 
             if patterns and not _matches(entry.name, matchers):
                 continue
+            from crapcleaner.safety.protected_paths import validate_cleanup_path
+
+            is_safe, _ = validate_cleanup_path(entry.path)
+            if not is_safe:
+                skipped += 1
+                continue
             total += st.st_size
             count += 1
             visited[0] += 1

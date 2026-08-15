@@ -199,3 +199,128 @@ class DockerPruneWorker(QThread):
             self.done.emit(run_action(self._action_name, dry_run=False))
         except Exception as exc:  # pragma: no cover - defensive
             self.failed.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Non-blocking workers for slow system-info queries
+# ---------------------------------------------------------------------------
+
+
+class SpecsWorker(QThread):
+    """Fetches system hardware specs + storage health off the main thread."""
+
+    done = Signal(object, list)  # (HardwareSpecs, list[DiskHealthInfo])
+    failed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def run(self):
+        try:
+            from crapcleaner.specs.hardware import get_system_specs
+            from crapcleaner.specs.storage_health import get_storage_health_report
+
+            specs = get_system_specs()
+            try:
+                health = get_storage_health_report()
+            except Exception:
+                health = []
+            self.done.emit(specs, health)
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
+class HealthWorker(QThread):
+    """Fetches storage health diagnostics off the main thread."""
+
+    done = Signal(list)  # list[DiskHealthInfo]
+    failed = Signal(str)
+
+    def __init__(self, force_refresh: bool = False, parent=None):
+        super().__init__(parent)
+        self._force_refresh = force_refresh
+
+    def run(self):
+        try:
+            from crapcleaner.specs.storage_health import get_storage_health_report
+
+            self.done.emit(get_storage_health_report(force_refresh=self._force_refresh))
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
+class StorageAnalysisWorker(QThread):
+    """Runs the 4 storage analysis passes off the main thread.
+
+    Signals fire as each section completes so the UI can update progressively.
+    """
+
+    tree_done = Signal(object)  # StorageNode root
+    types_done = Signal(list)  # list[FileTypeSummary]
+    old_done = Signal(list)  # list[OldFileInfo]
+    vms_done = Signal(list)  # list[VmStorageInfo]
+    finished_all = Signal()
+    failed = Signal(str)
+
+    def __init__(self, path: str, depth: int = 3, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self._depth = depth
+
+    def run(self):
+        try:
+            from crapcleaner.storage.analyzer import analyze_storage_hierarchy
+            from crapcleaner.storage.file_types import analyze_file_types
+            from crapcleaner.storage.old_files import find_old_files
+            from crapcleaner.storage.virtual_machines import detect_virtual_machine_storage
+
+            root_node = analyze_storage_hierarchy(self._path, max_depth=self._depth)
+            self.tree_done.emit(root_node)
+
+            file_types = analyze_file_types(self._path)
+            self.types_done.emit(file_types)
+
+            old_files = find_old_files(self._path, min_age_days=90, max_results=200)
+            self.old_done.emit(old_files)
+
+            vms = detect_virtual_machine_storage()
+            self.vms_done.emit(vms)
+
+            self.finished_all.emit()
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
+class MemoryReportWorker(QThread):
+    """Reads RAM, swap, and VRAM statistics off the main thread."""
+
+    done = Signal(object)
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            from crapcleaner.memory import get_memory_report
+
+            self.done.emit(get_memory_report())
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
+class MemoryActionWorker(QThread):
+    """Runs a single memory reclamation action off the main thread."""
+
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, action_id: str, dry_run: bool = False, parent=None):
+        super().__init__(parent)
+        self._action_id = action_id
+        self._dry_run = dry_run
+
+    def run(self):
+        try:
+            from crapcleaner.memory import run_action
+
+            self.done.emit(run_action(self._action_id, dry_run=self._dry_run))
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))

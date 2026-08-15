@@ -11,14 +11,25 @@ from typing import Any
 from crapcleaner import __version__
 from crapcleaner.cleaners.actions import run_action
 from crapcleaner.cleaners.cleaner import clean_categories
+from crapcleaner.cleaners.preview import generate_cleanup_preview
+from crapcleaner.cleaners.recycle_bin import empty_trash, get_recycle_bin_info
 from crapcleaner.config.settings import load_settings
 from crapcleaner.duplicates.finder import DuplicateGroup, find_duplicates
+from crapcleaner.large_files.installers import scan_installers
 from crapcleaner.large_files.scanner import LargeFile, scan_large_files
 from crapcleaner.models.category import CleanupCategory, SafetyLevel
 from crapcleaner.models.report import CleanupReport, ScanReport
 from crapcleaner.registry import find_categories, get_all_categories
+from crapcleaner.reports.exporter import export_report
+from crapcleaner.safety.protected_paths import (
+    get_protected_rules_summary,
+    validate_cleanup_path,
+)
 from crapcleaner.scanner.scanner import ScanEngine
 from crapcleaner.scanner.size import compute_dir_size
+from crapcleaner.specs.storage_health import get_storage_health_report
+from crapcleaner.storage.analyzer import analyze_storage_hierarchy
+from crapcleaner.storage.file_types import analyze_file_types
 from crapcleaner.utils.format import format_datetime, format_size, parse_size
 from crapcleaner.utils.platform import (
     get_drive_info,
@@ -56,9 +67,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="Clean a category matching NAME (repeatable, substring match).",
     )
     parser.add_argument(
+        "--cleanup-preview",
+        action="store_true",
+        help="Display a detailed pre-cleanup preview of all candidate files without modifying anything.",
+    )
+    parser.add_argument(
+        "--recycle-bin",
+        action="store_true",
+        help="Inspect platform Recycle Bin / Trash size, item counts, and timestamps.",
+    )
+    parser.add_argument(
+        "--empty-recycle-bin",
+        action="store_true",
+        help="Explicitly empty the Recycle Bin / Trash.",
+    )
+    parser.add_argument(
+        "--disk-health",
+        action="store_true",
+        help="Inspect storage device health, SSD/HDD media type, and TRIM status.",
+    )
+    parser.add_argument(
+        "--storage",
+        nargs="?",
+        const="",
+        metavar="PATH",
+        help="Hierarchical storage usage breakdown for a directory or drive (default: user profile).",
+    )
+    parser.add_argument(
+        "--file-types",
+        nargs="?",
+        const="",
+        metavar="PATH",
+        help="Analyze storage distribution by functional file type (Images, Videos, Code, etc.).",
+    )
+    parser.add_argument(
         "--large-files",
         metavar="SIZE",
         help='Scan for files larger than SIZE (e.g. "1GB", "500MB").',
+    )
+    parser.add_argument(
+        "--installers",
+        action="store_true",
+        help="Detect potentially removable installer and package archives in user folders.",
     )
     parser.add_argument(
         "--duplicates",
@@ -71,6 +121,31 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SIZE",
         default="1MB",
         help="Minimum file size for duplicate scanning (default: 1MB).",
+    )
+    parser.add_argument(
+        "--cache-report",
+        action="store_true",
+        help="Audit developer, engine, and application caches.",
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="View recent local cleanup history records.",
+    )
+    parser.add_argument(
+        "--protected-paths",
+        action="store_true",
+        help="List all active protected filesystem paths and safety rules.",
+    )
+    parser.add_argument(
+        "--export",
+        choices=["json", "csv", "txt"],
+        help="Export report format (used with --scan, --storage, --disk-health, etc.).",
+    )
+    parser.add_argument(
+        "--output",
+        metavar="FILE",
+        help="Output file destination for --export.",
     )
     parser.add_argument(
         "--prune-docker",
@@ -90,12 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--specs",
         action="store_true",
-        help="Inspect PC hardware and OS specifications (Speccy-style).",
+        help="Inspect PC hardware and OS specifications.",
     )
     parser.add_argument(
         "--root",
         metavar="PATH",
-        help="Root path for --large-files scans (default: user profile).",
+        help="Root path for file scans (default: user profile).",
     )
     parser.add_argument(
         "--dry-run",
@@ -111,6 +186,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="Skip the confirmation prompt for real cleanups.",
+    )
+    parser.add_argument(
+        "--memory",
+        action="store_true",
+        help="Report RAM, swap/pagefile, and graphics memory usage.",
+    )
+    parser.add_argument(
+        "--memory-clean",
+        metavar="ACTION",
+        help=(
+            "Run a memory reclamation action "
+            "(working_set, standby_list, fs_cache, vram_report). "
+            "Use --memory-clean list to see what this system supports."
+        ),
     )
     parser.add_argument(
         "--permanent-delete",
@@ -142,6 +231,8 @@ def _print_categories(categories: list[CleanupCategory], json_output: bool = Fal
                 "safety_level": c.safety_level.value,
                 "requires_admin": c.requires_admin,
                 "selected_by_default": c.selected_by_default,
+                "what_it_contains": c.what_it_contains,
+                "why_safe_to_delete": c.why_safe_to_delete,
                 "description": c.description,
             }
             for c in categories
@@ -204,168 +295,120 @@ def _print_cleanup(report: CleanupReport, json_output: bool = False) -> None:
             f"{result.skipped:>8} {format_size(result.space_recovered):>10}"
         )
         for error in result.errors[:5]:
-            print(f"  warn [{result.category_name}]: {error}", file=sys.stderr)
+            print(f"  error [{result.category_name}]: {error}", file=sys.stderr)
+        for denied in result.permission_errors[:5]:
+            print(f"  permission denied [{result.category_name}]: {denied}", file=sys.stderr)
+        for reason in result.skip_reasons[:5]:
+            print(f"  skipped [{result.category_name}]: {reason}", file=sys.stderr)
     print("-" * 74)
     print(
         f"Total: {report.total_files_deleted} files, {format_size(report.total_space_recovered)} "
         f"recovered, {report.total_skipped} skipped"
     )
+    if report.permission_errors:
+        print(f"Permission denied on {len(report.permission_errors)} item(s).")
 
 
-def _print_large_files(files: list[LargeFile], json_output: bool = False) -> None:
-    if json_output:
-        print(json.dumps([f.to_dict() for f in files], indent=2))
-        return
-    print(f"{'Size':>10}  {'Modified':<16} {'Type':<16} Path")
-    print("-" * 90)
-    for item in files[:200]:
-        print(
-            f"{format_size(item.size):>10}  {item.last_modified:%Y-%m-%d %H:%M}  "
-            f"{item.file_type:<16} {item.path}"
-        )
-    print(f"Found {len(files)} files.")
-
-
-def _print_duplicates(groups: list[DuplicateGroup], json_output: bool = False) -> None:
-    if json_output:
-        print(json.dumps([g.to_dict() for g in groups], indent=2))
-        return
-    total_reclaimable = sum(g.reclaimable for g in groups)
-    print(f"{'Size':>10} {'Copies':>8} {'Wasted Space':>14} File Path")
-    print("-" * 90)
-    for g in groups[:100]:
-        print(
-            f"{format_size(g.size):>10} {len(g.files):>8} {format_size(g.reclaimable):>14} "
-            f"{g.files[0]}"
-        )
-        for copy_path in g.files[1:]:
-            print(f"{'':>34} -> {copy_path}")
-    print("-" * 90)
-    print(
-        f"Found {len(groups)} duplicate group(s) with {format_size(total_reclaimable)} reclaimable space."
-    )
-
-
-def _run_health_check(json_output: bool = False) -> int:
-    drives = list_drives()
-    drive_stats: list[dict[str, Any]] = []
-    total_capacity: int = 0
-    total_free: int = 0
-    for drive_letter in drives:
-        try:
-            info = get_drive_info(drive_letter)
-            total_cap = int(info["total"])
-            free_space = int(info["free"])
-            used_space = int(info["used"])
-            total_capacity += total_cap
-            total_free += free_space
-            pct = int(used_space / total_cap * 100) if total_cap else 0
-            drive_stats.append(
-                {
-                    "drive": drive_letter,
-                    "total": total_cap,
-                    "used": used_space,
-                    "free": free_space,
-                    "used_pct": pct,
-                }
-            )
-        except OSError:
-            pass
-
-    admin = is_admin()
-    categories = get_all_categories()
-    quick_categories = [c for c in categories if c.finder is None]
-    engine = ScanEngine(quick_categories)
-    report = engine.run(max_files=2000)
-
-    result = {
-        "timestamp": datetime.now().isoformat(),
-        "admin": admin,
-        "drives": drive_stats,
-        "total_capacity": total_capacity,
-        "total_free": total_free,
-        "total_reclaimable": report.total_size,
-        "categories_checked": len(categories),
-        "categories_with_junk": len([r for r in report.results if r.size > 0]),
-    }
-
-    if json_output:
-        print(json.dumps(result, indent=2))
-        return 0
-
-    print("=" * 60)
-    print(" CrapCleaner System Health & Storage Report")
-    print("=" * 60)
-    print(
-        f"Privileges:        {'Administrator (Full system access)' if admin else 'Standard User'}"
-    )
-    print(f"Monitored Drives:  {len(drive_stats)} volume(s)")
-    for stat_item in drive_stats:
-        used_sz = format_size(float(stat_item["used"]))
-        total_sz = format_size(float(stat_item["total"]))
-        free_sz = format_size(float(stat_item["free"]))
-        pct_used = stat_item["used_pct"]
-        drive_name = stat_item["drive"]
-        extra = []
-        label = str(stat_item.get("label", ""))
-        filesystem = str(stat_item.get("filesystem", ""))
-        if label:
-            extra.append(label)
-        if filesystem:
-            extra.append(filesystem)
-        suffix = f" [{' · '.join(extra)}]" if extra else ""
-        print(
-            f"  - Drive {drive_name}{suffix}: {used_sz} used / {total_sz} ({pct_used}% full) · Free: {free_sz}"
-        )
-    print("-" * 60)
-    print(f"Total Storage:     {format_size(total_capacity)} (Free: {format_size(total_free)})")
-    print(
-        f"Reclaimable Junk:  {format_size(report.total_size)} across {result['categories_with_junk']} active categories"
-    )
-    print("=" * 60)
-    return 0
-
-
-def _run_benchmark(json_output: bool = False) -> int:
-    target = os.environ.get("TEMP", os.path.join(get_local_appdata(), "Temp"))
-    if not json_output:
-        print(f"Benchmarking scanner traversal on {target}...")
-    t0 = time.perf_counter()
-    total, count, skipped = compute_dir_size(target, max_files=2000)
-    t1 = time.perf_counter()
-    duration = max(t1 - t0, 0.001)
-
-    files_per_sec = int(count / duration)
-    mb_per_sec = (total / (1024 * 1024)) / duration
-
-    res = {
-        "target": target,
-        "files_scanned": count,
-        "bytes_scanned": total,
-        "duration_seconds": round(duration, 4),
-        "files_per_second": files_per_sec,
-        "throughput_mb_s": round(mb_per_sec, 2),
-    }
-
-    if json_output:
-        print(json.dumps(res, indent=2))
-        return 0
-
-    print("-" * 50)
-    print(f"Files Visited:   {count:,}")
-    print(f"Total Scanned:   {format_size(total)}")
-    print(f"Elapsed Time:    {duration:.3f} s")
-    print(f"Traversal Speed: {files_per_sec:,} files/sec ({mb_per_sec:.2f} MB/s)")
-    print("-" * 50)
-    return 0
-
-
-def _confirm_execute() -> bool:
+def _confirm_execute(prompt: str = "This will modify or delete files. Continue? [y/N] ") -> bool:
     try:
-        answer = input("This will modify or delete files. Continue? [y/N] ")
+        answer = input(prompt)
     except EOFError:
         return False
     return answer.strip().lower() in ("y", "yes")
+
+
+def _print_memory_report(report, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(report.to_dict(), indent=2))
+        return
+
+    ram = report.ram
+    print("=" * 80)
+    print(" CrapCleaner Memory Report")
+    print("=" * 80)
+    print(f"Total RAM:      {format_size(ram.total_bytes)}")
+    print(f"In Use:         {format_size(ram.used_bytes)} ({ram.percent_used}%)")
+    print(f"Available:      {format_size(ram.available_bytes)}")
+    if ram.cached_known:
+        print(f"Cached/Standby: {format_size(ram.cached_bytes)}")
+    else:
+        print("Cached/Standby: not reported by this platform")
+    if ram.commit_limit_bytes:
+        print(
+            f"Committed:      {format_size(ram.commit_bytes)} of "
+            f"{format_size(ram.commit_limit_bytes)} commit limit"
+        )
+    print(f"Memory pressure: {ram.pressure}")
+    print(f"Elevated:       {'yes' if is_admin() else 'no'}")
+    if ram.swap_supported:
+        print(
+            f"Swap/Pagefile:  {format_size(ram.swap_used_bytes)} used of "
+            f"{format_size(ram.swap_total_bytes)}"
+        )
+    else:
+        print("Swap/Pagefile:  Not configured")
+    print("-" * 80)
+    if not report.gpus:
+        print("Graphics:       No adapter with readable memory counters detected.")
+    for gpu in report.gpus:
+        vendor = f" [{gpu.vendor}]" if gpu.vendor else ""
+        print(f"GPU: {gpu.name}{vendor}")
+        if gpu.live_usage_available:
+            print(
+                f"  VRAM: {format_size(gpu.used_bytes)} used of "
+                f"{format_size(gpu.total_bytes)} ({gpu.percent_used}%) via {gpu.source}"
+            )
+        elif gpu.total_bytes:
+            print(f"  VRAM: {format_size(gpu.total_bytes)} installed, live usage unavailable")
+        else:
+            print("  VRAM: capacity not reported")
+    for consumer in report.vram_consumers:
+        print(
+            f"  Holding VRAM: {consumer.name} (PID {consumer.pid}) {format_size(consumer.used_bytes)}"
+        )
+    print("=" * 80)
+
+
+def _run_memory(args, settings: dict) -> int:
+    from crapcleaner.memory import available_actions, get_memory_report
+    from crapcleaner.memory import run_action as run_memory_action
+
+    action_id = args.memory_clean
+    if not action_id:
+        _print_memory_report(get_memory_report(), args.json)
+        return 0
+
+    if action_id == "list":
+        actions = [a.to_dict() for a in available_actions()]
+        if args.json:
+            print(json.dumps(actions, indent=2))
+        else:
+            for action in available_actions():
+                state = (
+                    "available"
+                    if action.supported
+                    else f"unavailable ({action.unsupported_reason})"
+                )
+                admin = " [requires administrator]" if action.requires_admin else ""
+                print(f"{action.id}: {action.name} - {state}{admin}")
+                print(f"    {action.effect}")
+        return 0
+
+    dry_run = not args.execute
+    result = run_memory_action(action_id, dry_run=dry_run)
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print(result.message)
+        if result.success and result.measurable and not result.dry_run:
+            print(
+                f"Available memory: {format_size(result.before.available_bytes)} -> "
+                f"{format_size(result.after.available_bytes)} "
+                f"(reclaimed {format_size(result.reclaimed_bytes)})"
+            )
+        if dry_run and result.success:
+            print("Nothing was changed. Re-run with --execute to perform this action.")
+    return 0 if result.success else 1
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -379,17 +422,249 @@ def run(argv: list[str] | None = None) -> int:
             args.list_categories,
             args.clean_safe,
             args.clean_category,
+            args.cleanup_preview,
+            args.recycle_bin,
+            args.empty_recycle_bin,
+            args.disk_health,
+            args.storage is not None,
+            args.file_types is not None,
             args.large_files,
+            args.installers,
             args.duplicates,
+            args.cache_report,
+            args.history,
+            args.protected_paths,
             args.prune_docker,
             args.health_check,
             args.benchmark,
             args.specs,
+            args.memory,
+            args.memory_clean,
         )
     ):
         from crapcleaner.gui.app import run_gui
 
         return run_gui()
+
+    if args.memory or args.memory_clean:
+        return _run_memory(args, settings)
+
+    if args.protected_paths:
+        rules = get_protected_rules_summary()
+        if args.json:
+            print(json.dumps(rules, indent=2))
+        else:
+            print("=" * 80)
+            print(" CrapCleaner Protected Filesystem Rules & Safety Layer")
+            print("=" * 80)
+            for r in rules:
+                print(f"[{r['rule_type']}] {r['target']}")
+                print(f"  Reason: {r['reason']}")
+            print("=" * 80)
+        return 0
+
+    if args.recycle_bin:
+        info = get_recycle_bin_info()
+        if args.json:
+            print(json.dumps(info.to_dict(), indent=2))
+        else:
+            print("=" * 60)
+            print(" Recycle Bin / Trash Storage Inspection")
+            print("=" * 60)
+            print(f"Recoverable Space: {format_size(info.total_size)}")
+            print(f"Total Items:       {info.item_count:,}")
+            if info.oldest_item:
+                print(f"Oldest Item:       {format_datetime(info.oldest_item)}")
+            if info.newest_item:
+                print(f"Newest Item:       {format_datetime(info.newest_item)}")
+            if info.items:
+                print("\nSample Deleted Items:")
+                for item in info.items[:15]:
+                    print(f"  • {item.name:<30} ({format_size(item.size)})")
+            print("=" * 60)
+        return 0
+
+    if args.empty_recycle_bin:
+        if not args.yes and not _confirm_execute(
+            "Are you sure you want to empty the Recycle Bin/Trash? [y/N] "
+        ):
+            print("Cancelled.")
+            return 1
+        ok = empty_trash()
+        print("Recycle Bin emptied successfully." if ok else "Failed to empty Recycle Bin.")
+        return 0 if ok else 1
+
+    if args.disk_health:
+        health_disks = get_storage_health_report()
+        if args.export:
+            export_report(
+                health_disks,
+                report_type="disk_health",
+                export_format=args.export,
+                output_path=args.output,
+            )
+            if not args.output:
+                print(
+                    export_report(
+                        health_disks, report_type="disk_health", export_format=args.export
+                    )
+                )
+            return 0
+        if args.json:
+            print(json.dumps([d.to_dict() for d in health_disks], indent=2))
+        else:
+            print("=" * 80)
+            print(" Storage Device Health & Diagnostics")
+            print("=" * 80)
+            for d in health_disks:
+                trim_str = (
+                    "Enabled" if d.trim_enabled else ("Supported" if d.trim_supported else "N/A")
+                )
+                cap_str = format_size(d.capacity) if d.capacity else "N/A"
+                free_str = f" (Free: {format_size(d.free_space)})" if d.free_space else ""
+                print(f"Drive: {d.device_id} - {d.model}")
+                print(f"  Type: {d.media_type} ({d.bus_type}) | Filesystem: {d.filesystem}")
+                print(f"  Capacity: {cap_str}{free_str} | Status: {d.health_status}")
+                print(f"  TRIM Status: {trim_str}")
+                print("-" * 80)
+        return 0
+
+    if args.storage is not None:
+        target_path = (
+            args.storage
+            or args.root
+            or settings.get("large_file_default_root")
+            or get_user_profile()
+        )
+        node = analyze_storage_hierarchy(target_path, max_depth=3)
+        if node is None:
+            print(f"error: unable to inspect storage path {target_path!r}", file=sys.stderr)
+            return 1
+        if args.export:
+            export_report(
+                node, report_type="storage", export_format=args.export, output_path=args.output
+            )
+            if not args.output:
+                print(export_report(node, report_type="storage", export_format=args.export))
+            return 0
+        if args.json:
+            print(json.dumps(node.to_dict(), indent=2))
+        else:
+            print("=" * 70)
+            print(
+                f" Storage Breakdown: {node.path} ({format_size(node.size)}, {node.file_count:,} files)"
+            )
+            print("=" * 70)
+            for child in node.children:
+                print(
+                    f"  [DIR] {child.name:<30} {format_size(child.size):>10} ({child.percentage_of_parent:>5.1f}%)"
+                )
+            print("=" * 70)
+        return 0
+
+    if args.file_types is not None:
+        target_path = args.file_types or args.root or get_user_profile()
+        types_summary = analyze_file_types(target_path)
+        if args.json:
+            print(json.dumps([t.to_dict() for t in types_summary], indent=2))
+        else:
+            print(f"File Type Storage Analysis on {target_path}")
+            print(f"{'Category':<28} {'Size':>10} {'Files':>8} {'Share':>7}")
+            print("-" * 60)
+            for s in types_summary:
+                print(
+                    f"{s.category:<28} {format_size(s.total_size):>10} {s.file_count:>8,} {s.percentage:>6.1f}%"
+                )
+            print("-" * 60)
+        return 0
+
+    if args.installers:
+        installs = scan_installers(search_roots=[args.root] if args.root else None)
+        if args.json:
+            print(json.dumps([item.to_dict() for item in installs], indent=2))
+        else:
+            print(f"Found {len(installs)} potentially removable installer(s):")
+            print(f"{'Size':>10}  {'Modified':<16} Path")
+            print("-" * 80)
+            for item in installs[:100]:
+                print(
+                    f"{format_size(item.size):>10}  {format_datetime(item.modified_at)}  {item.path}"
+                )
+        return 0
+
+    if args.cleanup_preview:
+        categories = [
+            c
+            for c in get_all_categories()
+            if c.selected_by_default and c.safety_level in (SafetyLevel.SAFE, SafetyLevel.LOW_RISK)
+        ]
+        preview = generate_cleanup_preview(categories)
+        if args.export:
+            export_report(
+                preview, report_type="scan", export_format=args.export, output_path=args.output
+            )
+            if not args.output:
+                print(export_report(preview, report_type="scan", export_format=args.export))
+            return 0
+        if args.json:
+            print(json.dumps(preview.to_dict(), indent=2))
+        else:
+            print("=" * 80)
+            print(" CrapCleaner Pre-Cleanup Preview")
+            print(
+                f" Total Reclaimable: {format_size(preview.total_estimated_size)} ({preview.total_item_count} items)"
+            )
+            print("=" * 80)
+            for c in preview.categories:
+                if c.estimated_size == 0 and c.item_count == 0:
+                    continue
+                admin_str = " [Admin required]" if c.requires_admin else ""
+                rev_str = " (Recycle Bin)" if c.reversible else " (Permanent)"
+                print(
+                    f"\n[Category] {c.category_name} - {format_size(c.estimated_size)} ({c.item_count} items){admin_str}{rev_str}"
+                )
+                for item in c.items[:10]:
+                    print(f"    • {item.path} ({format_size(item.size)})")
+            print("\n" + "=" * 80)
+        return 0
+
+    if args.cache_report:
+        categories = [
+            c
+            for c in get_all_categories()
+            if c.group in ("Developer tools", "Python", "Node.js", ".NET", "Browsers", "Gaming")
+        ]
+        engine = ScanEngine(categories)
+        report = engine.run()
+        if args.json:
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print("Cache & Developer Tool Audit Report")
+            _print_scan(report, json_output=False)
+        return 0
+
+    if args.history:
+        from crapcleaner.history.store import load as load_hist
+
+        records = load_hist()
+        if args.export:
+            export_report(
+                records, report_type="history", export_format=args.export, output_path=args.output
+            )
+            if not args.output:
+                print(export_report(records, report_type="history", export_format=args.export))
+            return 0
+        if args.json:
+            print(json.dumps([h.to_dict() for h in records], indent=2))
+        else:
+            print("Recent Cleanup History:")
+            print(f"{'Date':<19} {'Kind':<10} {'Files':>8} {'Recovered':>12}")
+            print("-" * 55)
+            for r in records[-50:]:
+                print(
+                    f"{format_datetime(r.started):<19} {r.kind:<10} {r.files_removed:>8} {format_size(r.space_recovered):>12}"
+                )
+        return 0
 
     if args.specs:
         from crapcleaner.specs.hardware import get_system_specs, print_specs_summary
@@ -399,10 +674,116 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     if args.health_check:
-        return _run_health_check(json_output=args.json)
+        drives = list_drives()
+        drive_stats: list[dict[str, Any]] = []
+        total_capacity: int = 0
+        total_free: int = 0
+        for drive_letter in drives:
+            try:
+                info = get_drive_info(drive_letter)
+                total_cap = int(info["total"])
+                free_space = int(info["free"])
+                used_space = int(info["used"])
+                total_capacity += total_cap
+                total_free += free_space
+                pct = int(used_space / total_cap * 100) if total_cap else 0
+                drive_stats.append(
+                    {
+                        "drive": drive_letter,
+                        "total": total_cap,
+                        "used": used_space,
+                        "free": free_space,
+                        "used_pct": pct,
+                    }
+                )
+            except OSError:
+                pass
+
+        admin = is_admin()
+        categories = get_all_categories()
+        quick_categories = [c for c in categories if c.finder is None]
+        engine = ScanEngine(quick_categories)
+        report = engine.run(max_files=2000)
+
+        result = {
+            "timestamp": datetime.now().isoformat(),
+            "admin": admin,
+            "drives": drive_stats,
+            "total_capacity": total_capacity,
+            "total_free": total_free,
+            "total_reclaimable": report.total_size,
+            "categories_checked": len(categories),
+            "categories_with_junk": len([r for r in report.results if r.size > 0]),
+        }
+
+        if args.json:
+            print(json.dumps(result, indent=2))
+            return 0
+
+        print("=" * 60)
+        print(" CrapCleaner System Health & Storage Report")
+        print("=" * 60)
+        print(
+            f"Privileges:        {'Administrator (Full system access)' if admin else 'Standard User'}"
+        )
+        print(f"Monitored Drives:  {len(drive_stats)} volume(s)")
+        for stat_item in drive_stats:
+            used_sz = format_size(float(stat_item["used"]))
+            total_sz = format_size(float(stat_item["total"]))
+            free_sz = format_size(float(stat_item["free"]))
+            pct_used = stat_item["used_pct"]
+            drive_name = stat_item["drive"]
+            extra = []
+            label = str(stat_item.get("label", ""))
+            filesystem = str(stat_item.get("filesystem", ""))
+            if label:
+                extra.append(label)
+            if filesystem:
+                extra.append(filesystem)
+            suffix = f" [{' · '.join(extra)}]" if extra else ""
+            print(
+                f"  - Drive {drive_name}{suffix}: {used_sz} used / {total_sz} ({pct_used}% full) · Free: {free_sz}"
+            )
+        print("-" * 60)
+        print(f"Total Storage:     {format_size(total_capacity)} (Free: {format_size(total_free)})")
+        print(
+            f"Reclaimable Junk:  {format_size(report.total_size)} across {result['categories_with_junk']} active categories"
+        )
+        print("=" * 60)
+        return 0
 
     if args.benchmark:
-        return _run_benchmark(json_output=args.json)
+        target = os.environ.get("TEMP", os.path.join(get_local_appdata(), "Temp"))
+        if not args.json:
+            print(f"Benchmarking scanner traversal on {target}...")
+        t0 = time.perf_counter()
+        total, count, skipped = compute_dir_size(target, max_files=2000)
+        t1 = time.perf_counter()
+        duration = max(t1 - t0, 0.001)
+
+        files_per_sec = int(count / duration)
+        mb_per_sec = (total / (1024 * 1024)) / duration
+
+        res = {
+            "target": target,
+            "files_scanned": count,
+            "bytes_scanned": total,
+            "duration_seconds": round(duration, 4),
+            "files_per_second": files_per_sec,
+            "throughput_mb_s": round(mb_per_sec, 2),
+        }
+
+        if args.json:
+            print(json.dumps(res, indent=2))
+            return 0
+
+        print("-" * 50)
+        print(f"Files Visited:   {count:,}")
+        print(f"Total Scanned:   {format_size(total)}")
+        print(f"Elapsed Time:    {duration:.3f} s")
+        print(f"Traversal Speed: {files_per_sec:,} files/sec ({mb_per_sec:.2f} MB/s)")
+        print("-" * 50)
+        return 0
 
     if args.list_categories:
         _print_categories(get_all_categories(), json_output=args.json)
@@ -416,6 +797,13 @@ def run(argv: list[str] | None = None) -> int:
         engine = ScanEngine(categories, cache=cache)
         report = engine.run(max_files=settings.get("max_scan_files", 200000))
         cache.save()
+        if args.export:
+            export_report(
+                report, report_type="scan", export_format=args.export, output_path=args.output
+            )
+            if not args.output:
+                print(export_report(report, report_type="scan", export_format=args.export))
+            return 0
         _print_scan(report, json_output=args.json)
         return 0
 
@@ -423,13 +811,39 @@ def run(argv: list[str] | None = None) -> int:
         threshold = parse_size(args.large_files)
         root = args.root or settings.get("large_file_default_root") or get_user_profile()
         files = scan_large_files(root, threshold)
-        _print_large_files(files, json_output=args.json)
+        if args.json:
+            print(json.dumps([f.to_dict() for f in files], indent=2))
+        else:
+            print(f"{'Size':>10}  {'Modified':<16} {'Type':<16} Path")
+            print("-" * 90)
+            for item in files[:200]:
+                print(
+                    f"{format_size(item.size):>10}  {item.last_modified:%Y-%m-%d %H:%M}  "
+                    f"{item.file_type:<16} {item.path}"
+                )
+            print(f"Found {len(files)} files.")
         return 0
 
     if args.duplicates:
         min_size = parse_size(args.min_dup_size)
         groups = find_duplicates(args.duplicates, min_size)
-        _print_duplicates(groups, json_output=args.json)
+        if args.json:
+            print(json.dumps([g.to_dict() for g in groups], indent=2))
+        else:
+            total_reclaimable = sum(g.reclaimable for g in groups)
+            print(f"{'Size':>10} {'Copies':>8} {'Wasted Space':>14} File Path")
+            print("-" * 90)
+            for g in groups[:100]:
+                print(
+                    f"{format_size(g.size):>10} {len(g.files):>8} {format_size(g.reclaimable):>14} "
+                    f"{g.files[0]}"
+                )
+                for copy_path in g.files[1:]:
+                    print(f"{'':>34} -> {copy_path}")
+            print("-" * 90)
+            print(
+                f"Found {len(groups)} duplicate group(s) with {format_size(total_reclaimable)} reclaimable space."
+            )
         return 0
 
     if args.prune_docker:

@@ -69,6 +69,13 @@ class CleanupCategory:
     errors: list[str] = field(default_factory=list)
     application: str | None = None
 
+    # 1.0.3 Transparency and explanation fields
+    what_it_contains: str = ""
+    why_it_grows: str = ""
+    why_safe_to_delete: str = ""
+    regeneration_behavior: str = ""
+    reversible: bool = True
+
     @property
     def selected_by_default(self) -> bool:
         if self.auto_selected is not None:

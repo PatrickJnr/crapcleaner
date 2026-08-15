@@ -5,7 +5,7 @@ import os
 import threading
 from typing import Any
 
-from crapcleaner.constants import CONFIG_DIR_NAME, CONFIG_FILE, DEFAULT_CONFIG
+from crapcleaner.constants import CONFIG_DIR_NAME, CONFIG_FILE, CONFIG_VERSION, DEFAULT_CONFIG
 from crapcleaner.utils.platform import get_appdata
 
 _lock = threading.Lock()
@@ -22,18 +22,46 @@ def config_path() -> str:
     return os.path.join(config_dir(), CONFIG_FILE)
 
 
+def _migrate_v0(data: dict[str, Any]) -> dict[str, Any]:
+    """Pre-versioned configs: drop unknown keys and normalise the theme name."""
+    migrated = {key: value for key, value in data.items() if key in DEFAULT_CONFIG}
+    if not isinstance(migrated.get("theme"), str):
+        migrated["theme"] = DEFAULT_CONFIG["theme"]
+    return migrated
+
+
+_MIGRATIONS = {0: _migrate_v0}
+
+
+def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
+    version = data.get("config_version")
+    if not isinstance(version, int) or version < 0:
+        version = 0
+    while version < CONFIG_VERSION:
+        migration = _MIGRATIONS.get(version)
+        if migration is not None:
+            data = migration(data)
+        version += 1
+    data["config_version"] = CONFIG_VERSION
+    return data
+
+
 def load_settings() -> dict[str, Any]:
     path = config_path()
     settings = dict(DEFAULT_CONFIG)
     try:
         with open(path, encoding="utf-8") as fh:
             loaded = json.load(fh)
-        if isinstance(loaded, dict):
-            for key, value in loaded.items():
-                if key in DEFAULT_CONFIG:
-                    settings[key] = value
     except (OSError, ValueError):
-        pass
+        return settings
+
+    if not isinstance(loaded, dict):
+        return settings
+
+    loaded = migrate_settings(loaded)
+    for key, value in loaded.items():
+        if key in DEFAULT_CONFIG and isinstance(value, type(DEFAULT_CONFIG[key])):
+            settings[key] = value
     return settings
 
 
@@ -42,8 +70,11 @@ def save_settings(settings: dict[str, Any]) -> None:
         os.makedirs(config_dir(), exist_ok=True)
         path = config_path()
         temp = path + ".tmp"
-        merged = dict(DEFAULT_CONFIG)
+        # Merge onto what is already stored so partial saves (e.g. the settings
+        # form) never reset untouched keys such as window_geometry.
+        merged = load_settings()
         merged.update(settings)
+        merged["config_version"] = CONFIG_VERSION
         with open(temp, "w", encoding="utf-8") as fh:
             json.dump(merged, fh, indent=2, sort_keys=True)
         os.replace(temp, path)

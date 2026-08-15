@@ -1,6 +1,7 @@
-"""Tests for Speccy-style System Specs inspector, About view, and avatar rendering."""
+"""Tests for System Specs inspector, About view, and avatar rendering."""
 
 import json
+import time
 
 from crapcleaner.cli import run
 from crapcleaner.specs.hardware import (
@@ -148,6 +149,11 @@ def test_gui_about_and_specs_views():
     dummy = DummyMain()
     specs_view = SpecsView(dummy)
     specs_view.refresh_specs()
+    # refresh_specs() runs on a QThread; pump the event loop until it lands.
+    deadline = time.monotonic() + 60
+    while specs_view._specs is None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.05)
     assert specs_view._specs is not None
 
     about_view = AboutView(dummy)

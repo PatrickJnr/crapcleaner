@@ -2,7 +2,7 @@
 
 APP_NAME = "CrapCleaner"
 APP_DISPLAY_NAME = "CrapCleaner [CCleaner]"
-VERSION = "1.0.0"
+VERSION = "1.0.3"
 COMPANY_NAME = "CrapCleaner"
 APP_URL = ""
 
@@ -11,7 +11,10 @@ CONFIG_FILE = "config.json"
 HISTORY_FILE = "history.jsonl"
 LOG_FILE = "crapcleaner.log"
 
+CONFIG_VERSION = 1
+
 DEFAULT_CONFIG = {
+    "config_version": CONFIG_VERSION,
     "theme": "dark",
     "scan_roots": [],
     "scan_all_drives": True,
@@ -25,5 +28,9 @@ DEFAULT_CONFIG = {
     "recent_categories": [],
     "large_file_default_root": "",
     "disabled_categories": [],
+    "excluded_paths": [],
+    "auto_rescan_after_cleanup": True,
+    "show_command_preview": True,
+    "reduce_motion": False,
     "window_geometry": "",
 }

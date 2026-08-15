@@ -1,4 +1,4 @@
-"""Hardware and Operating System specifications inspector (Speccy-style).
+"""Hardware and Operating System specifications inspector.
 
 Collects detailed hardware and system metrics including CPU, RAM, GPU, Motherboard,
 Storage drives, Network adapters, and OS build info.
@@ -325,9 +325,127 @@ def _get_memory_specs() -> MemorySpec:
     return MemorySpec()
 
 
+def _get_windows_gpu_registry() -> list[dict]:
+    """Read full 64-bit GPU VRAM and driver details from Windows Registry to bypass 32-bit WMI caps."""
+    gpus_reg = []
+    guid_key = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+    try:
+        import struct
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, guid_key) as k:
+            num_subkeys = winreg.QueryInfoKey(k)[0]
+            for i in range(num_subkeys):
+                sub_name = winreg.EnumKey(k, i)
+                if not sub_name.isdigit():
+                    continue
+                try:
+                    with winreg.OpenKey(k, sub_name) as sub:
+                        try:
+                            desc, _ = winreg.QueryValueEx(sub, "DriverDesc")
+                            desc = str(desc).strip()
+                        except OSError:
+                            continue
+
+                        vram = 0
+                        # 1. 64-bit QWORD VRAM
+                        for qword_name in (
+                            "HardwareInformation.qwMemorySize",
+                            "qwMemorySize",
+                        ):
+                            try:
+                                v, _ = winreg.QueryValueEx(sub, qword_name)
+                                if isinstance(v, int) and v > 0:
+                                    vram = v
+                                    break
+                                elif isinstance(v, bytes) and len(v) >= 8:
+                                    vram = struct.unpack("<Q", v[:8])[0]
+                                    if vram > 0:
+                                        break
+                            except OSError:
+                                pass
+
+                        # 2. 32-bit DWORD fallback if QWORD is not present
+                        if not vram:
+                            for dword_name in (
+                                "HardwareInformation.MemorySize",
+                                "MemorySize",
+                            ):
+                                try:
+                                    v, _ = winreg.QueryValueEx(sub, dword_name)
+                                    if isinstance(v, int) and v > 0:
+                                        vram = v
+                                        break
+                                    elif isinstance(v, bytes) and len(v) >= 4:
+                                        vram = struct.unpack("<I", v[:4])[0]
+                                        if vram > 0:
+                                            break
+                                except OSError:
+                                    pass
+
+                        drv = ""
+                        try:
+                            drv_val, _ = winreg.QueryValueEx(sub, "DriverVersion")
+                            drv = str(drv_val).strip()
+                        except OSError:
+                            pass
+
+                        gpus_reg.append(
+                            {
+                                "name": desc,
+                                "driver_version": drv,
+                                "vram": vram,
+                            }
+                        )
+                except OSError:
+                    continue
+    except Exception:
+        pass
+    return gpus_reg
+
+
+def _get_nvidia_smi_vram() -> dict[str, int]:
+    """Query nvidia-smi if available to get exact VRAM in bytes."""
+    vram_map = {}
+    smi = which("nvidia-smi")
+    if not smi and os.name == "nt":
+        for cand in [
+            os.path.expandvars(r"%ProgramFiles%\NVIDIA Corporation\NVSMI\nvidia-smi.exe"),
+            os.path.expandvars(r"%SystemRoot%\System32\nvidia-smi.exe"),
+        ]:
+            if os.path.exists(cand):
+                smi = cand
+                break
+    if smi:
+        try:
+            out = subprocess.run(
+                [smi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=4,
+            )
+            if out.returncode == 0:
+                for line in out.stdout.splitlines():
+                    if "," in line:
+                        g_name, mem_mb = line.split(",", 1)
+                        try:
+                            vram_map[g_name.strip().lower()] = (
+                                int(float(mem_mb.strip())) * 1024 * 1024
+                            )
+                        except ValueError:
+                            pass
+        except Exception:
+            pass
+    return vram_map
+
+
 def _get_gpu_specs() -> list[GpuSpec]:
     gpus: list[GpuSpec] = []
     if os.name == "nt":
+        reg_gpus = _get_windows_gpu_registry()
+        smi_vram = _get_nvidia_smi_vram()
+
+        wmi_gpus = []
         cmd = [
             "powershell",
             "-NoProfile",
@@ -344,17 +462,75 @@ def _get_gpu_specs() -> list[GpuSpec]:
                     drv = item.get("DriverVersion") or ""
                     ram = int(item.get("AdapterRAM") or 0)
                     mode = item.get("VideoModeDescription") or ""
-                    gpus.append(
-                        GpuSpec(
-                            name=name,
-                            driver_version=drv,
-                            adapter_ram_bytes=ram,
-                            resolution=mode,
-                        )
+                    wmi_gpus.append(
+                        {
+                            "name": name,
+                            "driver_version": drv,
+                            "adapter_ram_bytes": ram,
+                            "resolution": mode,
+                        }
                     )
         except Exception:
             pass
+
+        # Match WMI and Registry GPUs to obtain true 64-bit VRAM
+        matched_reg_indices = set()
+        for wmi in wmi_gpus:
+            w_name = wmi["name"]
+            w_lower = w_name.lower()
+            drv = wmi["driver_version"]
+            ram = wmi["adapter_ram_bytes"]
+            mode = wmi["resolution"]
+
+            # Try matching with registry for 64-bit qwMemorySize
+            best_vram = ram
+            for idx, reg in enumerate(reg_gpus):
+                r_lower = reg["name"].lower()
+                if r_lower in w_lower or w_lower in r_lower:
+                    matched_reg_indices.add(idx)
+                    if reg["vram"] > best_vram or (best_vram >= 4293918720 and reg["vram"] > 0):
+                        best_vram = reg["vram"]
+                    if not drv and reg["driver_version"]:
+                        drv = reg["driver_version"]
+                    break
+
+            # Try matching with nvidia-smi
+            for smi_name, smi_bytes in smi_vram.items():
+                if smi_name in w_lower or w_lower in smi_name:
+                    if smi_bytes > best_vram or (best_vram >= 4293918720 and smi_bytes > 0):
+                        best_vram = smi_bytes
+                    break
+
+            gpus.append(
+                GpuSpec(
+                    name=w_name,
+                    driver_version=drv,
+                    adapter_ram_bytes=best_vram,
+                    resolution=mode,
+                )
+            )
+
+        # Add any registry GPUs that weren't detected via WMI
+        for idx, reg in enumerate(reg_gpus):
+            if idx not in matched_reg_indices:
+                r_name = reg["name"]
+                r_lower = r_name.lower()
+                best_vram = reg["vram"]
+                for smi_name, smi_bytes in smi_vram.items():
+                    if smi_name in r_lower or r_lower in smi_name:
+                        if smi_bytes > best_vram:
+                            best_vram = smi_bytes
+                        break
+                gpus.append(
+                    GpuSpec(
+                        name=r_name,
+                        driver_version=reg["driver_version"],
+                        adapter_ram_bytes=best_vram,
+                    )
+                )
+
     elif is_linux():
+        smi_vram = _get_nvidia_smi_vram()
         lspci = which("lspci")
         if lspci:
             try:
@@ -364,7 +540,12 @@ def _get_gpu_specs() -> list[GpuSpec]:
                         lowered = line.lower()
                         if "vga compatible controller" in lowered or "3d controller" in lowered:
                             name = line.split(": ", 1)[1].strip() if ": " in line else line.strip()
-                            gpus.append(GpuSpec(name=name))
+                            vram = 0
+                            for smi_name, smi_bytes in smi_vram.items():
+                                if smi_name in name.lower() or name.lower() in smi_name:
+                                    vram = smi_bytes
+                                    break
+                            gpus.append(GpuSpec(name=name, adapter_ram_bytes=vram))
             except Exception:
                 pass
         if not gpus:
@@ -376,13 +557,35 @@ def _get_gpu_specs() -> list[GpuSpec]:
                     device_path = os.path.join(drm_cards, entry, "device")
                     vendor = _read_text(os.path.join(device_path, "vendor"))
                     device = _read_text(os.path.join(device_path, "device"))
+                    vram_file = os.path.join(device_path, "mem_info_vram_total")
+                    vram = 0
+                    if os.path.exists(vram_file):
+                        try:
+                            vram = int(_read_text(vram_file).strip())
+                        except ValueError:
+                            pass
                     if vendor or device:
-                        gpus.append(GpuSpec(name=f"GPU {entry} ({vendor} {device})".strip()))
+                        gpus.append(
+                            GpuSpec(
+                                name=f"GPU {entry} ({vendor} {device})".strip(),
+                                adapter_ram_bytes=vram,
+                            )
+                        )
             except OSError:
                 pass
 
     if not gpus:
         gpus.append(GpuSpec(name="Standard Display Adapter"))
+
+    def _gpu_sort_priority(g: GpuSpec) -> int:
+        low = g.name.lower()
+        if any(k in low for k in ["rtx", "gtx", "geforce", "nvidia", "radeon", "rx ", "arc "]):
+            return 0
+        if any(v in low for v in ["virtual", "basic", "remote", "citrix", "spacedesk"]):
+            return 2
+        return 1
+
+    gpus.sort(key=_gpu_sort_priority)
     return gpus
 
 
@@ -468,20 +671,42 @@ def _get_motherboard_specs() -> MotherboardSpec:
 
 def _get_network_specs() -> list[NetworkSpec]:
     adapters: list[NetworkSpec] = []
-    hostname = socket.gethostname()
-    try:
-        ip = socket.gethostbyname(hostname)
-    except Exception:
-        ip = "127.0.0.1"
+    if os.name == "nt":
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike '*Loopback*' -and $_.IPAddress -notlike '169.254*' } | Select-Object InterfaceAlias, IPAddress | ConvertTo-Json -Compress",
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                raw = json.loads(res.stdout.strip())
+                items = [raw] if isinstance(raw, dict) else raw
+                for it in items:
+                    name = it.get("InterfaceAlias") or "Network Adapter"
+                    ip = it.get("IPAddress") or ""
+                    if ip and not ip.startswith("127."):
+                        adapters.append(
+                            NetworkSpec(adapter_name=name, ip_address=ip, status="Connected")
+                        )
+        except Exception:
+            pass
 
-    adapters.append(
-        NetworkSpec(
-            adapter_name="Primary Network Interface",
-            ip_address=ip,
-            mac_address="",
-            status="Connected",
+    if not adapters:
+        hostname = socket.gethostname()
+        try:
+            ip = socket.gethostbyname(hostname)
+        except Exception:
+            ip = "127.0.0.1"
+        adapters.append(
+            NetworkSpec(
+                adapter_name="Primary Network Interface",
+                ip_address=ip,
+                mac_address="",
+                status="Connected",
+            )
         )
-    )
     return adapters
 
 
@@ -499,13 +724,13 @@ def get_system_specs() -> SystemSpecs:
 
 
 def print_specs_summary(specs: SystemSpecs, json_output: bool = False) -> None:
-    """Print a clean Speccy-style formatted summary to the console."""
+    """Print a clean formatted summary to the console."""
     if json_output:
         print(specs.to_json())
         return
 
     print("=" * 65)
-    print(" CrapCleaner System Hardware & OS Specifications (Speccy)")
+    print(" CrapCleaner System Hardware & OS Specifications")
     print("=" * 65)
     print(f"Operating System:  {specs.os.name} {specs.os.architecture}")
     print(f"                   {specs.os.build_number} (Uptime: {specs.os.uptime})")
