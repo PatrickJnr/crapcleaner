@@ -132,7 +132,9 @@ def test_linux_pseudo_subtrees_are_skipped(monkeypatch, tmp_path):
 
     monkeypatch.setattr(analyzer_mod, "is_linux", lambda: True)
     monkeypatch.setattr(
-        analyzer_mod, "_should_skip_linux_subtree", lambda path: path.endswith("/proc")
+        analyzer_mod,
+        "_should_skip_linux_subtree",
+        lambda path: os.path.basename(os.path.normpath(path)) == "proc",
     )
 
     (tmp_path / "real").mkdir()
