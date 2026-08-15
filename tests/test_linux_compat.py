@@ -99,3 +99,35 @@ def test_linux_memory_specs(mock_linux):
 def test_linux_motherboard_specs(mock_linux):
     spec = _get_motherboard_specs()
     assert isinstance(spec.manufacturer, str)
+
+
+def test_get_mount_metadata():
+    from crapcleaner.utils.platform import get_mount_metadata
+
+    data = get_mount_metadata()
+    assert isinstance(data, dict)
+
+
+def test_dedupe_linux_mounts(tmp_path):
+    from crapcleaner.utils.platform import _dedupe_linux_mounts
+
+    mounts = [str(tmp_path)]
+    metadata = {str(tmp_path): {"source": "/dev/sda1", "filesystem": "ext4"}}
+    res = _dedupe_linux_mounts(mounts, metadata)
+    assert len(res) == 1
+
+
+def test_linux_trash_helpers(tmp_path):
+    from crapcleaner.utils.files import _empty_linux_trash, _trash_put
+
+    f = tmp_path / "sample.txt"
+    f.write_text("hello")
+    assert _trash_put(str(f)) is True
+    assert not f.exists()
+
+    with patch("crapcleaner.utils.files.get_user_profile", return_value=str(tmp_path)):
+        trash_dir = tmp_path / ".local" / "share" / "Trash" / "files"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        (trash_dir / "old.txt").write_text("trash")
+        assert _empty_linux_trash() is True
+        assert not (trash_dir / "old.txt").exists()

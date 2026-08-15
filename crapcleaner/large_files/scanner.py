@@ -102,6 +102,7 @@ def scan_large_files(
 ) -> list[LargeFile]:
     if not root or not os.path.isdir(root):
         return []
+    heap: list[tuple[int, int, LargeFile]] = []
     results: list[LargeFile] = []
     visited = 0
 
@@ -138,15 +139,15 @@ def scan_large_files(
             )
             if max_results is None or max_results <= 0:
                 results.append(item)
-            elif len(results) < max_results:
-                heapq.heappush(results, (item.size, len(results), item))
-            elif item.size > results[0][0]:
-                heapq.heapreplace(results, (item.size, visited, item))
+            elif len(heap) < max_results:
+                heapq.heappush(heap, (item.size, len(heap), item))
+            elif item.size > heap[0][0]:
+                heapq.heapreplace(heap, (item.size, visited, item))
         if progress_cb is not None and visited % 2000 == 0:
             progress_cb(visited)
 
     if max_results is not None and max_results > 0:
-        results = [item for _size, _idx, item in sorted(results, reverse=True)]
+        results = [item for _size, _idx, item in sorted(heap, reverse=True)]
     else:
         results.sort(key=lambda item: item.size, reverse=True)
     return results

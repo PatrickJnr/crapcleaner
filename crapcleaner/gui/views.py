@@ -595,8 +595,10 @@ class DashboardView(QWidget):
             card.set_selected(d == drive)
         try:
             info = get_drive_info(drive)
-            total = info["total"]
-            self._used_fraction = info["used"] / total if total else 0.0
+            total = int(info.get("total", 0))
+            used = int(info.get("used", 0))
+            free = int(info.get("free", 0))
+            self._used_fraction = used / total if total else 0.0
             self.donut.set_usage(self._used_fraction, self._theme)
             label = str(info.get("label", ""))
             fs_name = str(info.get("filesystem", ""))
@@ -610,7 +612,7 @@ class DashboardView(QWidget):
             )
             self.drive_detail.setText(
                 f"<b>{drive}</b><br>"
-                f"Used: {format_size(info['used'])} · Free: {format_size(info['free'])} · Total: {format_size(info['total'])}"
+                f"Used: {format_size(used)} · Free: {format_size(free)} · Total: {format_size(total)}"
                 f"{extra_line}"
             )
         except OSError:
