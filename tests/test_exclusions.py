@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+
 from crapcleaner.safety.protected_paths import (
     is_path_excluded,
     validate_cleanup_path,

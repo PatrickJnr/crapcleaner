@@ -22,9 +22,9 @@ def test_zero_registry_cleaners_in_categories():
         id_lower = cat.id.lower()
 
         for term in forbidden_terms:
-            assert (
-                term not in name_lower
-            ), f"Forbidden term '{term}' found in category name: {cat.name}"
+            assert term not in name_lower, (
+                f"Forbidden term '{term}' found in category name: {cat.name}"
+            )
             assert term not in id_lower, f"Forbidden term '{term}' found in category id: {cat.id}"
             # Ensure description doesn't promise registry cleaning
             if "registry" in desc_lower:
@@ -40,12 +40,13 @@ def test_no_registry_writing_modules():
     """Verify that winreg is never imported for write/delete operations in cleaners."""
     import importlib
     import pkgutil
+
     import crapcleaner.cleaners
 
     for _, modname, _ in pkgutil.iter_modules(crapcleaner.cleaners.__path__):
         mod = importlib.import_module(f"crapcleaner.cleaners.{modname}")
         # Cleaners should never have winreg write functions
         for attr in ["DeleteKey", "DeleteValue", "SetValue", "SetValueEx"]:
-            assert not hasattr(
-                mod, attr
-            ), f"Cleaner module {modname} contains forbidden winreg attribute: {attr}"
+            assert not hasattr(mod, attr), (
+                f"Cleaner module {modname} contains forbidden winreg attribute: {attr}"
+            )

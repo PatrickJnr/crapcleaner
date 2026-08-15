@@ -1,8 +1,10 @@
 """Tests for HelpSafetyView and StorageBreakdownView instantiation and diagnostics."""
 
 from unittest.mock import MagicMock
-from crapcleaner.gui.views import HelpSafetyView, StorageBreakdownView
+
 from PySide6.QtWidgets import QApplication
+
+from crapcleaner.gui.views import HelpSafetyView, StorageBreakdownView
 
 # Ensure QApplication exists for GUI widget tests
 _app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])

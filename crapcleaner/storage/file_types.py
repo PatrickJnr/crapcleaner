@@ -37,7 +37,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".webm": "Videos",
     ".m4v": "Videos",
     ".3gp": "Videos",
-    ".ts": "Videos",
     ".mpg": "Videos",
     ".mpeg": "Videos",
     # Audio

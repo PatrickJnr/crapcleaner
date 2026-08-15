@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import time
 import urllib.error
 import urllib.request
@@ -37,7 +36,7 @@ def _load_cached_contributors() -> tuple[list[ContributorInfo], float]:
     if not cache_path.exists():
         return [], 0.0
     try:
-        with open(cache_path, "r", encoding="utf-8") as f:
+        with open(cache_path, encoding="utf-8") as f:
             data = json.load(f)
             ts = data.get("timestamp", 0.0)
             items = [

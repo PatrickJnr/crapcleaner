@@ -39,11 +39,8 @@ from crapcleaner.gui.workers import (
     DockerPruneWorker,
     DockerWorker,
     DuplicatesWorker,
-    HealthWorker,
     LargeFilesWorker,
     ScanWorker,
-    SpecsWorker,
-    StorageAnalysisWorker,
 )
 from crapcleaner.history.store import append as history_append
 from crapcleaner.models.history import HistoryEntry

@@ -12,7 +12,6 @@ from crapcleaner.utils.platform import (
     get_local_appdata,
     get_program_data,
     get_program_files_x86,
-    get_user_profile,
 )
 
 
@@ -20,7 +19,6 @@ def get_categories() -> list[CleanupCategory]:
     local = get_local_appdata()
     program_data = get_program_data()
     prog_x86 = get_program_files_x86()
-    user = get_user_profile()
 
     categories: list[CleanupCategory] = []
 

@@ -4,7 +4,6 @@ Strictly targets package caches, compiler outputs, and index artifacts without e
 touching source code, Git repositories, or user assets.
 """
 
-import glob
 import os
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel

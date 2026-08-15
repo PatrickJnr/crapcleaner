@@ -14,16 +14,15 @@ from crapcleaner.cleaners.cleaner import clean_categories
 from crapcleaner.cleaners.preview import generate_cleanup_preview
 from crapcleaner.cleaners.recycle_bin import empty_trash, get_recycle_bin_info
 from crapcleaner.config.settings import load_settings
-from crapcleaner.duplicates.finder import DuplicateGroup, find_duplicates
+from crapcleaner.duplicates.finder import find_duplicates
 from crapcleaner.large_files.installers import scan_installers
-from crapcleaner.large_files.scanner import LargeFile, scan_large_files
+from crapcleaner.large_files.scanner import scan_large_files
 from crapcleaner.models.category import CleanupCategory, SafetyLevel
 from crapcleaner.models.report import CleanupReport, ScanReport
 from crapcleaner.registry import find_categories, get_all_categories
 from crapcleaner.reports.exporter import export_report
 from crapcleaner.safety.protected_paths import (
     get_protected_rules_summary,
-    validate_cleanup_path,
 )
 from crapcleaner.scanner.scanner import ScanEngine
 from crapcleaner.scanner.size import compute_dir_size

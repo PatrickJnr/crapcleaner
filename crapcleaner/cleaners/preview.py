@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from crapcleaner.models.category import CacheTarget, CleanupCategory
+from crapcleaner.models.category import CleanupCategory
 from crapcleaner.safety.protected_paths import validate_cleanup_path
 
 

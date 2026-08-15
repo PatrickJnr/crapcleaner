@@ -1,10 +1,8 @@
 """Unit tests for the centralized protected paths safety layer."""
 
-import os
 from unittest.mock import patch
 
 from crapcleaner.safety.protected_paths import (
-    explain_protection,
     get_protected_rules_summary,
     get_protected_system_roots,
     is_path_protected,

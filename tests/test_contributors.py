@@ -3,12 +3,9 @@
 import json
 import time
 import urllib.error
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from crapcleaner.utils.contributors import (
-    ContributorInfo,
-    _DEFAULT_CACHE_TTL,
     fetch_contributors,
 )
 
