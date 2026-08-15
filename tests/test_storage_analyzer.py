@@ -131,7 +131,9 @@ def test_linux_pseudo_subtrees_are_skipped(monkeypatch, tmp_path):
     from crapcleaner.storage import analyzer as analyzer_mod
 
     monkeypatch.setattr(analyzer_mod, "is_linux", lambda: True)
-    monkeypatch.setattr(analyzer_mod, "_should_skip_linux_subtree", lambda path: path.endswith("/proc"))
+    monkeypatch.setattr(
+        analyzer_mod, "_should_skip_linux_subtree", lambda path: path.endswith("/proc")
+    )
 
     (tmp_path / "real").mkdir()
     (tmp_path / "real" / "data.bin").write_bytes(b"x" * 1024)

@@ -219,11 +219,7 @@ def _freedesktop_trash_put(path: str) -> bool:
     dest = os.path.join(files_dir, candidate)
     info_path = os.path.join(info_dir, f"{candidate}.trashinfo")
     deleted_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    info_text = (
-        "[Trash Info]\n"
-        f"Path={quote(src)}\n"
-        f"DeletionDate={deleted_at}\n"
-    )
+    info_text = f"[Trash Info]\nPath={quote(src)}\nDeletionDate={deleted_at}\n"
 
     try:
         with open(info_path, "w", encoding="utf-8") as fh:

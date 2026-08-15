@@ -3273,7 +3273,11 @@ class SpecsView(QWidget):
 
         drive_copy_lines = ["Storage Drives:"]
         for d in specs.drives:
-            d_name = d.drive.rstrip(":").rstrip("\\") + ":" if is_windows() else linux_drive_display_name(d.drive)
+            d_name = (
+                d.drive.rstrip(":").rstrip("\\") + ":"
+                if is_windows()
+                else linux_drive_display_name(d.drive)
+            )
             drive_copy_lines.append(
                 f"- Drive {d_name} {format_size(d.used_bytes)} / {format_size(d.total_bytes)} ({d.percent_used}% full) | Free: {format_size(d.free_bytes)} [{d.file_system}]"
             )
@@ -3307,7 +3311,11 @@ class SpecsView(QWidget):
             d_row_head = QHBoxLayout()
             fs_info = f" [{d.file_system}]" if d.file_system else ""
             label_info = f" ({d.label})" if d.label else ""
-            d_name = d.drive.rstrip(":").rstrip("\\") + ":" if is_windows() else linux_drive_display_name(d.drive)
+            d_name = (
+                d.drive.rstrip(":").rstrip("\\") + ":"
+                if is_windows()
+                else linux_drive_display_name(d.drive)
+            )
             path_info = "" if is_windows() else f" <span style='font-weight:400'>{d.drive}</span>"
             name_lbl = QLabel(f"<b>Drive {d_name}</b>{path_info}{label_info}{fs_info}")
             name_lbl.setStyleSheet("font-size: 13px; background: transparent; border: none;")
