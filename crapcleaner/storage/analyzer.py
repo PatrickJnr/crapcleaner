@@ -10,6 +10,8 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from crapcleaner.utils.platform import is_linux
+
 _REPARSE_POINT = 0x400
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -62,6 +64,29 @@ def _child_real_path(entry: os.DirEntry, parent_real: str) -> str:
         except OSError:
             return entry.path
     return os.path.join(parent_real, entry.name)
+
+
+def _should_skip_linux_subtree(path: str) -> bool:
+    if not is_linux():
+        return False
+    normalized = os.path.normpath(path)
+    return normalized in {
+        "/proc",
+        "/sys",
+        "/dev",
+        "/run",
+        "/var/lib/docker",
+        "/var/lib/containers",
+    } or normalized.startswith(
+        (
+            "/proc/",
+            "/sys/",
+            "/dev/",
+            "/run/",
+            "/var/lib/docker/",
+            "/var/lib/containers/",
+        )
+    )
 
 
 def analyze_storage_hierarchy(
@@ -122,6 +147,8 @@ def analyze_storage_hierarchy(
                 return node
             try:
                 if child.is_dir(follow_symlinks=False):
+                    if _should_skip_linux_subtree(child.path):
+                        continue
                     subdirs.append(child)
                     node.dir_count += 1
                 elif child.is_file(follow_symlinks=False):

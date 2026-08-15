@@ -4031,8 +4031,12 @@ class StorageBreakdownView(QWidget):
 
         toolbar.addWidget(QLabel("Drive / Path:"))
         self.drive_combo = QComboBox()
-        self.drive_combo.setFixedWidth(120)
+        self.drive_combo.setFixedWidth(180)
         drives = [d.rstrip("\\") if is_windows() else d for d in list_drives()]
+        if not is_windows():
+            home_path = get_user_profile()
+            if home_path and home_path not in drives:
+                drives.append(home_path)
         self.drive_combo.addItems(drives)
         self.drive_combo.currentTextChanged.connect(self._on_drive_changed)
         toolbar.addWidget(self.drive_combo)

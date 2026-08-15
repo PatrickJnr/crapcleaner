@@ -125,3 +125,20 @@ def test_symlinked_directory_is_not_counted_twice(tmp_path):
     node = analyze_storage_hierarchy(str(tmp_path), max_depth=3)
     assert node.size == 4096
     assert node.file_count == 1
+
+
+def test_linux_pseudo_subtrees_are_skipped(monkeypatch, tmp_path):
+    from crapcleaner.storage import analyzer as analyzer_mod
+
+    monkeypatch.setattr(analyzer_mod, "is_linux", lambda: True)
+    monkeypatch.setattr(analyzer_mod, "_should_skip_linux_subtree", lambda path: path.endswith("/proc"))
+
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "data.bin").write_bytes(b"x" * 1024)
+    (tmp_path / "proc").mkdir()
+    (tmp_path / "proc" / "fake.bin").write_bytes(b"y" * 2048)
+
+    node = analyzer_mod.analyze_storage_hierarchy(str(tmp_path), max_depth=3)
+    assert node is not None
+    assert {child.name for child in node.children} == {"real"}
+    assert node.size == 1024
