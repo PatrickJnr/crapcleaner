@@ -7,6 +7,8 @@ import stat
 import subprocess
 from collections.abc import Iterable
 from ctypes import wintypes
+from datetime import datetime
+from urllib.parse import quote
 
 from crapcleaner.utils.platform import get_user_profile, is_linux, which
 
@@ -179,14 +181,62 @@ def _trash_put(path: str) -> bool:
     trash_put = which("gio")
     if trash_put:
         result = subprocess.run([trash_put, "trash", path], capture_output=True, text=True)
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
     trash_cli = which("trash-put")
     if trash_cli:
         result = subprocess.run([trash_cli, path], capture_output=True, text=True)
-        return result.returncode == 0
-    return (
-        remove_tree(path) if os.path.isdir(path) and not os.path.islink(path) else remove_file(path)
+        if result.returncode == 0:
+            return True
+    return _freedesktop_trash_put(path)
+
+
+def _freedesktop_trash_put(path: str) -> bool:
+    src = os.path.abspath(path)
+    if not os.path.exists(src):
+        return True
+
+    user = get_user_profile()
+    trash_root = os.path.join(user, ".local", "share", "Trash")
+    files_dir = os.path.join(trash_root, "files")
+    info_dir = os.path.join(trash_root, "info")
+    try:
+        os.makedirs(files_dir, exist_ok=True)
+        os.makedirs(info_dir, exist_ok=True)
+    except OSError:
+        return False
+
+    base_name = os.path.basename(src.rstrip(os.sep)) or "item"
+    candidate = base_name
+    stem, ext = os.path.splitext(base_name)
+    counter = 1
+    while os.path.exists(os.path.join(files_dir, candidate)) or os.path.exists(
+        os.path.join(info_dir, f"{candidate}.trashinfo")
+    ):
+        candidate = f"{stem}.{counter}{ext}" if stem else f"{base_name}.{counter}"
+        counter += 1
+
+    dest = os.path.join(files_dir, candidate)
+    info_path = os.path.join(info_dir, f"{candidate}.trashinfo")
+    deleted_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    info_text = (
+        "[Trash Info]\n"
+        f"Path={quote(src)}\n"
+        f"DeletionDate={deleted_at}\n"
     )
+
+    try:
+        with open(info_path, "w", encoding="utf-8") as fh:
+            fh.write(info_text)
+        shutil.move(src, dest)
+        return True
+    except OSError:
+        try:
+            if os.path.exists(info_path):
+                os.remove(info_path)
+        except OSError:
+            pass
+        return False
 
 
 def _empty_linux_trash() -> bool:

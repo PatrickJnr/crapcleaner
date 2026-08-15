@@ -1,5 +1,6 @@
 """Tests for Linux compatibility, categories, and platform fallbacks."""
 
+import os
 from unittest.mock import patch
 
 from crapcleaner.apps.cleanup import get_categories as get_apps_categories
@@ -115,6 +116,40 @@ def test_dedupe_linux_mounts(tmp_path):
     metadata = {str(tmp_path): {"source": "/dev/sda1", "filesystem": "ext4"}}
     res = _dedupe_linux_mounts(mounts, metadata)
     assert len(res) == 1
+
+
+def test_dedupe_linux_mounts_drops_duplicate_aliases(tmp_path):
+    from crapcleaner.utils.platform import _dedupe_linux_mounts
+
+    alias = tmp_path / "alias"
+    os.symlink(tmp_path, alias)
+    mounts = [str(tmp_path), str(alias)]
+    metadata = {
+        str(tmp_path): {"source": "/dev/nvme0n1p2", "filesystem": "btrfs"},
+        str(alias): {"source": "/dev/nvme0n1p2", "filesystem": "btrfs"},
+    }
+    res = _dedupe_linux_mounts(mounts, metadata)
+    assert res == [str(tmp_path)]
+
+
+def test_visible_linux_mount_filters_proc_and_run():
+    from crapcleaner.utils.platform import _is_visible_linux_mount
+
+    assert _is_visible_linux_mount("/", "ext4") is True
+    assert _is_visible_linux_mount("/proc", "proc") is False
+    assert _is_visible_linux_mount("/proc/sysrq-trigger", "proc") is False
+    assert _is_visible_linux_mount("/run/user/1000", "tmpfs") is False
+
+
+def test_visible_linux_mount_is_strict_about_user_storage_paths():
+    from crapcleaner.utils.platform import _is_visible_linux_mount
+
+    assert _is_visible_linux_mount("/home", "ext4") is True
+    assert _is_visible_linux_mount("/mnt/data", "ext4") is True
+    assert _is_visible_linux_mount("/media/will/Drive", "ext4") is True
+    assert _is_visible_linux_mount("/tmp", "ext4") is False
+    assert _is_visible_linux_mount("/var", "ext4") is False
+    assert _is_visible_linux_mount("/usr", "ext4") is False
 
 
 def test_linux_trash_helpers(tmp_path):

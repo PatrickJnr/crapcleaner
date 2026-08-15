@@ -3,6 +3,7 @@
 import ctypes
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +37,8 @@ def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
         "free": free,
         "label": mount_meta.get("source", ""),
         "filesystem": mount_meta.get("filesystem", ""),
+        "display_name": linux_drive_display_name(target),
+        "display_kind": linux_drive_display_kind(target),
     }
 
 
@@ -84,15 +87,40 @@ def _is_visible_linux_mount(mount_point: str, fs_type: str) -> bool:
         "configfs",
         "selinuxfs",
         "binfmt_misc",
+        "ramfs",
     }:
         return False
-    if mount_point.startswith("/run/"):
+    if mount_point in {"/proc", "/sys", "/dev", "/run", "/boot", "/boot/efi"}:
+        return False
+    if mount_point.startswith(("/proc/", "/sys/", "/dev/", "/run/")):
+        return False
+    if mount_point.startswith("/var/lib/docker/") or mount_point.startswith("/var/lib/containers/"):
         return False
     if mount_point.startswith("/home/") and "/.git" in mount_point:
         return False
     if mount_point.startswith("/home/") and "/CrapCleaner/" in mount_point:
         return False
-    return True
+
+    if mount_point == "/":
+        return True
+
+    allowed_prefixes = (
+        "/home",
+        "/mnt",
+        "/media",
+        "/srv",
+        "/var/home",
+    )
+    if mount_point.startswith(allowed_prefixes):
+        return True
+
+    source = ""
+    try:
+        source = os.path.realpath(mount_point)
+    except OSError:
+        source = mount_point
+
+    return source.startswith(allowed_prefixes)
 
 
 def _linux_mount_sort_key(mount_point: str) -> tuple[int, int, str]:
@@ -102,27 +130,68 @@ def _linux_mount_sort_key(mount_point: str) -> tuple[int, int, str]:
 
 def _dedupe_linux_mounts(mounts: list[str], metadata: dict[str, dict[str, str]]) -> list[str]:
     deduped: list[str] = []
-    seen_signatures: set[tuple[str, str, int, int, int]] = set()
+    seen_devices: set[tuple[int, int]] = set()
 
     for mount_point in sorted(mounts, key=_linux_mount_sort_key):
-        info = metadata.get(mount_point, {})
-        source = info.get("source", "")
-        fs_type = info.get("filesystem", "")
         try:
-            usage = shutil.disk_usage(mount_point)
+            st = os.stat(mount_point)
         except OSError:
             deduped.append(mount_point)
             continue
 
-        signature = (source, fs_type, usage.total, usage.used, usage.free)
-        if source and signature in seen_signatures:
+        if not stat.S_ISDIR(st.st_mode):
+            continue
+
+        identity = (st.st_dev, st.st_ino)
+        if identity in seen_devices:
             continue
 
         deduped.append(mount_point)
-        if source:
-            seen_signatures.add(signature)
+        seen_devices.add(identity)
 
     return deduped
+
+
+def linux_drive_display_name(mount_point: str) -> str:
+    if is_windows():
+        return mount_point
+    normalized = mount_point.rstrip("/") or "/"
+    if normalized == "/":
+        return "System Root (/ )".replace(" /", "/")
+    if normalized == "/home":
+        return "Home"
+    if normalized.startswith("/mnt/"):
+        tail = normalized[len("/mnt/") :].strip("/")
+        return f"Mounted Volume ({tail})" if tail else "Mounted Volume"
+    if normalized.startswith("/media/"):
+        tail = normalized[len("/media/") :].strip("/")
+        if "/" in tail:
+            tail = tail.split("/")[-1]
+        return f"External Drive ({tail})" if tail else "External Drive"
+    if normalized.startswith("/srv/"):
+        tail = normalized[len("/srv/") :].strip("/")
+        return f"Service Storage ({tail})" if tail else "Service Storage"
+    if normalized.startswith("/var/home/"):
+        tail = normalized[len("/var/home/") :].strip("/")
+        return f"Home Volume ({tail})" if tail else "Home Volume"
+    return normalized
+
+
+def linux_drive_display_kind(mount_point: str) -> str:
+    if is_windows():
+        return "LOCAL"
+    normalized = mount_point.rstrip("/") or "/"
+    if normalized == "/":
+        return "SYSTEM"
+    if normalized in {"/home", "/var/home"} or normalized.startswith(("/home/", "/var/home/")):
+        return "HOME"
+    if normalized.startswith("/media/"):
+        return "EXTERNAL"
+    if normalized.startswith("/mnt/"):
+        return "MOUNTED"
+    if normalized.startswith("/srv/"):
+        return "SERVICE"
+    return "LOCAL"
 
 
 def list_drives() -> list[str]:

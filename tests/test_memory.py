@@ -79,6 +79,22 @@ def test_gpu_detection_without_nvidia_smi(monkeypatch):
     assert get_gpu_memory() == []
 
 
+def test_nvidia_total_capacity_is_preserved_when_live_counters_are_missing(monkeypatch):
+    monkeypatch.setattr(
+        report_mod,
+        "_run_smi",
+        lambda args: ["NVIDIA GeForce RTX 3080, 555.12, 10240, N/A, N/A"],
+    )
+    gpus = report_mod._nvidia_gpu_memory()
+    assert len(gpus) == 1
+    assert gpus[0].total_bytes == 10240 * 1024 * 1024
+    assert gpus[0].live_usage_available is False
+
+
+def test_vram_consumers_are_suppressed_in_default_report():
+    assert report_mod.get_vram_consumers() == []
+
+
 def test_memory_report_is_json_serialisable(monkeypatch):
     monkeypatch.setattr(report_mod, "get_gpu_memory", lambda: [])
     monkeypatch.setattr(report_mod, "get_vram_consumers", list)

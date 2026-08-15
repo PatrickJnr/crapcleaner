@@ -79,6 +79,8 @@ from crapcleaner.utils.platform import (
     get_user_profile,
     is_admin,
     is_windows,
+    linux_drive_display_kind,
+    linux_drive_display_name,
     list_drives,
 )
 
@@ -327,7 +329,8 @@ class DriveCard(QFrame):
         lay.setSpacing(6)
 
         top_row = QHBoxLayout()
-        self.title = QLabel(f"Drive {drive}" if is_windows() else drive)
+        display_name = f"Drive {drive}" if is_windows() else linux_drive_display_name(drive)
+        self.title = QLabel(display_name)
         font = self.title.font()
         font.setPointSize(13)
         font.setBold(True)
@@ -337,12 +340,8 @@ class DriveCard(QFrame):
 
         self.type_badge = QLabel(
             "SYSTEM"
-            if (
-                drive.upper().startswith("C")
-                if is_windows()
-                else drive in ("/", "/boot", "/boot/efi")
-            )
-            else "LOCAL"
+            if (drive.upper().startswith("C") if is_windows() else False)
+            else (linux_drive_display_kind(drive) if not is_windows() else "LOCAL")
         )
         self.type_badge.setProperty("badge", "true")
         self.type_badge.setStyleSheet("font-size: 9px; padding: 1px 5px;")
@@ -635,8 +634,10 @@ class DashboardView(QWidget):
             extra_line = (
                 f"<br><span style='font-size:11px'>{' · '.join(extra)}</span>" if extra else ""
             )
+            drive_name = drive if is_windows() else linux_drive_display_name(drive)
+            path_line = "" if is_windows() else f"<br><span style='font-size:11px'>{drive}</span>"
             self.drive_detail.setText(
-                f"<b>{drive}</b><br>"
+                f"<b>{drive_name}</b>{path_line}<br>"
                 f"Used: {format_size(used)} · Free: {format_size(free)} · Total: {format_size(total)}"
                 f"{extra_line}"
             )
@@ -3272,7 +3273,7 @@ class SpecsView(QWidget):
 
         drive_copy_lines = ["Storage Drives:"]
         for d in specs.drives:
-            d_name = d.drive.rstrip(":").rstrip("\\") + ":"
+            d_name = d.drive.rstrip(":").rstrip("\\") + ":" if is_windows() else linux_drive_display_name(d.drive)
             drive_copy_lines.append(
                 f"- Drive {d_name} {format_size(d.used_bytes)} / {format_size(d.total_bytes)} ({d.percent_used}% full) | Free: {format_size(d.free_bytes)} [{d.file_system}]"
             )
@@ -3291,9 +3292,12 @@ class SpecsView(QWidget):
         # Build a drive-letter -> media type lookup from pre-fetched health data
         health_lookup: dict[str, str] = {}
         for dh in health_data or []:
-            key = dh.device_id.upper().rstrip("\\")
-            if not key.endswith(":"):
-                key = key + ":"
+            if is_windows():
+                key = dh.device_id.upper().rstrip("\\")
+                if not key.endswith(":"):
+                    key = key + ":"
+            else:
+                key = dh.device_id.rstrip("/").upper() or "/"
             health_lookup[key] = f"{dh.media_type} · {dh.bus_type}"
 
         drive_search_lines = ["Storage Drives SSD NVMe"]
@@ -3303,16 +3307,23 @@ class SpecsView(QWidget):
             d_row_head = QHBoxLayout()
             fs_info = f" [{d.file_system}]" if d.file_system else ""
             label_info = f" ({d.label})" if d.label else ""
-            d_name = d.drive.rstrip(":").rstrip("\\") + ":"
-            name_lbl = QLabel(f"<b>Drive {d_name}</b>{label_info}{fs_info}")
+            d_name = d.drive.rstrip(":").rstrip("\\") + ":" if is_windows() else linux_drive_display_name(d.drive)
+            path_info = "" if is_windows() else f" <span style='font-weight:400'>{d.drive}</span>"
+            name_lbl = QLabel(f"<b>Drive {d_name}</b>{path_info}{label_info}{fs_info}")
             name_lbl.setStyleSheet("font-size: 13px; background: transparent; border: none;")
             used_str = format_size(d.used_bytes)
             tot_str = format_size(d.total_bytes)
             free_str = format_size(d.free_bytes)
 
             # Disk type on the right of the header row
-            drive_key = (d_name if d_name.endswith(":") else d_name + ":").upper()
+            drive_key = (
+                (d_name if d_name.endswith(":") else d_name + ":").upper()
+                if is_windows()
+                else (d.drive.rstrip("/").upper() or "/")
+            )
             disk_type_str = health_lookup.get(drive_key, "")
+            if not disk_type_str and not is_windows():
+                disk_type_str = linux_drive_display_kind(d.drive).title()
 
             d_row_head.addWidget(name_lbl)
             d_row_head.addStretch(1)

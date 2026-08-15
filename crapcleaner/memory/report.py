@@ -3,6 +3,7 @@
 import os
 import subprocess
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from crapcleaner.utils.platform import is_linux, is_windows, which
 
@@ -40,7 +41,7 @@ class MemoryStats:
             return "moderate"
         return "low"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["cached_known"] = self.cached_known
         data["pressure"] = self.pressure
@@ -73,7 +74,7 @@ class GpuMemoryStats:
             return 0.0
         return round(self.used_bytes / self.total_bytes * 100, 1)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["live_usage_available"] = self.live_usage_available
         data["percent_used"] = self.percent_used
@@ -86,7 +87,7 @@ class VramConsumer:
     name: str = ""
     used_bytes: int = 0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -96,7 +97,7 @@ class MemoryReport:
     gpus: list[GpuMemoryStats] = field(default_factory=list)
     vram_consumers: list[VramConsumer] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "ram": self.ram.to_dict(),
             "gpus": [g.to_dict() for g in self.gpus],
@@ -275,9 +276,18 @@ def _nvidia_gpu_memory() -> list[GpuMemoryStats]:
         if len(parts) < 5:
             continue
         try:
-            total, used, free = (int(float(parts[i])) * mib for i in (2, 3, 4))
+            total = int(float(parts[2])) * mib
         except ValueError:
             continue
+
+        used = _UNKNOWN
+        free = _UNKNOWN
+        try:
+            used = int(float(parts[3])) * mib
+            free = int(float(parts[4])) * mib
+        except ValueError:
+            pass
+
         gpus.append(
             GpuMemoryStats(
                 name=parts[0],
@@ -378,26 +388,14 @@ def get_gpu_memory() -> list[GpuMemoryStats]:
 
 
 def get_vram_consumers() -> list[VramConsumer]:
-    """Processes holding GPU memory, where the driver reports them (NVIDIA only)."""
-    consumers = []
-    for line in _run_smi(
-        ["--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
-    ):
-        parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 3:
-            continue
-        try:
-            consumers.append(
-                VramConsumer(
-                    pid=int(parts[0]),
-                    name=os.path.basename(parts[1]),
-                    used_bytes=int(float(parts[2])) * 1024 * 1024,
-                )
-            )
-        except ValueError:
-            continue
-    consumers.sort(key=lambda c: c.used_bytes, reverse=True)
-    return consumers
+    """Processes holding GPU memory, where the driver reports them.
+
+    Disabled in the default report because NVIDIA's exposed process lists are often
+    incomplete or noisy on desktop Linux (for example, graphics contexts may not
+    appear in the compute-apps query, while other interfaces surface low-signal
+    helper processes). The GUI and CLI now focus on adapter-level VRAM figures.
+    """
+    return []
 
 
 def get_memory_report(include_gpu: bool = True) -> MemoryReport:
