@@ -2,11 +2,10 @@
 
 from unittest.mock import MagicMock
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from crapcleaner.models.category import CleanupCategory, SafetyLevel
 from crapcleaner.gui.views import CleanupView
+from crapcleaner.models.category import CleanupCategory, SafetyLevel
 
 _app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
 

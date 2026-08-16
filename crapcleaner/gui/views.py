@@ -1400,7 +1400,9 @@ class CleanupView(QWidget):
         if delta > 0:
             headline = f"Since the last scan: reclaimable space increased by {format_size(delta)}."
         elif delta < 0:
-            headline = f"Since the last scan: reclaimable space decreased by {format_size(abs(delta))}."
+            headline = (
+                f"Since the last scan: reclaimable space decreased by {format_size(abs(delta))}."
+            )
         else:
             headline = "Since the last scan: total reclaimable space is unchanged."
         if changes:
