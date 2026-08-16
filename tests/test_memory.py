@@ -112,13 +112,40 @@ def test_report_dataclass_defaults():
 
 def test_actions_are_platform_gated():
     actions = {a.id: a for a in available_actions()}
-    assert set(actions) == {"working_set", "standby_list", "fs_cache", "vram_report"}
+    assert set(actions) == {
+        "flush_all",
+        "process_working_sets",
+        "working_set",
+        "standby_list",
+        "fs_cache",
+        "vram_report",
+    }
     assert actions["standby_list"].supported is cleaner_mod.is_windows()
     assert actions["fs_cache"].supported is cleaner_mod.is_linux()
     for action in actions.values():
         if not action.supported:
             assert action.unsupported_reason
     assert actions["working_set"].requires_admin is False
+    assert actions["process_working_sets"].requires_admin is False
+    assert actions["flush_all"].requires_admin is False
+
+
+def test_process_working_sets_action(monkeypatch):
+    monkeypatch.setattr(
+        cleaner_mod,
+        "_trim_process_working_sets",
+        lambda: (True, "Flushed working sets for 10 processes."),
+    )
+    result = run_action("process_working_sets")
+    assert result.success is True
+    assert "Flushed working sets" in result.message
+
+
+def test_flush_all_action(monkeypatch):
+    monkeypatch.setattr(cleaner_mod, "_flush_all", lambda: (True, "Memory flush completed."))
+    result = run_action("flush_all")
+    assert result.success is True
+    assert "Memory flush completed" in result.message
 
 
 def test_unknown_action_is_reported():

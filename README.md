@@ -61,7 +61,8 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 
 ## Features
 
-### 1. Storage Dashboard & Hierarchical Breakdown
+### 1. Storage Dashboard & Live System Vitals
+- **Live System Telemetry Dashboard**: real-time network throughput (download/upload rates, session transfer totals, and active connection adapter), RAM load with dynamic high-memory pressure alerts and one-click Memory Cleaner access, real-time multi-core CPU utilization, GPU temperature monitoring & VRAM consumption (NVIDIA NVML & Linux DRM), and live system uptime with fluid exponential moving average (EMA) smoothing and cubic eased animations.
 - Real-time disk capacity and reclaimable space calculation across all mounted drives.
 - Storage Breakdown: proportional storage grid where each cell's area maps to its size, so the largest consumers stand out immediately. Drill into folders, navigate with the keyboard (arrows, Enter, Backspace), and hover for full paths; junction, symlink, and loop protection is preserved throughout.
 - Drive health, media type, and TRIM diagnostics are cached briefly and shared across views, so switching views does not re-run the underlying platform query.
@@ -79,7 +80,9 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - Platform-native Recycle Bin inspection (Windows `SHQueryRecycleBinW` & Linux FreeDesktop Trash).
 - View recoverable space, total items, and oldest/newest item timestamps.
 
-### 4. Storage Device Health & TRIM Diagnostics
+### 4. Hardware Specifications & Storage Health
+- Detailed PC Specs inspector detailing OS, CPU, Motherboard/BIOS, RAM slots, GPU, Network interfaces, and NVMe/SATA storage drives.
+- **Hardware Specs Skeleton Loading**: Renders smooth, animated pulsing placeholder cards during async hardware and sensor queries.
 - Physical drive detection (NVMe SSD, SATA SSD, HDD), bus type, filesystem, and capacity.
 - TRIM support and enablement diagnostics (`fsutil` / `Get-PhysicalDisk` / `lsblk`).
 
@@ -103,11 +106,14 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - Export storage breakdown, scan results, disk health diagnostics, and audit history to structured JSON, CSV, or TXT.
 
 ### 11. Memory Cleaner
+- Overhauled view featuring a prominent top Hero usage gauge, dynamic memory pressure badges, and 2-column hardware vitals (Physical RAM 4-metric grid, Swap & GPU VRAM).
 - Live RAM report: total, in use, available, utilization percentage, cached/standby memory, committed memory against the commit limit, coarse memory pressure, and swap / pagefile usage. Counters a platform does not expose are shown as *unknown*, never as zero.
-- Graphics memory report per adapter: capacity, and live VRAM usage where the driver exposes it (NVIDIA via `nvidia-smi`, AMD on Linux via `amdgpu` sysfs). Adapters without a reliable counter are shown as *unknown*, never as zero.
-- Separate, individually explained reclamation actions - each states the exact system call it performs and reports before/after memory plus the amount reclaimed:
+- Graphics memory report per adapter: capacity, and live VRAM usage where the driver exposes it (NVIDIA via `nvidia-smi` and NVML, AMD on Linux via `amdgpu` sysfs). Adapters without a reliable counter are shown as *unknown*, never as zero.
+- Multi-tier, explained reclamation actions:
+  - **Quick Flush Memory** - fast one-click memory optimizer combining multi-pass process working set trimming, application heap release, and (if elevated) standby cache purge.
+  - **Flush process working sets** - trims unused physical memory pages across active processes (`EmptyWorkingSet` and `SetProcessWorkingSetSize`), reclaiming 1–3+ GB of available physical RAM without closing any applications and without requiring administrator privileges.
   - **Release CrapCleaner's own memory** - trims only this application's working set (Windows) or heap (Linux `malloc_trim`).
-  - **Purge the Windows standby list** - discards cached file data (administrator required).
+  - **Purge the Windows standby list** - executes a 5-stage kernel sweep purging modified page lists (`MemoryFlushModifiedList`), system working sets (`MemoryEmptyWorkingSets`), standby priority levels 0–7 (`MemoryPurgeStandbyList`), low-priority standby (`MemoryPurgeLowPriorityStandbyList`), and Windows system file cache (`SetSystemFileCacheSize`) (administrator required, with 1-click elevation button).
   - **Drop the Linux filesystem cache** - `sync` + `drop_caches`, filesystem cache only (root required).
   - **Inspect graphics memory** - read-only VRAM report covering adapter capacity and, where the driver exposes a reliable counter, live usage.
 - Windows and Linux already manage memory automatically; this is optional maintenance, not an optimization. No process is ever terminated, no process priority is changed, no other application's memory is touched, and no GPU is reset. CrapCleaner does not claim that freeing RAM or VRAM improves FPS or system speed.
@@ -115,11 +121,12 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - **Windows privileges**: purging the standby list needs `SeProfileSingleProcessPrivilege`, which an elevated CrapCleaner normally holds. If Windows refuses it, the exact reason is reported (privilege missing from the token, token access failure, or lookup failure) rather than a generic "run as administrator".
 - CrapCleaner contains **no registry cleaning, registry optimization, or registry defragmentation** - neither here nor anywhere else in the application.
 
-### 12. Themes
-- Ten built-in themes: **Dark** (default), **Light**, **OLED Black**, **Midnight Blue**, **Slate**, **Forest**, **Graphite**, **Arctic Light**, **Solarized Dark**, and **High Contrast**.
+### 12. Visual Theme Gallery & Themes (41 Palettes)
+- **41 built-in curated themes** across 6 distinct categories: *Modern Dark* (Dark, OLED Black, Midnight Blue, Slate, Graphite, High Contrast), *Light & Pastel* (Light, Arctic Light, Bubblegum Pop, Parchment), *Retro & Vintage* (Windows 95, Commodore 64, Game Boy, Amber CRT, Matrix Terminal, Vault 1950s, Analog VHS, Pulp '70s), *Cyber & Synth* (Cyberpunk Neon, Synthwave Outrun, Vaporwave '90s, Solar Eclipse), *Code Palettes* (Dracula, Monokai Pro, Tokyo Night, Nord, Gruvbox, One Dark Pro, Catppuccin Mocha, Solarized Dark), and *Warm & Nature* (Forest, Matcha Tea, Sunset Orange, Desert Dune, Espresso Roast, Coffee, Sakura Blossom, Lavender Dream, Crimson Velvet, Ocean Deep, Facility Orange).
+- **Interactive Theme Gallery**: Real-time 5-color swatch bars, active hero card, search filtering, category chips, "Surprise Me" randomizer, and default reset.
 - **OLED Black** uses true black (`#000000`) backgrounds with near-black panels so OLED panels can switch pixels off, while keeping text, borders, and disabled states readable.
 - Themes apply instantly and cross-fade smoothly; a *Reduce motion* preference disables the transition.
-- All colours come from the central palette definitions in `crapcleaner.gui.theme`, so new themes need no per-widget changes.
+- Pure Google Material Icons integrated with dynamic theme color adaptation (zero unicode emojis).
 
 ### 13. Linux Storage Handling
 - Mount points are shown with descriptive names (*System Root (/)*, *Home*, *Mounted Volume*, *External Drive*) alongside their real paths.
@@ -127,10 +134,11 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - Storage scans skip `/proc`, `/sys`, `/dev`, `/run`, and container storage roots.
 - Deletions fall back to a FreeDesktop-compliant `~/.local/share/Trash` implementation when `gio` and `trash-put` are unavailable, so choosing the Recycle Bin never silently means permanent deletion.
 
-### 14. Settings Persistence
+### 14. Preferences & Configuration
+- Segmented sub-tabbed settings view for *Appearance & Themes*, *Safety & Protection*, *Exclusions & Roots*, *Scan Performance*, *Category Rules*, and *Backup & Sync*.
 - Preferences, theme, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
 - The config file is versioned, so future releases can migrate older files; unknown, malformed, or wrongly typed entries fall back to defaults instead of preventing startup.
-- Settings are local only. No credentials or secrets are ever written to configuration.
+- Full JSON export, import, and factory reset support for settings migration.
 
 ---
 

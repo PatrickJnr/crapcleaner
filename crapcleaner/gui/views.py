@@ -6,7 +6,17 @@ import os
 import shutil
 import subprocess
 
-from PySide6.QtCore import QEvent, QRectF, Qt, Signal
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -26,7 +36,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
-    QGroupBox,
+    QGraphicsOpacityEffect,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -57,14 +68,17 @@ from crapcleaner.gui.dialogs import (
     DuplicateFilesDialog,
     ReportDialog,
 )
-from crapcleaner.gui.theme import THEMES, theme_label
+from crapcleaner.gui.icons import icon as material_icon
+from crapcleaner.gui.theme import THEMES
 from crapcleaner.gui.theme import color as theme_color
+from crapcleaner.gui.theme_picker import ThemeGalleryWidget
 from crapcleaner.history import clear as clear_history
 from crapcleaner.history import load as load_history
 from crapcleaner.models.category import SafetyLevel
 from crapcleaner.models.report import ScanReport
 from crapcleaner.registry import get_all_categories
 from crapcleaner.reports import export_report
+from crapcleaner.system.live_metrics import sample_live_metrics
 from crapcleaner.system.memory_actions import available_actions as available_memory_actions
 from crapcleaner.system.memory_actions import get_action as get_memory_action
 from crapcleaner.utils.contributors import fetch_avatar_file, fetch_contributors
@@ -75,6 +89,7 @@ from crapcleaner.utils.format import (
     parse_size,
 )
 from crapcleaner.utils.platform import (
+    elevate,
     get_drive_info,
     get_user_profile,
     is_admin,
@@ -108,7 +123,7 @@ class _SizeSortedItem(QTreeWidgetItem):
     _SIZE_ROLE = Qt.ItemDataRole.UserRole + 1
 
     def set_sort_size(self, size: int):
-        self.setData(3, self._SIZE_ROLE, int(size))
+        self.setData(3, self._SIZE_ROLE, size)
 
     def __lt__(self, other):
         column = self.treeWidget().sortColumn() if self.treeWidget() else 0
@@ -176,6 +191,38 @@ def stat_card(
     lay.addWidget(v_lbl)
     lay.addWidget(s_lbl)
     return card, v_lbl, s_lbl
+
+
+class SkeletonBlock(QFrame):
+    """A rounded placeholder block simulating text or UI elements during async data fetching."""
+
+    def __init__(
+        self,
+        width: int | None = None,
+        height: int = 14,
+        radius: int = 4,
+        theme: str = "dark",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setFixedHeight(height)
+        if width:
+            self.setFixedWidth(width)
+        else:
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._radius = radius
+        self._theme = theme
+        self.apply_theme(theme)
+
+    def apply_theme(self, theme: str):
+        self._theme = theme
+        is_dark = theme not in ("light", "soft_light", "warm_paper", "cream")
+        color = "255, 255, 255" if is_dark else "0, 0, 0"
+        self.setStyleSheet(
+            f"background-color: rgba({color}, 0.08); "
+            f"border-radius: {self._radius}px; "
+            f"border: 1px solid rgba({color}, 0.04);"
+        )
 
 
 class NumericItem(QTableWidgetItem):
@@ -475,16 +522,21 @@ class DashboardView(QWidget):
         buttons.setSpacing(10)
         self.scan_button = QPushButton("Scan for Crap")
         self.scan_button.setProperty("primary", "true")
+        self.scan_button.setIcon(material_icon("search", "#ffffff"))
+        self.scan_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scan_button.setFixedHeight(34)
         self.scan_button.clicked.connect(self._main.start_scan)
 
         self.cancel_button = QPushButton("Cancel Scan")
+        self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_button.setFixedHeight(34)
         self.cancel_button.hide()
         self.cancel_button.clicked.connect(self._cancel_scan)
 
         self.review_button = QPushButton("Review && Clean")
         self.review_button.setProperty("danger", "true")
+        self.review_button.setIcon(material_icon("clean", "#ffffff"))
+        self.review_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.review_button.setFixedHeight(34)
         self.review_button.setEnabled(False)
         self.review_button.setToolTip("Go to Cleanup with safe categories pre-selected.")
@@ -525,6 +577,172 @@ class DashboardView(QWidget):
         content.addWidget(donut_card, 0, Qt.AlignmentFlag.AlignTop)
 
         layout.addLayout(content)
+
+        # Live System Vitals Row (RAM, CPU, GPU & Thermals, Network)
+        layout.addWidget(section_label("Live System Vitals"))
+        vitals_row = QHBoxLayout()
+        vitals_row.setSpacing(12)
+
+        # 1. RAM Vitals Card
+        self.ram_card = QFrame()
+        self.ram_card.setProperty("card", "true")
+        self.ram_card.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ram_card.setToolTip("Click to open Memory Cleaner")
+        self.ram_card.mousePressEvent = lambda _: (
+            self._main.navigate("memory") if hasattr(self._main, "navigate") else None
+        )
+        rc_lay = QVBoxLayout(self.ram_card)
+        rc_lay.setContentsMargins(14, 12, 14, 12)
+        rc_lay.setSpacing(6)
+
+        rc_top = QHBoxLayout()
+        rc_title = QLabel("Memory (RAM)")
+        rc_title.setProperty("subtle", "true")
+        rc_top.addWidget(rc_title)
+        rc_top.addStretch(1)
+        self.ram_badge = badge("NORMAL", "safe")
+        rc_top.addWidget(self.ram_badge)
+        rc_lay.addLayout(rc_top)
+
+        self.ram_val = QLabel("-- / --")
+        self.ram_val.setStyleSheet(
+            f"font-size: 15px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
+        rc_lay.addWidget(self.ram_val)
+
+        self.ram_bar = QProgressBar()
+        self.ram_bar.setRange(0, 100)
+        self.ram_bar.setValue(0)
+        self.ram_bar.setTextVisible(False)
+        self.ram_bar.setFixedHeight(5)
+        self.ram_bar.setProperty("thin", "true")
+        self.ram_bar.setProperty("good", "true")
+        rc_lay.addWidget(self.ram_bar)
+
+        self.ram_sub = QLabel("Click to open Memory Cleaner ->")
+        self.ram_sub.setProperty("subtle", "true")
+        self.ram_sub.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
+        rc_lay.addWidget(self.ram_sub)
+        vitals_row.addWidget(self.ram_card, 1)
+
+        # 2. CPU Vitals Card
+        self.cpu_card = QFrame()
+        self.cpu_card.setProperty("card", "true")
+        cpu_lay = QVBoxLayout(self.cpu_card)
+        cpu_lay.setContentsMargins(14, 12, 14, 12)
+        cpu_lay.setSpacing(6)
+
+        cpu_top = QHBoxLayout()
+        cpu_title = QLabel("Processor (CPU)")
+        cpu_title.setProperty("subtle", "true")
+        cpu_top.addWidget(cpu_title)
+        cpu_top.addStretch(1)
+        self.cpu_badge = badge(f"{os.cpu_count() or 4} Cores", "accent")
+        cpu_top.addWidget(self.cpu_badge)
+        cpu_lay.addLayout(cpu_top)
+
+        self.cpu_val = QLabel("-- % Load")
+        self.cpu_val.setStyleSheet(
+            f"font-size: 15px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
+        cpu_lay.addWidget(self.cpu_val)
+
+        self.cpu_bar = QProgressBar()
+        self.cpu_bar.setRange(0, 100)
+        self.cpu_bar.setValue(0)
+        self.cpu_bar.setTextVisible(False)
+        self.cpu_bar.setFixedHeight(5)
+        self.cpu_bar.setProperty("thin", "true")
+        self.cpu_bar.setProperty("good", "true")
+        cpu_lay.addWidget(self.cpu_bar)
+
+        self.cpu_sub = QLabel("Uptime: -- · AC Power")
+        self.cpu_sub.setProperty("subtle", "true")
+        self.cpu_sub.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
+        cpu_lay.addWidget(self.cpu_sub)
+        vitals_row.addWidget(self.cpu_card, 1)
+
+        # 3. GPU / Graphics & Thermals Card
+        self.gpu_card = QFrame()
+        self.gpu_card.setProperty("card", "true")
+        gpu_lay = QVBoxLayout(self.gpu_card)
+        gpu_lay.setContentsMargins(14, 12, 14, 12)
+        gpu_lay.setSpacing(6)
+
+        gpu_top = QHBoxLayout()
+        gpu_title = QLabel("Graphics (GPU)")
+        gpu_title.setProperty("subtle", "true")
+        gpu_top.addWidget(gpu_title)
+        gpu_top.addStretch(1)
+        self.gpu_badge = badge("OPTIMAL", "safe")
+        gpu_top.addWidget(self.gpu_badge)
+        gpu_lay.addLayout(gpu_top)
+
+        self.gpu_val = QLabel("--")
+        self.gpu_val.setStyleSheet(
+            f"font-size: 15px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
+        gpu_lay.addWidget(self.gpu_val)
+
+        self.gpu_bar = QProgressBar()
+        self.gpu_bar.setRange(0, 100)
+        self.gpu_bar.setValue(0)
+        self.gpu_bar.setTextVisible(False)
+        self.gpu_bar.setFixedHeight(5)
+        self.gpu_bar.setProperty("thin", "true")
+        self.gpu_bar.setProperty("good", "true")
+        gpu_lay.addWidget(self.gpu_bar)
+
+        self.gpu_sub = QLabel("VRAM: -- / --")
+        self.gpu_sub.setProperty("subtle", "true")
+        self.gpu_sub.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
+        gpu_lay.addWidget(self.gpu_sub)
+        vitals_row.addWidget(self.gpu_card, 1)
+
+        # 4. Network Throughput Card
+        self.net_card = QFrame()
+        self.net_card.setProperty("card", "true")
+        net_lay = QVBoxLayout(self.net_card)
+        net_lay.setContentsMargins(14, 12, 14, 12)
+        net_lay.setSpacing(6)
+
+        net_top = QHBoxLayout()
+        net_title = QLabel("Network Activity")
+        net_title.setProperty("subtle", "true")
+        net_top.addWidget(net_title)
+        net_top.addStretch(1)
+        self.net_badge = badge("Connected", "accent")
+        net_top.addWidget(self.net_badge)
+        net_lay.addLayout(net_top)
+
+        net_rates_row = QHBoxLayout()
+        net_rates_row.setSpacing(8)
+
+        self.net_in_label = QLabel("↓ 0 B/s")
+        self.net_in_label.setStyleSheet(
+            f"font-size: 13px; font-weight: 700; color: {_c(self._theme, 'safe')};"
+        )
+        self.net_out_label = QLabel("↑ 0 B/s")
+        self.net_out_label.setStyleSheet(
+            f"font-size: 13px; font-weight: 700; color: {_c(self._theme, 'accent')};"
+        )
+        net_rates_row.addWidget(self.net_in_label)
+        net_rates_row.addWidget(self.net_out_label)
+        net_rates_row.addStretch(1)
+        net_lay.addLayout(net_rates_row)
+
+        self.net_sub = QLabel("Session: 0 B in · 0 B out")
+        self.net_sub.setProperty("subtle", "true")
+        self.net_sub.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
+        net_lay.addWidget(self.net_sub)
+        vitals_row.addWidget(self.net_card, 1)
+
+        layout.addLayout(vitals_row)
+
+        # Setup Vitals Live Polling Timer (1.2s smooth polling)
+        self._vitals_timer = QTimer(self)
+        self._vitals_timer.setInterval(1200)
+        self._vitals_timer.timeout.connect(self._update_live_vitals)
 
         # Middle: 4 Quick Stat Cards
         layout.addWidget(section_label("System Metrics & Categories"))
@@ -576,6 +794,7 @@ class DashboardView(QWidget):
         cards_row.addStretch(1)
         cards_scroll.setWidget(cards_container)
         layout.addWidget(cards_scroll)
+        layout.addStretch(1)
 
         scroll.setWidget(container)
         main_lay = QVBoxLayout(self)
@@ -610,6 +829,7 @@ class DashboardView(QWidget):
         total_rec = sum(e.space_recovered for e in entries if not e.dry_run)
         self.c4_val.setText(format_size(total_rec))
         self.c4_sub.setText(f"{len(entries)} total actions logged")
+        self._update_live_vitals()
 
     def _select_drive(self, drive: str):
         if drive not in self._cards:
@@ -698,12 +918,169 @@ class DashboardView(QWidget):
             self.scan_progress.setFormat(f"Scanning: {name} ({pct}%)")
         self.scan_progress.setVisible(True)
 
+    def _animate_bar(self, bar: QProgressBar, target_val: int, anim_attr: str):
+        existing = getattr(self, anim_attr, None)
+        if existing is not None and existing.state() == QVariantAnimation.State.Running:
+            existing.stop()
+        curr = bar.value()
+        if curr == target_val:
+            return
+        anim = QVariantAnimation(self)
+        anim.setDuration(550)
+        anim.setStartValue(curr)
+        anim.setEndValue(target_val)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.valueChanged.connect(lambda v: bar.setValue(int(v)))
+        setattr(self, anim_attr, anim)
+        anim.start()
+
+    def _update_live_vitals(self):
+        if not self.isVisible():
+            return
+        try:
+            snap = sample_live_metrics()
+            # 1. Update RAM
+            ram_pct = int(snap.ram.percent_used)
+            self.ram_val.setText(f"{snap.ram.used_str} / {snap.ram.total_str} ({ram_pct}%)")
+            self._animate_bar(self.ram_bar, ram_pct, "_ram_anim")
+
+            pressure = snap.ram.pressure
+            if getattr(self, "_last_ram_level", None) != pressure:
+                self._last_ram_level = pressure
+                if pressure == "critical":
+                    self.ram_badge.setText("CRITICAL")
+                    self.ram_badge.setProperty("level", "danger")
+                    self.ram_bar.setProperty("good", "false")
+                    self.ram_bar.setProperty("warn", "false")
+                    self.ram_bar.setProperty("bad", "true")
+                elif pressure == "high":
+                    self.ram_badge.setText("HIGH USAGE")
+                    self.ram_badge.setProperty("level", "warn")
+                    self.ram_bar.setProperty("good", "false")
+                    self.ram_bar.setProperty("warn", "true")
+                    self.ram_bar.setProperty("bad", "false")
+                elif pressure == "moderate":
+                    self.ram_badge.setText("MODERATE")
+                    self.ram_badge.setProperty("level", "review")
+                    self.ram_bar.setProperty("good", "true")
+                    self.ram_bar.setProperty("warn", "false")
+                    self.ram_bar.setProperty("bad", "false")
+                else:
+                    self.ram_badge.setText("NORMAL")
+                    self.ram_badge.setProperty("level", "safe")
+                    self.ram_bar.setProperty("good", "true")
+                    self.ram_bar.setProperty("warn", "false")
+                    self.ram_bar.setProperty("bad", "false")
+                self.ram_badge.style().unpolish(self.ram_badge)
+                self.ram_badge.style().polish(self.ram_badge)
+                self.ram_bar.style().unpolish(self.ram_bar)
+                self.ram_bar.style().polish(self.ram_bar)
+
+            # 2. Update CPU
+            cpu_pct = int(snap.cpu.percent_used)
+            self.cpu_val.setText(f"{snap.cpu.percent_used:.1f}% Load")
+            self._animate_bar(self.cpu_bar, cpu_pct, "_cpu_anim")
+            if snap.uptime_str:
+                self.cpu_sub.setText(f"Uptime: {snap.uptime_str} · {snap.power_str}")
+
+            cpu_level = "bad" if cpu_pct >= 85 else ("warn" if cpu_pct >= 60 else "good")
+            if getattr(self, "_last_cpu_level", None) != cpu_level:
+                self._last_cpu_level = cpu_level
+                self.cpu_bar.setProperty("good", "true" if cpu_level == "good" else "false")
+                self.cpu_bar.setProperty("warn", "true" if cpu_level == "warn" else "false")
+                self.cpu_bar.setProperty("bad", "true" if cpu_level == "bad" else "false")
+                self.cpu_bar.style().unpolish(self.cpu_bar)
+                self.cpu_bar.style().polish(self.cpu_bar)
+
+            # 3. Update GPU & Thermals
+            if snap.gpu.available:
+                self.gpu_val.setText(f"{snap.gpu.name} · {snap.gpu.temp_str}")
+                gpu_load = int(snap.gpu.utilization_pct)
+                self._animate_bar(self.gpu_bar, gpu_load, "_gpu_anim")
+                self.gpu_sub.setText(
+                    f"VRAM: {snap.gpu.vram_fraction_str} ({int(snap.gpu.vram_percent)}%)"
+                )
+
+                t_status = snap.gpu.thermal_status
+                if getattr(self, "_last_gpu_status", None) != t_status:
+                    self._last_gpu_status = t_status
+                    if t_status == "hot":
+                        self.gpu_badge.setText(f"{snap.gpu.temp_str} HOT")
+                        self.gpu_badge.setProperty("level", "danger")
+                        self.gpu_bar.setProperty("good", "false")
+                        self.gpu_bar.setProperty("warn", "false")
+                        self.gpu_bar.setProperty("bad", "true")
+                    elif t_status == "warm":
+                        self.gpu_badge.setText(f"{snap.gpu.temp_str} WARM")
+                        self.gpu_badge.setProperty("level", "warn")
+                        self.gpu_bar.setProperty("good", "false")
+                        self.gpu_bar.setProperty("warn", "true")
+                        self.gpu_bar.setProperty("bad", "false")
+                    else:
+                        self.gpu_badge.setText(f"{snap.gpu.temp_str} {t_status.upper()}")
+                        self.gpu_badge.setProperty("level", "safe")
+                        self.gpu_bar.setProperty("good", "true")
+                        self.gpu_bar.setProperty("warn", "false")
+                        self.gpu_bar.setProperty("bad", "false")
+                    self.gpu_badge.style().unpolish(self.gpu_badge)
+                    self.gpu_badge.style().polish(self.gpu_badge)
+                    self.gpu_bar.style().unpolish(self.gpu_bar)
+                    self.gpu_bar.style().polish(self.gpu_bar)
+            else:
+                self.gpu_val.setText("Display Adapter")
+                self.gpu_badge.setText("READY")
+                self.gpu_sub.setText(f"System: {snap.uptime_str} · {snap.power_str}")
+
+            # 4. Update Network
+            self.net_in_label.setText(f"↓ {snap.network.in_rate_str}")
+            self.net_out_label.setText(f"↑ {snap.network.out_rate_str}")
+            self.net_sub.setText(
+                f"Session: {snap.network.total_in_str} in · {snap.network.total_out_str} out"
+            )
+            if snap.network.interface_name:
+                self.net_badge.setText(snap.network.interface_name[:16])
+        except Exception:
+            pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, "_vitals_timer") and not self._vitals_timer.isActive():
+            self._vitals_timer.start()
+            self._update_live_vitals()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if hasattr(self, "_vitals_timer") and self._vitals_timer.isActive():
+            self._vitals_timer.stop()
+
     def apply_theme(self, theme: str):
         self._theme = theme
         for card in self._cards.values():
             card.apply_theme(theme)
         self.drive_detail.setStyleSheet(f"color: {_c(theme, 'muted')};")
         self.donut.set_usage(self._used_fraction, theme)
+        self.reclaimable_label.setStyleSheet(
+            f"font-size: 32px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
+        self.ram_val.setStyleSheet(
+            f"font-size: 15px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
+        self.cpu_val.setStyleSheet(
+            f"font-size: 15px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
+        self.gpu_val.setStyleSheet(
+            f"font-size: 15px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
+        self.net_in_label.setStyleSheet(
+            f"font-size: 13px; font-weight: 700; color: {_c(theme, 'safe')};"
+        )
+        self.net_out_label.setStyleSheet(
+            f"font-size: 13px; font-weight: 700; color: {_c(theme, 'accent')};"
+        )
+        self.ram_sub.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'muted')};")
+        self.cpu_sub.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'muted')};")
+        self.gpu_sub.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'muted')};")
+        self.net_sub.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'muted')};")
 
 
 class CleanupView(QWidget):
@@ -736,6 +1113,8 @@ class CleanupView(QWidget):
 
         self.scan_button = QPushButton("Scan Now")
         self.scan_button.setProperty("primary", "true")
+        self.scan_button.setIcon(material_icon("search", "#ffffff"))
+        self.scan_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scan_button.clicked.connect(self._main.start_scan)
 
         self.cancel_button = QPushButton("Cancel")
@@ -749,15 +1128,21 @@ class CleanupView(QWidget):
         )
 
         self.safe_button = QPushButton("Select Safe")
+        self.safe_button.setIcon(material_icon("security", _c(self._theme, "text")))
+        self.safe_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.safe_button.clicked.connect(lambda: self._select_by_safety(True))
 
         self.all_button = QPushButton("Select All")
+        self.all_button.setIcon(material_icon("done_all", _c(self._theme, "text")))
+        self.all_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.all_button.clicked.connect(lambda: self._select_all(True))
 
         self.none_button = QPushButton("Deselect All")
+        self.none_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.none_button.clicked.connect(lambda: self._select_all(False))
 
         self.invert_button = QPushButton("Invert")
+        self.invert_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.invert_button.clicked.connect(self._invert_selection)
 
         toolbar.addWidget(self.scan_button)
@@ -847,6 +1232,8 @@ class CleanupView(QWidget):
 
         self.clean_button = QPushButton("Clean Selected")
         self.clean_button.setProperty("danger", "true")
+        self.clean_button.setIcon(material_icon("clean", "#ffffff"))
+        self.clean_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clean_button.setEnabled(False)
         self.clean_button.setFixedHeight(36)
         self.clean_button.setFixedWidth(160)
@@ -1355,6 +1742,8 @@ class LargeFilesView(QWidget):
         self.root_edit = QLineEdit()
         self.root_edit.setText(self._default_root())
         self.browse_button = QPushButton("Browse...")
+        self.browse_button.setIcon(material_icon("folder_open", _c(self._theme, "text")))
+        self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_button.clicked.connect(self._browse)
         f_row.addWidget(self.root_edit, 1)
         f_row.addWidget(self.browse_button)
@@ -1375,6 +1764,7 @@ class LargeFilesView(QWidget):
             if os.path.exists(path):
                 btn = QPushButton(label)
                 btn.setProperty("chip", "true")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.clicked.connect(lambda _=False, p=path: self.root_edit.setText(p))
                 opts_row.addWidget(btn)
 
@@ -1392,9 +1782,12 @@ class LargeFilesView(QWidget):
         opts_row.addStretch(1)
         self.scan_button = QPushButton("Find Large Files")
         self.scan_button.setProperty("primary", "true")
+        self.scan_button.setIcon(material_icon("search", "#ffffff"))
+        self.scan_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scan_button.clicked.connect(self._scan)
 
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_button.hide()
         self.cancel_button.clicked.connect(
             lambda: (
@@ -1419,6 +1812,8 @@ class LargeFilesView(QWidget):
         filter_row.addWidget(self.table_search)
 
         export_btn = QPushButton("Export to CSV")
+        export_btn.setIcon(material_icon("file_download", _c(self._theme, "text")))
+        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         export_btn.clicked.connect(self._export_csv)
         filter_row.addWidget(export_btn)
         layout.addLayout(filter_row)
@@ -1460,6 +1855,8 @@ class LargeFilesView(QWidget):
     def _scan(self):
         self.scan_button.setEnabled(False)
         self.cancel_button.show()
+        self.table.set_empty_text(self._theme, "Scanning directories for large files...")
+        self.status_label.setText("Scanning directories for files exceeding size threshold...")
         self._main.scan_large_files(self.root_edit.text(), self._threshold())
 
     def _open_folder(self, path: str):
@@ -1667,8 +2064,12 @@ class DuplicatesView(QWidget):
         side = QVBoxLayout()
         side.setSpacing(6)
         add_button = QPushButton("Add Folder...")
+        add_button.setIcon(material_icon("add", _c(self._theme, "text")))
+        add_button.setCursor(Qt.CursorShape.PointingHandCursor)
         add_button.clicked.connect(self._add_folder)
         remove_button = QPushButton("Remove Selected")
+        remove_button.setIcon(material_icon("delete", _c(self._theme, "danger")))
+        remove_button.setCursor(Qt.CursorShape.PointingHandCursor)
         remove_button.clicked.connect(self._remove_folder)
         side.addWidget(add_button)
         side.addWidget(remove_button)
@@ -1688,9 +2089,12 @@ class DuplicatesView(QWidget):
 
         self.scan_button = QPushButton("Find Duplicates")
         self.scan_button.setProperty("primary", "true")
+        self.scan_button.setIcon(material_icon("search", "#ffffff"))
+        self.scan_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scan_button.clicked.connect(self._scan)
 
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_button.hide()
         self.cancel_button.clicked.connect(
             lambda: (
@@ -1745,6 +2149,10 @@ class DuplicatesView(QWidget):
             return
         self.scan_button.setEnabled(False)
         self.cancel_button.show()
+        self.table.set_empty_text(
+            self._theme, "Scanning folders and calculating SHA-256 file hashes..."
+        )
+        self.status_label.setText("Scanning folders and calculating SHA-256 file hashes...")
         self._main.scan_duplicates(folders, self.min_size.value() * 1024 * 1024)
 
     def show_groups(self, groups):
@@ -1875,6 +2283,8 @@ class AiDataView(QWidget):
         toolbar.setSpacing(8)
         self.scan_button = QPushButton("Inspect AI Data")
         self.scan_button.setProperty("primary", "true")
+        self.scan_button.setIcon(material_icon("search", "#ffffff"))
+        self.scan_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scan_button.clicked.connect(self._scan)
 
         self.min_size = QSpinBox()
@@ -1916,6 +2326,9 @@ class AiDataView(QWidget):
         layout.addWidget(self.status_label)
 
     def _scan(self):
+        self.table.set_empty_text(
+            self._theme, "Scanning directories for local AI models and checkpoints..."
+        )
         self._main.scan_ai_data(self.min_size.value() * 1024 * 1024)
 
     def _open_row(self, item):
@@ -2014,6 +2427,8 @@ class DockerView(QWidget):
         toolbar = QHBoxLayout()
         self.df_button = QPushButton("Refresh Docker Usage (docker system df)")
         self.df_button.setProperty("primary", "true")
+        self.df_button.setIcon(material_icon("refresh", "#ffffff"))
+        self.df_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.df_button.clicked.connect(self._main.refresh_docker)
         toolbar.addWidget(self.df_button)
         toolbar.addStretch(1)
@@ -2039,6 +2454,8 @@ class DockerView(QWidget):
 
         copy_cmd_btn = QPushButton("Copy WSL Compact Command")
         copy_cmd_btn.setProperty("ghost", "true")
+        copy_cmd_btn.setIcon(material_icon("code", _c(self._theme, "text")))
+        copy_cmd_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_cmd_btn.setToolTip("Copies the command to compact WSL virtual disks")
         copy_cmd_btn.clicked.connect(
             lambda: QApplication.clipboard().setText(
@@ -2065,8 +2482,12 @@ class DockerView(QWidget):
         prune_row = QHBoxLayout()
         prune_row.setSpacing(8)
         self.prune_system_button = QPushButton("docker system prune")
+        self.prune_system_button.setIcon(material_icon("clean", _c(self._theme, "text")))
+        self.prune_system_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.prune_system_button.clicked.connect(lambda: self._prune("docker_system_prune"))
         self.prune_builder_button = QPushButton("docker builder prune")
+        self.prune_builder_button.setIcon(material_icon("clean", _c(self._theme, "text")))
+        self.prune_builder_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.prune_builder_button.clicked.connect(lambda: self._prune("docker_builder_prune"))
         prune_row.addWidget(self.prune_system_button)
         prune_row.addWidget(self.prune_builder_button)
@@ -2154,15 +2575,21 @@ class HistoryView(QWidget):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
         self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setIcon(material_icon("refresh", _c(self._theme, "text")))
+        self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_button.clicked.connect(self.refresh)
         toolbar.addWidget(self.refresh_button)
 
         export_btn = QPushButton("Export Log to JSON")
+        export_btn.setIcon(material_icon("file_download", _c(self._theme, "text")))
+        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         export_btn.clicked.connect(self._export_json)
         toolbar.addWidget(export_btn)
 
         toolbar.addStretch(1)
         self.clear_button = QPushButton("Clear History Log")
+        self.clear_button.setIcon(material_icon("delete_sweep", _c(self._theme, "danger")))
+        self.clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_button.clicked.connect(self._clear)
         toolbar.addWidget(self.clear_button)
         layout.addLayout(toolbar)
@@ -2277,52 +2704,119 @@ class SettingsView(QWidget):
         self._main = main
         self._categories = get_all_categories()
         self._theme = "dark"
+        self._section_buttons: dict[str, QPushButton] = {}
         self._build()
 
     def _build(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 16)
-        root.setSpacing(10)
-        root.addWidget(
-            page_header(
-                "Preferences & Configuration",
-                "Customize theme, safety defaults, scan speed, and enabled category rules.",
-            )
-        )
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 8, 0)
-        layout.setSpacing(12)
+        root.setSpacing(12)
         self.settings = load_settings()
 
-        # Appearance Card
-        group = QGroupBox("Appearance && Theme")
-        g1 = QVBoxLayout(group)
-        theme_row = QHBoxLayout()
-        theme_row.addWidget(QLabel("Interface Theme:"))
-        self.theme_combo = QComboBox()
-        for theme_id in THEMES:
-            self.theme_combo.addItem(theme_label(theme_id), theme_id)
+        # 1. Header with Page Title + Global Action Buttons
+        header_row = QHBoxLayout()
+        header_row.setSpacing(12)
+        header_text = page_header(
+            "Preferences & Configuration",
+            "Customize interface themes, safety protections, scan engine speed, and cleanup rules.",
+        )
+        header_row.addWidget(header_text, 1)
+
+        # Quick Save and Reset Actions in Header
+        actions_box = QHBoxLayout()
+        actions_box.setSpacing(8)
+
+        self.reset_top_btn = QPushButton("Reset Defaults")
+        self.reset_top_btn.setIcon(material_icon("refresh", "#888888"))
+        self.reset_top_btn.setFixedHeight(34)
+        self.reset_top_btn.clicked.connect(self._reset_defaults)
+        actions_box.addWidget(self.reset_top_btn)
+
+        self.save_button = QPushButton("Save Preferences")
+        self.save_button.setProperty("primary", "true")
+        self.save_button.setIcon(material_icon("check", "#ffffff"))
+        self.save_button.setFixedHeight(34)
+        self.save_button.setFixedWidth(160)
+        self.save_button.clicked.connect(self._save)
+        actions_box.addWidget(self.save_button)
+
+        header_row.addLayout(actions_box)
+        root.addLayout(header_row)
+
+        # 2. Horizontal Sub-Navigation Tab Bar (Segmented Tabs)
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(6)
+
+        self._sections = [
+            ("themes", "Appearance & Themes", "palette"),
+            ("safety", "Safety & Protection", "security"),
+            ("exclusions", "Exclusions & Roots", "folder"),
+            ("performance", "Scan Performance", "speed"),
+            ("rules", "Category Rules", "checklist"),
+            ("backup", "Backup & Sync", "backup"),
+        ]
+
+        for idx, (key, label, icon_name) in enumerate(self._sections):
+            btn = QPushButton(label.replace("&", "&&"))
+            btn.setProperty("chip", "true")
+            btn.setProperty("active", "true" if idx == 0 else "false")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setIcon(material_icon(icon_name, "#3b82f6" if idx == 0 else "#888888"))
+            btn.setIconSize(QSize(16, 16))
+            btn.clicked.connect(lambda _, k=key, i=idx: self._set_active_tab(k, i))
+            self._section_buttons[key] = btn
+            nav_row.addWidget(btn)
+
+        nav_row.addStretch(1)
+        root.addLayout(nav_row)
+
+        # 3. Stack of Tab Pages
+        self.tab_stack = QStackedWidget()
+
+        # --- PAGE 0: Appearance & Themes ---
+        page_themes = QWidget()
+        lay_themes = QVBoxLayout(page_themes)
+        lay_themes.setContentsMargins(0, 4, 0, 0)
+        lay_themes.setSpacing(10)
+
         current_theme = self.settings.get("theme", "dark")
-        if current_theme in THEMES:
-            self.theme_combo.setCurrentIndex(THEMES.index(current_theme))
-        self.theme_combo.currentTextChanged.connect(self._preview_theme)
-        theme_row.addWidget(self.theme_combo)
-        theme_row.addStretch(1)
-        g1.addLayout(theme_row)
+        self.theme_gallery = ThemeGalleryWidget(current_theme, page_themes)
+        self.theme_combo = self.theme_gallery.theme_combo
+        self.theme_gallery.theme_changed.connect(self._on_theme_changed)
+        lay_themes.addWidget(self.theme_gallery, 1)
+
+        motion_card = QFrame()
+        motion_card.setProperty("card", "true")
+        motion_lay = QVBoxLayout(motion_card)
+        motion_lay.setContentsMargins(14, 10, 14, 10)
+        motion_lay.setSpacing(4)
+        motion_title = QLabel("Motion & Visual Transitions")
+        motion_title.setProperty("strong", "true")
+        motion_lay.addWidget(motion_title)
         self.reduce_motion_check = QCheckBox("Reduce motion (skip the theme cross-fade)")
         self.reduce_motion_check.setChecked(bool(self.settings.get("reduce_motion", False)))
         self.reduce_motion_check.toggled.connect(self._save_reduce_motion)
-        g1.addWidget(self.reduce_motion_check)
-        layout.addWidget(group)
+        motion_lay.addWidget(self.reduce_motion_check)
+        lay_themes.addWidget(motion_card)
 
-        # Safety Card
-        group2 = QGroupBox("Safety Defaults")
-        g2 = QVBoxLayout(group2)
+        self.tab_stack.addWidget(page_themes)
+
+        # --- PAGE 1: Safety & Protection ---
+        page_safety = QWidget()
+        lay_safety = QVBoxLayout(page_safety)
+        lay_safety.setContentsMargins(0, 4, 0, 0)
+        lay_safety.setSpacing(12)
+
+        safety_card = QFrame()
+        safety_card.setProperty("card", "true")
+        sc_lay = QVBoxLayout(safety_card)
+        sc_lay.setContentsMargins(16, 16, 16, 16)
+        sc_lay.setSpacing(12)
+
+        sc_title = QLabel("System Safety Defaults")
+        sc_title.setProperty("strong", "true")
+        sc_lay.addWidget(sc_title)
+
         self.dry_run_check = QCheckBox(
             "Default cleanups to Dry-Run mode (Simulate and preview first)"
         )
@@ -2343,50 +2837,180 @@ class SettingsView(QWidget):
             "Show command preview before running external operations (Docker / WSL)"
         )
         self.cmd_preview_check.setChecked(bool(self.settings.get("show_command_preview", True)))
-        g2.addWidget(self.dry_run_check)
-        g2.addWidget(self.confirm_check)
-        g2.addWidget(self.recycle_check)
-        g2.addWidget(self.auto_rescan_check)
-        g2.addWidget(self.cmd_preview_check)
-        layout.addWidget(group2)
 
-        # Exclusions Card
-        group_excl = QGroupBox("Cleanup Exclusions (Permanently Excluded Folders)")
-        g_excl = QVBoxLayout(group_excl)
-        excl_sub = QLabel(
-            "Paths listed here are strictly skipped during all scanning and cleanup operations."
+        sc_lay.addWidget(self.dry_run_check)
+        sc_lay.addWidget(self.confirm_check)
+        sc_lay.addWidget(self.recycle_check)
+        sc_lay.addWidget(self.auto_rescan_check)
+        sc_lay.addWidget(self.cmd_preview_check)
+        lay_safety.addWidget(safety_card)
+
+        guide_card = QFrame()
+        guide_card.setProperty("card", "true")
+        g_lay = QVBoxLayout(guide_card)
+        g_lay.setContentsMargins(16, 16, 16, 16)
+        g_lay.setSpacing(10)
+        guide_title = QLabel("Safety Level Architecture")
+        guide_title.setProperty("strong", "true")
+        g_lay.addWidget(guide_title)
+
+        levels_grid = QGridLayout()
+        levels_grid.setSpacing(10)
+
+        badge_safe = QLabel("SAFE")
+        badge_safe.setProperty("badge", "true")
+        badge_safe.setProperty("level", "safe")
+        desc_safe = QLabel(
+            "Standard temporary cache files, crash dumps, and browser histories. Zero risk."
         )
-        excl_sub.setProperty("subtle", "true")
-        excl_sub.setWordWrap(True)
-        g_excl.addWidget(excl_sub)
+        desc_safe.setProperty("subtle", "true")
+
+        badge_low = QLabel("LOW RISK")
+        badge_low.setProperty("badge", "true")
+        badge_low.setProperty("level", "warn")
+        desc_low = QLabel("Package manager caches (pip, npm, cargo), old downloads, thumbnails.")
+        desc_low.setProperty("subtle", "true")
+
+        badge_review = QLabel("REVIEW")
+        badge_review.setProperty("badge", "true")
+        badge_review.setProperty("level", "review")
+        desc_review = QLabel(
+            "AI model checkpoints, Docker image caches, virtualenvs. Review recommended."
+        )
+        desc_review.setProperty("subtle", "true")
+
+        badge_danger = QLabel("DANGEROUS")
+        badge_danger.setProperty("badge", "true")
+        badge_danger.setProperty("level", "danger")
+        desc_danger = QLabel(
+            "System component stores, recovery images, registry caches. Use with caution."
+        )
+        desc_danger.setProperty("subtle", "true")
+
+        levels_grid.addWidget(badge_safe, 0, 0)
+        levels_grid.addWidget(desc_safe, 0, 1)
+        levels_grid.addWidget(badge_low, 1, 0)
+        levels_grid.addWidget(desc_low, 1, 1)
+        levels_grid.addWidget(badge_review, 2, 0)
+        levels_grid.addWidget(desc_review, 2, 1)
+        levels_grid.addWidget(badge_danger, 3, 0)
+        levels_grid.addWidget(desc_danger, 3, 1)
+
+        g_lay.addLayout(levels_grid)
+        lay_safety.addWidget(guide_card)
+        lay_safety.addStretch(1)
+
+        self.tab_stack.addWidget(page_safety)
+
+        # --- PAGE 2: Exclusions & Roots ---
+        page_excl = QWidget()
+        lay_excl = QHBoxLayout(page_excl)
+        lay_excl.setContentsMargins(0, 4, 0, 0)
+        lay_excl.setSpacing(12)
+
+        card_excl = QFrame()
+        card_excl.setProperty("card", "true")
+        ce_lay = QVBoxLayout(card_excl)
+        ce_lay.setContentsMargins(14, 14, 14, 14)
+        ce_lay.setSpacing(8)
+
+        ce_title = QLabel("Cleanup Exclusions")
+        ce_title.setProperty("strong", "true")
+        ce_sub = QLabel("Permanently skip these folders during all scans and cleanups.")
+        ce_sub.setProperty("subtle", "true")
+        ce_sub.setWordWrap(True)
+        ce_lay.addWidget(ce_title)
+        ce_lay.addWidget(ce_sub)
+
         self.exclusions_list = QListWidget()
         for excl_path in self.settings.get("excluded_paths", []):
             self.exclusions_list.addItem(excl_path)
-        g_excl.addWidget(self.exclusions_list)
-        row_excl = QHBoxLayout()
-        add_excl_btn = QPushButton("Add Excluded Folder...")
+        ce_lay.addWidget(self.exclusions_list, 1)
+
+        row_excl_btns = QHBoxLayout()
+        add_excl_btn = QPushButton("Add Folder...")
+        add_excl_btn.setIcon(material_icon("add", "#888888"))
         add_excl_btn.clicked.connect(self._add_exclusion)
         rem_excl_btn = QPushButton("Remove Selected")
+        rem_excl_btn.setIcon(material_icon("delete", "#888888"))
         rem_excl_btn.clicked.connect(self._remove_exclusion)
-        row_excl.addWidget(add_excl_btn)
-        row_excl.addWidget(rem_excl_btn)
-        row_excl.addStretch(1)
-        g_excl.addLayout(row_excl)
-        layout.addWidget(group_excl)
+        row_excl_btns.addWidget(add_excl_btn)
+        row_excl_btns.addWidget(rem_excl_btn)
+        row_excl_btns.addStretch(1)
+        ce_lay.addLayout(row_excl_btns)
+        lay_excl.addWidget(card_excl, 1)
 
-        # Scanning Card
-        group3 = QGroupBox("Scanning Engine Performance")
-        g3 = QVBoxLayout(group3)
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Max Files Scanned per Run:"))
+        card_roots = QFrame()
+        card_roots.setProperty("card", "true")
+        cr_lay = QVBoxLayout(card_roots)
+        cr_lay.setContentsMargins(14, 14, 14, 14)
+        cr_lay.setSpacing(8)
+
+        cr_title = QLabel("Developer Scan Roots")
+        cr_title.setProperty("strong", "true")
+        self.all_drives_check = QCheckBox(
+            "Automatically search all local drives for developer caches"
+        )
+        self.all_drives_check.setChecked(bool(self.settings.get("scan_all_drives", True)))
+        cr_lay.addWidget(cr_title)
+        cr_lay.addWidget(self.all_drives_check)
+
+        self.roots_list = QListWidget()
+        for root_path in self.settings.get("scan_roots", []):
+            self.roots_list.addItem(root_path)
+        cr_lay.addWidget(self.roots_list, 1)
+
+        row_roots_btns = QHBoxLayout()
+        add_root_btn = QPushButton("Add Root Folder...")
+        add_root_btn.setIcon(material_icon("add", "#888888"))
+        add_root_btn.clicked.connect(self._add_root)
+        rem_root_btn = QPushButton("Remove Selected")
+        rem_root_btn.setIcon(material_icon("delete", "#888888"))
+        rem_root_btn.clicked.connect(self._remove_root)
+        row_roots_btns.addWidget(add_root_btn)
+        row_roots_btns.addWidget(rem_root_btn)
+        row_roots_btns.addStretch(1)
+        cr_lay.addLayout(row_roots_btns)
+        lay_excl.addWidget(card_roots, 1)
+
+        self.tab_stack.addWidget(page_excl)
+
+        # --- PAGE 3: Scan Performance ---
+        page_perf = QWidget()
+        lay_perf = QVBoxLayout(page_perf)
+        lay_perf.setContentsMargins(0, 4, 0, 0)
+        lay_perf.setSpacing(12)
+
+        perf_card = QFrame()
+        perf_card.setProperty("card", "true")
+        pc_lay = QVBoxLayout(perf_card)
+        pc_lay.setContentsMargins(16, 16, 16, 16)
+        pc_lay.setSpacing(14)
+
+        pc_title = QLabel("Scanning Engine Performance")
+        pc_title.setProperty("strong", "true")
+        pc_lay.addWidget(pc_title)
+
+        row_files = QHBoxLayout()
+        row_files.addWidget(QLabel("Max Files Scanned per Run:"))
         self.max_files_spin = QSpinBox()
         self.max_files_spin.setRange(5000, 2000000)
         self.max_files_spin.setSingleStep(10000)
         self.max_files_spin.setSuffix(" files")
         self.max_files_spin.setValue(int(self.settings.get("max_scan_files", 200000)))
-        row1.addWidget(self.max_files_spin)
-        row1.addStretch(1)
-        g3.addLayout(row1)
+        row_files.addWidget(self.max_files_spin)
+
+        p_fast = QPushButton("Quick (50k)")
+        p_fast.clicked.connect(lambda: self.max_files_spin.setValue(50000))
+        p_std = QPushButton("Standard (200k)")
+        p_std.clicked.connect(lambda: self.max_files_spin.setValue(200000))
+        p_deep = QPushButton("Deep (1M)")
+        p_deep.clicked.connect(lambda: self.max_files_spin.setValue(1000000))
+        row_files.addWidget(p_fast)
+        row_files.addWidget(p_std)
+        row_files.addWidget(p_deep)
+        row_files.addStretch(1)
+        pc_lay.addLayout(row_files)
 
         row_ttl = QHBoxLayout()
         row_ttl.addWidget(QLabel("Scan Cache TTL (Seconds):"))
@@ -2396,69 +3020,127 @@ class SettingsView(QWidget):
         self.cache_ttl_spin.setValue(int(self.settings.get("scan_cache_ttl", 300)))
         row_ttl.addWidget(self.cache_ttl_spin)
         row_ttl.addStretch(1)
-        g3.addLayout(row_ttl)
-        layout.addWidget(group3)
+        pc_lay.addLayout(row_ttl)
 
-        # Scan Roots
-        group4 = QGroupBox("Developer Roots (Python Junk, __pycache__, Virtualenvs)")
-        g4 = QVBoxLayout(group4)
-        self.all_drives_check = QCheckBox(
-            "Automatically search all local drives for developer caches"
+        ttl_sub = QLabel(
+            "Higher TTL avoids re-scanning unmodified directories within the specified time window."
         )
-        self.all_drives_check.setChecked(bool(self.settings.get("scan_all_drives", True)))
-        g4.addWidget(self.all_drives_check)
-        self.roots_list = QListWidget()
-        for root_path in self.settings.get("scan_roots", []):
-            self.roots_list.addItem(root_path)
-        row_roots = QHBoxLayout()
-        add_btn = QPushButton("Add Root Folder...")
-        add_btn.clicked.connect(self._add_root)
-        rem_btn = QPushButton("Remove Selected")
-        rem_btn.clicked.connect(self._remove_root)
-        row_roots.addWidget(add_btn)
-        row_roots.addWidget(rem_btn)
-        row_roots.addStretch(1)
-        g4.addWidget(self.roots_list)
-        g4.addLayout(row_roots)
-        layout.addWidget(group4)
+        ttl_sub.setProperty("subtle", "true")
+        pc_lay.addWidget(ttl_sub)
 
-        # Categories
-        group5 = QGroupBox("Category Rules (Disabled categories are skipped)")
-        g5 = QVBoxLayout(group5)
+        lay_perf.addWidget(perf_card)
+        lay_perf.addStretch(1)
+        self.tab_stack.addWidget(page_perf)
+
+        # --- PAGE 4: Category Rules ---
+        page_rules = QWidget()
+        lay_rules = QVBoxLayout(page_rules)
+        lay_rules.setContentsMargins(0, 4, 0, 0)
+        lay_rules.setSpacing(10)
+
+        rules_card = QFrame()
+        rules_card.setProperty("card", "true")
+        rc_lay = QVBoxLayout(rules_card)
+        rc_lay.setContentsMargins(14, 14, 14, 14)
+        rc_lay.setSpacing(10)
+
+        r_header = QHBoxLayout()
+        r_title = QLabel("Active Category Rules (Disabled rules are skipped)")
+        r_title.setProperty("strong", "true")
+        r_header.addWidget(r_title, 1)
+
+        btn_all = QPushButton("Enable All")
+        btn_all.clicked.connect(self._enable_all_categories)
+        btn_safe = QPushButton("Safe Only")
+        btn_safe.clicked.connect(self._enable_safe_only_categories)
+        btn_none = QPushButton("Disable All")
+        btn_none.clicked.connect(self._disable_all_categories)
+        r_header.addWidget(btn_all)
+        r_header.addWidget(btn_safe)
+        r_header.addWidget(btn_none)
+        rc_lay.addLayout(r_header)
+
         self.cat_list = QListWidget()
         self._rebuild_cat_list()
-        g5.addWidget(self.cat_list)
-        layout.addWidget(group5)
+        rc_lay.addWidget(self.cat_list, 1)
+        lay_rules.addWidget(rules_card)
 
-        # Backup & Export
-        group6 = QGroupBox("Import / Export Configuration")
-        g6 = QHBoxLayout(group6)
+        self.tab_stack.addWidget(page_rules)
+
+        # --- PAGE 5: Backup & Sync ---
+        page_backup = QWidget()
+        lay_backup = QVBoxLayout(page_backup)
+        lay_backup.setContentsMargins(0, 4, 0, 0)
+        lay_backup.setSpacing(12)
+
+        backup_card = QFrame()
+        backup_card.setProperty("card", "true")
+        bc_lay = QVBoxLayout(backup_card)
+        bc_lay.setContentsMargins(16, 16, 16, 16)
+        bc_lay.setSpacing(12)
+
+        bc_title = QLabel("Configuration Backup & Migration")
+        bc_title.setProperty("strong", "true")
+        bc_sub = QLabel(
+            "Export your settings to JSON to create backups or transfer rules between machines."
+        )
+        bc_sub.setProperty("subtle", "true")
+        bc_lay.addWidget(bc_title)
+        bc_lay.addWidget(bc_sub)
+
+        bc_btns = QHBoxLayout()
         export_btn = QPushButton("Export Settings...")
+        export_btn.setIcon(material_icon("download", "#888888"))
         export_btn.clicked.connect(self._export)
         import_btn = QPushButton("Import Settings...")
+        import_btn.setIcon(material_icon("upload", "#888888"))
         import_btn.clicked.connect(self._import)
         reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.setIcon(material_icon("refresh", "#888888"))
         reset_btn.clicked.connect(self._reset_defaults)
-        g6.addWidget(export_btn)
-        g6.addWidget(import_btn)
-        g6.addWidget(reset_btn)
-        g6.addStretch(1)
-        layout.addWidget(group6)
 
-        # Save Button
-        save_row = QHBoxLayout()
-        self.save_button = QPushButton("Save Preferences")
-        self.save_button.setProperty("primary", "true")
-        self.save_button.setFixedHeight(36)
-        self.save_button.setFixedWidth(160)
-        self.save_button.clicked.connect(self._save)
-        save_row.addWidget(self.save_button)
-        save_row.addStretch(1)
-        layout.addLayout(save_row)
+        bc_btns.addWidget(export_btn)
+        bc_btns.addWidget(import_btn)
+        bc_btns.addWidget(reset_btn)
+        bc_btns.addStretch(1)
+        bc_lay.addLayout(bc_btns)
 
-        layout.addStretch(1)
-        scroll.setWidget(container)
-        root.addWidget(scroll, 1)
+        cfg_loc = QLabel(f"Active Config Path: {config_path()}")
+        cfg_loc.setProperty("subtle", "true")
+        cfg_loc.setStyleSheet("font-size: 11px; font-family: monospace;")
+        bc_lay.addWidget(cfg_loc)
+
+        lay_backup.addWidget(backup_card)
+        lay_backup.addStretch(1)
+        self.tab_stack.addWidget(page_backup)
+
+        root.addWidget(self.tab_stack, 1)
+
+    def _set_active_tab(self, key: str, index: int):
+        self.tab_stack.setCurrentIndex(index)
+        for k, btn in self._section_buttons.items():
+            is_active = k == key
+            btn.setProperty("active", "true" if is_active else "false")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def _enable_all_categories(self):
+        for i in range(self.cat_list.count()):
+            self.cat_list.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _disable_all_categories(self):
+        for i in range(self.cat_list.count()):
+            self.cat_list.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _enable_safe_only_categories(self):
+        cat_map = {c.id: c for c in self._categories}
+        for i in range(self.cat_list.count()):
+            cat_id = self.cat_list.item(i).data(Qt.ItemDataRole.UserRole)
+            cat = cat_map.get(cat_id)
+            if cat and cat.safety_level == SafetyLevel.SAFE:
+                self.cat_list.item(i).setCheckState(Qt.CheckState.Checked)
+            else:
+                self.cat_list.item(i).setCheckState(Qt.CheckState.Unchecked)
 
     def _rebuild_cat_list(self):
         self.cat_list.clear()
@@ -2494,15 +3176,26 @@ class SettingsView(QWidget):
             self.exclusions_list.addItem(folder)
 
     def _save_reduce_motion(self, enabled: bool):
-        self.settings["reduce_motion"] = bool(enabled)
-        save_settings({"reduce_motion": bool(enabled)})
+        self.settings["reduce_motion"] = enabled
+        save_settings({"reduce_motion": enabled})
         main_settings = getattr(self._main, "_settings", None)
         if isinstance(main_settings, dict):
-            main_settings["reduce_motion"] = bool(enabled)
+            main_settings["reduce_motion"] = enabled
 
     def _select_theme(self, theme: str):
         if theme in THEMES:
-            self.theme_combo.setCurrentIndex(THEMES.index(theme))
+            if hasattr(self, "theme_gallery"):
+                self.theme_gallery.select_theme(theme, emit_signal=False)
+            else:
+                self.theme_combo.setCurrentIndex(THEMES.index(theme))
+
+    def _on_theme_changed(self, theme: str):
+        """Apply theme selected from the visual theme gallery."""
+        self.settings["theme"] = theme
+        save_settings({"theme": theme})
+        switch = getattr(self._main, "switch_theme", None)
+        if switch is not None:
+            switch(theme)
 
     def _preview_theme(self, _label: str):
         """Apply the selected theme immediately and remember it across launches."""
@@ -2511,9 +3204,30 @@ class SettingsView(QWidget):
             return
         self.settings["theme"] = theme
         save_settings({"theme": theme})
+        if hasattr(self, "theme_gallery"):
+            self.theme_gallery.select_theme(theme, emit_signal=False)
         switch = getattr(self._main, "switch_theme", None)
         if switch is not None:
             switch(theme)
+
+    def apply_theme(self, theme: str):
+        self._theme = theme
+        if hasattr(self, "theme_gallery"):
+            self.theme_gallery.select_theme(theme, emit_signal=False)
+
+        # Update tab button icons and styles
+        accent_col = theme_color(theme, "accent")
+        muted_col = theme_color(theme, "muted")
+
+        self.save_button.setIcon(material_icon("check", "#ffffff"))
+        self.reset_top_btn.setIcon(material_icon("refresh", muted_col))
+
+        curr_idx = self.tab_stack.currentIndex()
+        for idx, (key, _, icon_name) in enumerate(self._sections):
+            if key in self._section_buttons:
+                btn = self._section_buttons[key]
+                icon_col = accent_col if idx == curr_idx else muted_col
+                btn.setIcon(material_icon(icon_name, icon_col))
 
     def _remove_exclusion(self):
         for item in self.exclusions_list.selectedItems():
@@ -2615,9 +3329,6 @@ class SettingsView(QWidget):
         except OSError as exc:
             QMessageBox.warning(self, "Import Error", str(exc))
 
-    def apply_theme(self, theme: str):
-        self._theme = theme
-
 
 class SquircleAvatarWidget(QWidget):
     """Profile avatar rendered inside a smooth anti-aliased squircle (rounded-rect) path."""
@@ -2698,7 +3409,9 @@ class SpecsView(QWidget):
         self._active_category = "All"
         self._filter_query = ""
         self._card_widgets = []
+        self._skeleton_anims = []
         self._build_ui()
+        self._show_skeletons()
 
     def _build_ui(self):
         root_lay = QVBoxLayout(self)
@@ -2809,6 +3522,144 @@ class SpecsView(QWidget):
         scroll.setWidget(content)
         root_lay.addWidget(scroll, 1)
 
+    def _show_skeletons(self):
+        """Render modern animated skeleton placeholder blocks while loading."""
+        self._clear_animations()
+
+        # 1. Clear Hero
+        while self.hero_container.count():
+            item = self.hero_container.takeAt(0)
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+
+        # 2. Clear Columns
+        while self.col_left.count():
+            item = self.col_left.takeAt(0)
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+
+        while self.col_right.count():
+            item = self.col_right.takeAt(0)
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+
+        self._card_widgets.clear()
+
+        # 3. Add 4 Hero Skeletons
+        hero_titles = ["PROCESSOR", "GRAPHICS", "MEMORY (RAM)", "OPERATING SYSTEM"]
+        for idx, title in enumerate(hero_titles):
+            card = QFrame()
+            card.setObjectName("SpecsHeroCard")
+            card.setProperty("card", "true")
+            lay = QVBoxLayout(card)
+            lay.setContentsMargins(14, 12, 14, 12)
+            lay.setSpacing(8)
+
+            t_lbl = QLabel(title)
+            t_lbl.setStyleSheet(
+                f"font-size: 11px; font-weight: 700; color: {_c(self._theme, 'muted')}; letter-spacing: 0.5px;"
+            )
+            lay.addWidget(t_lbl)
+
+            bar1 = SkeletonBlock(height=16, radius=4, theme=self._theme)
+            lay.addWidget(bar1)
+
+            bar2 = SkeletonBlock(width=130, height=11, radius=3, theme=self._theme)
+            lay.addWidget(bar2)
+
+            self._apply_skeleton_pulse(card, delay_offset=idx * 120)
+            self.hero_container.addWidget(card)
+
+        # 4. Add Left Column Skeleton Cards
+        left_skeletons = [
+            ("Operating System Details", 5),
+            ("Central Processor (CPU)", 6),
+            ("Motherboard & BIOS", 4),
+            ("Network Interfaces", 3),
+        ]
+        for idx, (title, row_count) in enumerate(left_skeletons):
+            card = self._make_skeleton_card(title, row_count)
+            self._apply_skeleton_pulse(card, delay_offset=(idx + 4) * 100)
+            self.col_left.addWidget(card)
+
+        # 5. Add Right Column Skeleton Cards
+        right_skeletons = [
+            ("Physical Memory & RAM Slots", 4),
+            ("Graphics & Display Adapters", 5),
+            ("Storage & NVMe Drives", 4),
+        ]
+        for idx, (title, row_count) in enumerate(right_skeletons):
+            card = self._make_skeleton_card(title, row_count)
+            self._apply_skeleton_pulse(card, delay_offset=(idx + 8) * 100)
+            self.col_right.addWidget(card)
+
+        self.col_left.addStretch(1)
+        self.col_right.addStretch(1)
+
+    def _make_skeleton_card(self, title: str, row_count: int) -> QFrame:
+        card = QFrame()
+        card.setObjectName("SpecsCard")
+        card.setProperty("card", "true")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(18, 14, 18, 14)
+        lay.setSpacing(12)
+
+        # Header
+        hdr = QHBoxLayout()
+        t_lbl = QLabel(title)
+        t_lbl.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {_c(self._theme, 'text')};")
+        hdr.addWidget(t_lbl)
+        hdr.addStretch(1)
+
+        copy_skel = SkeletonBlock(width=52, height=22, radius=4, theme=self._theme)
+        hdr.addWidget(copy_skel)
+        lay.addLayout(hdr)
+
+        # Key-Value Skeleton Rows
+        for i in range(row_count):
+            row = QHBoxLayout()
+            row.setSpacing(12)
+            lbl_skel = SkeletonBlock(width=120, height=13, radius=3, theme=self._theme)
+            row.addWidget(lbl_skel)
+
+            val_width = None if i % 2 == 0 else 180
+            val_skel = SkeletonBlock(width=val_width, height=13, radius=3, theme=self._theme)
+            row.addWidget(val_skel, 1)
+
+            lay.addLayout(row)
+
+        return card
+
+    def _apply_skeleton_pulse(self, widget: QWidget, delay_offset: int = 0):
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
+        anim = QPropertyAnimation(effect, b"opacity", widget)
+        anim.setDuration(1400)
+        anim.setKeyValueAt(0.0, 0.40)
+        anim.setKeyValueAt(0.5, 0.85)
+        anim.setKeyValueAt(1.0, 0.40)
+        anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        anim.setLoopCount(-1)
+        if delay_offset > 0:
+            QTimer.singleShot(delay_offset % 1000, anim.start)
+        else:
+            anim.start()
+        self._skeleton_anims.append(anim)
+
+    def _clear_animations(self):
+        for anim in self._skeleton_anims:
+            try:
+                anim.stop()
+            except Exception:
+                pass
+        self._skeleton_anims.clear()
+
     def _set_category(self, category_key: str):
         self._active_category = category_key
         for k, btn in self.chip_buttons.items():
@@ -2833,6 +3684,8 @@ class SpecsView(QWidget):
             card_widget.setVisible(match_cat and match_text)
 
     def refresh_specs(self):
+        if self._specs is None:
+            self._show_skeletons()
         from crapcleaner.gui.workers import SpecsWorker
 
         self.refresh_btn.setEnabled(False)
@@ -2959,22 +3812,30 @@ class SpecsView(QWidget):
         QMessageBox.information(self, "Copied", "Component specifications copied to clipboard!")
 
     def _populate(self, specs, health_data: list | None = None):
+        self._clear_animations()
+
         # 1. Clear Hero
         while self.hero_container.count():
             item = self.hero_container.takeAt(0)
-            if item is not None and item.widget():
-                item.widget().deleteLater()
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
 
         # 2. Clear Grid Columns
         while self.col_left.count():
             item = self.col_left.takeAt(0)
-            if item is not None and item.widget():
-                item.widget().deleteLater()
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
 
         while self.col_right.count():
             item = self.col_right.takeAt(0)
-            if item is not None and item.widget():
-                item.widget().deleteLater()
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
 
         self._card_widgets.clear()
 
@@ -3406,6 +4267,8 @@ class SpecsView(QWidget):
         self._theme = theme
         if self._specs is not None:
             self._populate(self._specs, self._health_data)
+        else:
+            self._show_skeletons()
 
 
 class AboutView(QWidget):
@@ -3427,7 +4290,7 @@ class AboutView(QWidget):
         header.setSpacing(4)
         h1 = QLabel("About CrapCleaner")
         h1.setObjectName("ViewTitle")
-        sub = QLabel("Open-source, non-destructive Windows cleaner & developer storage toolkit.")
+        sub = QLabel("Open-source, non-destructive system cleaner and developer storage toolkit.")
         sub.setProperty("subtle", "true")
         header.addWidget(h1)
         header.addWidget(sub)
@@ -3464,7 +4327,7 @@ class AboutView(QWidget):
         info_box.addWidget(c_name)
 
         c_desc = QLabel(
-            "Engineered CrapCleaner from the ground up to give Windows power users, developers, and gamers "
+            "Engineered CrapCleaner from the ground up to give Windows and Linux power users, developers, and gamers "
             "a transparent, ultra-fast, and completely safe system cleaner without bloatware, advertisements, or telemetry."
         )
         c_desc.setStyleSheet(
@@ -3477,6 +4340,7 @@ class AboutView(QWidget):
         links_row.setSpacing(10)
         gh_btn = QPushButton("GitHub Repository")
         gh_btn.setProperty("secondary", "true")
+        gh_btn.setIcon(material_icon("code", _c(self._theme, "text")))
         gh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         gh_btn.clicked.connect(
             lambda: subprocess.Popen(["explorer", "https://github.com/PatrickJnr/crapcleaner"])
@@ -3485,6 +4349,7 @@ class AboutView(QWidget):
 
         issue_btn = QPushButton("Report Issue")
         issue_btn.setProperty("secondary", "true")
+        issue_btn.setIcon(material_icon("bug_report", _c(self._theme, "text")))
         issue_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         issue_btn.clicked.connect(
             lambda: subprocess.Popen(
@@ -3495,6 +4360,7 @@ class AboutView(QWidget):
 
         update_btn = QPushButton("Check for Updates")
         update_btn.setProperty("primary", "true")
+        update_btn.setIcon(material_icon("refresh", "#ffffff"))
         update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         update_btn.clicked.connect(self._check_updates)
         links_row.addWidget(update_btn)
@@ -3615,15 +4481,18 @@ class AboutView(QWidget):
         while self.contrib_box.count():
             item = self.contrib_box.takeAt(0)
             if item is not None:
-                if item.widget():
-                    item.widget().deleteLater()
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
                 elif item.layout():
                     lay = item.layout()
                     if lay is not None:
                         while lay.count():
                             sub_item = lay.takeAt(0)
-                            if sub_item is not None and sub_item.widget():
-                                sub_item.widget().deleteLater()
+                            if sub_item is not None:
+                                sub_w = sub_item.widget()
+                                if sub_w is not None:
+                                    sub_w.deleteLater()
 
         try:
             contributors = fetch_contributors(timeout_seconds=3.0, force_refresh=force_refresh)
@@ -4054,6 +4923,8 @@ class StorageBreakdownView(QWidget):
         toolbar.addWidget(self.path_edit, 1)
 
         browse_btn = QPushButton("Browse...")
+        browse_btn.setIcon(material_icon("folder_open", _c(self._theme, "text")))
+        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         browse_btn.clicked.connect(self._browse_path)
         toolbar.addWidget(browse_btn)
 
@@ -4065,10 +4936,14 @@ class StorageBreakdownView(QWidget):
 
         self.analyze_btn = QPushButton("Analyze Storage")
         self.analyze_btn.setProperty("primary", "true")
+        self.analyze_btn.setIcon(material_icon("search", "#ffffff"))
+        self.analyze_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.analyze_btn.clicked.connect(self.run_analysis)
         toolbar.addWidget(self.analyze_btn)
 
         self.export_btn = QPushButton("Export Report...")
+        self.export_btn.setIcon(material_icon("file_download", _c(self._theme, "text")))
+        self.export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.export_btn.clicked.connect(self._export_report)
         toolbar.addWidget(self.export_btn)
 
@@ -4088,6 +4963,8 @@ class StorageBreakdownView(QWidget):
         h_lay.addWidget(self.health_info_label, 1)
 
         self._refresh_health_btn = QPushButton("Refresh Health")
+        self._refresh_health_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
+        self._refresh_health_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._refresh_health_btn.clicked.connect(lambda: self.refresh_health(force=True))
         h_lay.addWidget(self._refresh_health_btn)
 
@@ -4456,6 +5333,7 @@ class HelpSafetyView(QWidget):
 
         diag_btn = QPushButton("Copy System Diagnostics")
         diag_btn.setProperty("secondary", "true")
+        diag_btn.setIcon(material_icon("code", _c(self._theme, "text")))
         diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         diag_btn.clicked.connect(self._copy_diagnostics)
         header_row.addWidget(diag_btn)
@@ -4788,17 +5666,17 @@ class MemoryView(QWidget):
         self._report = None
         self._busy = False
         self._action_rows = {}
+        self._action_cards = {}
         self._build()
 
     def _build(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 16)
-        root.setSpacing(10)
+        root.setSpacing(12)
         root.addWidget(
             page_header(
                 "Memory Cleaner",
-                "Inspect physical memory, swap, and graphics memory, then reclaim only what "
-                "the operating system can safely give back.",
+                "Inspect physical memory, swap, and graphics VRAM, then safely optimize and reclaim memory across active processes.",
             )
         )
 
@@ -4808,144 +5686,242 @@ class MemoryView(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 8, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
 
-        top_row = QHBoxLayout()
+        # 1. Top Hero Card: Status, Usage Gauge & Quick Flush Action
+        self.hero_card = QFrame()
+        self.hero_card.setProperty("card", "true")
+        hero_lay = QVBoxLayout(self.hero_card)
+        hero_lay.setContentsMargins(18, 16, 18, 16)
+        hero_lay.setSpacing(10)
+
+        hero_top = QHBoxLayout()
+        self.hero_badge = badge("NORMAL PRESSURE", "safe")
+        self.elevated_badge = badge(
+            "ELEVATED (ADMIN)" if is_admin() else "STANDARD USER",
+            "accent" if is_admin() else "muted",
+        )
+        hero_top.addWidget(self.hero_badge)
+        hero_top.addWidget(self.elevated_badge)
+        hero_top.addStretch(1)
+
+        if not is_admin() and is_windows():
+            self.elevate_btn = QPushButton("Relaunch as Admin (Full Standby Flush)")
+            self.elevate_btn.setProperty("secondary", "true")
+            self.elevate_btn.setIcon(material_icon("security", _c(self._theme, "accent")))
+            self.elevate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.elevate_btn.clicked.connect(self._relaunch_admin)
+            hero_top.addWidget(self.elevate_btn)
+
+        self.flush_btn = QPushButton("Quick Flush Memory")
+        self.flush_btn.setProperty("primary", "true")
+        self.flush_btn.setIcon(material_icon("bolt", "#ffffff"))
+        self.flush_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.flush_btn.clicked.connect(lambda: self._run_action("flush_all"))
+
         self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_btn.clicked.connect(self.refresh)
-        self.status_label = QLabel("Reading memory statistics...")
-        self.status_label.setProperty("subtle", "true")
-        self.status_label.setWordWrap(True)
-        top_row.addWidget(self.refresh_btn)
-        top_row.addWidget(self.status_label, 1)
-        layout.addLayout(top_row)
 
-        ram_group = QGroupBox("Physical Memory (RAM)")
-        ram_lay = QVBoxLayout(ram_group)
-        ram_lay.setSpacing(8)
+        hero_top.addWidget(self.flush_btn)
+        hero_top.addWidget(self.refresh_btn)
+        hero_lay.addLayout(hero_top)
+
+        self.hero_title = QLabel("-- / -- Used")
+        self.hero_title.setStyleSheet(
+            f"font-size: 24px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
+        hero_lay.addWidget(self.hero_title)
+
         self.ram_bar = QProgressBar()
         self.ram_bar.setRange(0, 100)
-        self.ram_bar.setFormat("%p% used")
-        ram_lay.addWidget(self.ram_bar)
-        ram_stats = QHBoxLayout()
-        ram_stats.setSpacing(12)
-        self.ram_total_value = self._metric("Total", ram_stats)
-        self.ram_used_value = self._metric("In Use", ram_stats)
-        self.ram_free_value = self._metric("Available", ram_stats)
-        self.ram_cached_value = self._metric("Cached / Standby", ram_stats)
-        ram_lay.addLayout(ram_stats)
-        self.pressure_label = QLabel("Memory pressure: unknown")
-        self.pressure_label.setProperty("subtle", "true")
-        ram_lay.addWidget(self.pressure_label)
-        layout.addWidget(ram_group)
+        self.ram_bar.setValue(0)
+        self.ram_bar.setFixedHeight(8)
+        self.ram_bar.setTextVisible(False)
+        self.ram_bar.setProperty("good", "true")
+        hero_lay.addWidget(self.ram_bar)
 
-        self.swap_group = QGroupBox("Swap / Pagefile")
-        swap_lay = QVBoxLayout(self.swap_group)
-        swap_lay.setSpacing(8)
+        hero_sub_row = QHBoxLayout()
+        self.status_label = QLabel("Reading memory statistics...")
+        self.status_label.setProperty("subtle", "true")
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
+        self.pressure_label = QLabel("Memory pressure: normal")
+        self.pressure_label.setProperty("subtle", "true")
+        self.pressure_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
+        hero_sub_row.addWidget(self.status_label)
+        hero_sub_row.addStretch(1)
+        hero_sub_row.addWidget(self.pressure_label)
+        hero_lay.addLayout(hero_sub_row)
+
+        # Embedded result banner
+        self.result_banner = QFrame()
+        self.result_banner.setProperty("card", "true")
+        self.result_banner.setVisible(False)
+        rb_lay = QHBoxLayout(self.result_banner)
+        rb_lay.setContentsMargins(12, 8, 12, 8)
+        self.result_icon = QLabel()
+        self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
+        self.result_label = QLabel("")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(self._theme, 'text')};")
+        self.result_label.setWordWrap(True)
+        rb_lay.addWidget(self.result_icon)
+        rb_lay.addWidget(self.result_label, 1)
+        hero_lay.addWidget(self.result_banner)
+
+        layout.addWidget(self.hero_card)
+
+        # 2. Hardware & Memory Breakdown Cards (RAM 4-metric grid, Swap Card, GPU VRAM Card)
+        layout.addWidget(section_label("Memory Allocation & Hardware VRAM"))
+        vitals_grid = QHBoxLayout()
+        vitals_grid.setSpacing(12)
+
+        # RAM Breakdown Card
+        self.ram_group = QFrame()
+        self.ram_group.setProperty("card", "true")
+        rc_lay = QVBoxLayout(self.ram_group)
+        rc_lay.setContentsMargins(14, 12, 14, 12)
+        rc_lay.setSpacing(8)
+        rc_head = QLabel("Physical RAM (4-Metric)")
+        rc_head.setProperty("strong", "true")
+        rc_lay.addWidget(rc_head)
+
+        metrics_grid = QGridLayout()
+        metrics_grid.setSpacing(8)
+        self.ram_total_card, self.ram_total_value, _ = stat_card("Total", "--", "", self._theme)
+        self.ram_used_card, self.ram_used_value, _ = stat_card("In Use", "--", "", self._theme)
+        self.ram_free_card, self.ram_free_value, _ = stat_card("Available", "--", "", self._theme)
+        self.ram_cached_card, self.ram_cached_value, _ = stat_card(
+            "Cached / Standby", "--", "", self._theme
+        )
+        metrics_grid.addWidget(self.ram_total_card, 0, 0)
+        metrics_grid.addWidget(self.ram_used_card, 0, 1)
+        metrics_grid.addWidget(self.ram_free_card, 1, 0)
+        metrics_grid.addWidget(self.ram_cached_card, 1, 1)
+        rc_lay.addLayout(metrics_grid)
+        vitals_grid.addWidget(self.ram_group, 5)
+
+        # Side Column for Swap & GPU VRAM
+        side_col = QVBoxLayout()
+        side_col.setSpacing(10)
+
+        # Swap Card
+        self.swap_group = QFrame()
+        self.swap_group.setProperty("card", "true")
+        sc_lay = QVBoxLayout(self.swap_group)
+        sc_lay.setContentsMargins(14, 12, 14, 12)
+        sc_lay.setSpacing(6)
+        sc_top = QHBoxLayout()
+        sc_title = QLabel("Swap / Pagefile")
+        sc_title.setProperty("subtle", "true")
+        sc_top.addWidget(sc_title)
+        sc_top.addStretch(1)
+        self.swap_badge = badge("--", "accent")
+        sc_top.addWidget(self.swap_badge)
+        sc_lay.addLayout(sc_top)
+
         self.swap_bar = QProgressBar()
         self.swap_bar.setRange(0, 100)
-        self.swap_bar.setFormat("%p% used")
-        swap_lay.addWidget(self.swap_bar)
+        self.swap_bar.setValue(0)
+        self.swap_bar.setFixedHeight(5)
+        self.swap_bar.setTextVisible(False)
+        sc_lay.addWidget(self.swap_bar)
+
         self.swap_label = QLabel("--")
         self.swap_label.setProperty("subtle", "true")
-        swap_lay.addWidget(self.swap_label)
-        layout.addWidget(self.swap_group)
+        self.swap_label.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
+        sc_lay.addWidget(self.swap_label)
+        side_col.addWidget(self.swap_group)
 
-        self.gpu_group = QGroupBox("Graphics Memory (VRAM)")
+        # GPU VRAM Card
+        self.gpu_group = QFrame()
+        self.gpu_group.setProperty("card", "true")
         self.gpu_layout = QVBoxLayout(self.gpu_group)
-        self.gpu_layout.setSpacing(8)
+        self.gpu_layout.setContentsMargins(14, 12, 14, 12)
+        self.gpu_layout.setSpacing(6)
+
         gpu_placeholder = QLabel("Reading graphics adapters...")
         gpu_placeholder.setProperty("subtle", "true")
         gpu_placeholder.setWordWrap(True)
         self.gpu_layout.addWidget(gpu_placeholder)
-        layout.addWidget(self.gpu_group)
+        side_col.addWidget(self.gpu_group)
 
-        actions_group = QGroupBox("Reclamation Actions")
-        actions_lay = QVBoxLayout(actions_group)
-        actions_lay.setSpacing(10)
-        note = QLabel(
-            "Windows and Linux already manage memory automatically, so this is optional "
-            "maintenance rather than an optimization. Reclaiming memory frees what is "
-            "genuinely unused or cached; it does not make games or applications run faster, "
-            "and CrapCleaner never closes processes or changes their priority to free memory."
-        )
-        note.setProperty("subtle", "true")
-        note.setWordWrap(True)
-        actions_lay.addWidget(note)
+        vitals_grid.addLayout(side_col, 4)
+        layout.addLayout(vitals_grid)
 
-        self.privilege_label = QLabel(
-            f"Process elevated: {'yes' if is_admin() else 'no'}. "
-            "Actions marked Administrator need an elevated CrapCleaner."
-        )
-        self.privilege_label.setProperty("subtle", "true")
-        self.privilege_label.setWordWrap(True)
-        actions_lay.addWidget(self.privilege_label)
+        # 3. Reclamation Actions Section
+        layout.addWidget(section_label("Reclamation & Optimization Actions"))
+        actions_grid = QGridLayout()
+        actions_grid.setSpacing(10)
+
+        row_idx = 0
         for action in available_memory_actions():
-            actions_lay.addWidget(self._action_row(action))
-        layout.addWidget(actions_group)
+            card = self._create_action_card(action)
+            r, c = divmod(row_idx, 2)
+            actions_grid.addWidget(card, r, c)
+            row_idx += 1
 
-        self.result_label = QLabel("")
-        self.result_label.setWordWrap(True)
-        self.result_label.setProperty("subtle", "true")
-        layout.addWidget(self.result_label)
-
+        layout.addLayout(actions_grid)
         layout.addStretch(1)
         scroll.setWidget(container)
         root.addWidget(scroll, 1)
 
-    def _metric(self, title: str, row: QHBoxLayout) -> QLabel:
-        card, value_label, _sub = stat_card(title, "--", "", self._theme)
-        row.addWidget(card)
-        return value_label
-
-    def _action_row(self, action) -> QFrame:
-        frame = QFrame()
-        frame.setProperty("card", "true")
-        lay = QVBoxLayout(frame)
+    def _create_action_card(self, action) -> QFrame:
+        card = QFrame()
+        card.setProperty("card", "true")
+        lay = QVBoxLayout(card)
         lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(4)
+        lay.setSpacing(6)
 
-        head = QHBoxLayout()
-        name = QLabel(action.name)
-        name.setProperty("strong", "true")
-        head.addWidget(name)
+        top = QHBoxLayout()
+        title = QLabel(action.name)
+        title.setProperty("strong", "true")
+        top.addWidget(title)
+        top.addStretch(1)
+
         if action.requires_admin:
-            head.addWidget(badge("Administrator", "warn"))
-        head.addStretch(1)
+            top.addWidget(badge("ADMIN", "warn" if not is_admin() else "safe"))
+        elif action.id in ("flush_all", "process_working_sets"):
+            top.addWidget(badge("RECOMMENDED", "accent"))
+        elif action.kind == "vram":
+            top.addWidget(badge("DIAGNOSTIC", "muted"))
+        lay.addLayout(top)
 
-        button = QPushButton("Inspect" if action.kind == "vram" else "Run")
-        button.setProperty("primary", "true")
-        button.clicked.connect(lambda _=False, a=action.id: self._run_action(a))
-        if not action.supported:
-            button.setEnabled(False)
-            button.setToolTip(action.unsupported_reason)
-        head.addWidget(button)
-        lay.addLayout(head)
-
-        description = QLabel(action.description)
-        description.setWordWrap(True)
-        description.setProperty("subtle", "true")
-        lay.addWidget(description)
+        desc = QLabel(action.description)
+        desc.setWordWrap(True)
+        desc.setProperty("subtle", "true")
+        desc.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
+        lay.addWidget(desc)
 
         effect = QLabel(action.effect)
         effect.setWordWrap(True)
-        effect.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'faint')};")
+        effect.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'faint')};")
         lay.addWidget(effect)
 
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn = QPushButton("Inspect" if action.kind == "vram" else "Run Action")
+        if action.id in ("flush_all", "process_working_sets"):
+            btn.setProperty("primary", "true")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(lambda _=False, a=action.id: self._run_action(a))
         if not action.supported:
-            unsupported = QLabel(f"Unavailable: {action.unsupported_reason}")
-            unsupported.setWordWrap(True)
-            unsupported.setProperty("subtle", "true")
-            lay.addWidget(unsupported)
+            btn.setEnabled(False)
+            btn.setToolTip(action.unsupported_reason)
+        btn_row.addWidget(btn)
+        lay.addLayout(btn_row)
 
         self._action_rows[action.id] = effect
-        return frame
+        self._action_cards[action.id] = (card, desc, effect, btn)
+        return card
 
     def refresh(self):
         if self._busy:
             return
         self._busy = True
         self.refresh_btn.setEnabled(False)
+        if hasattr(self, "flush_btn"):
+            self.flush_btn.setEnabled(False)
         self.status_label.setText("Reading memory statistics...")
         from crapcleaner.gui.workers import MemoryReportWorker
 
@@ -4957,24 +5933,43 @@ class MemoryView(QWidget):
     def _on_failed(self, message: str):
         self._busy = False
         self.refresh_btn.setEnabled(True)
+        if hasattr(self, "flush_btn"):
+            self.flush_btn.setEnabled(True)
         self.status_label.setText(f"Could not read memory statistics: {message}")
 
     def _on_report(self, report):
         self._busy = False
         self.refresh_btn.setEnabled(True)
+        if hasattr(self, "flush_btn"):
+            self.flush_btn.setEnabled(True)
         self._report = report
         ram = report.ram
-        self.ram_bar.setValue(int(ram.percent_used))
+
+        pct = int(ram.percent_used)
+        self.hero_title.setText(
+            f"{format_size(ram.used_bytes)} / {format_size(ram.total_bytes)} ({pct}% in use)"
+        )
+        self.ram_bar.setValue(pct)
         self.ram_bar.setProperty("good", ram.percent_used < 70)
         self.ram_bar.setProperty("warn", 70 <= ram.percent_used <= 90)
         self.ram_bar.setProperty("bad", ram.percent_used > 90)
         self.ram_bar.style().unpolish(self.ram_bar)
         self.ram_bar.style().polish(self.ram_bar)
-        self.ram_total_value.setText(format_size(ram.total_bytes))
-        self.ram_used_value.setText(format_size(ram.used_bytes))
-        self.ram_free_value.setText(format_size(ram.available_bytes))
-        self.ram_cached_value.setText(
-            format_size(ram.cached_bytes) if ram.cached_known else "unknown"
+
+        self.hero_badge.setText(f"{ram.pressure.upper()} PRESSURE")
+        self.hero_badge.setProperty(
+            "level",
+            (
+                "safe"
+                if ram.pressure in ("low", "normal")
+                else ("warn" if ram.pressure == "high" else "danger")
+            ),
+        )
+        self.hero_badge.style().unpolish(self.hero_badge)
+        self.hero_badge.style().polish(self.hero_badge)
+
+        self.status_label.setText(
+            f"{format_size(ram.available_bytes)} available of {format_size(ram.total_bytes)}"
         )
         self.pressure_label.setText(
             f"Memory pressure: {ram.pressure}"
@@ -4985,20 +5980,30 @@ class MemoryView(QWidget):
             )
         )
 
+        self.ram_total_value.setText(format_size(ram.total_bytes))
+        self.ram_used_value.setText(format_size(ram.used_bytes))
+        self.ram_free_value.setText(format_size(ram.available_bytes))
+        self.ram_cached_value.setText(
+            format_size(ram.cached_bytes) if ram.cached_known else "unknown"
+        )
+
         if ram.swap_supported:
-            pct = int(round(ram.swap_used_bytes / ram.swap_total_bytes * 100))
-            self.swap_bar.setValue(pct)
+            swap_pct = (
+                int(round(ram.swap_used_bytes / ram.swap_total_bytes * 100))
+                if ram.swap_total_bytes > 0
+                else 0
+            )
+            self.swap_bar.setValue(swap_pct)
+            self.swap_badge.setText(f"{swap_pct}% Used")
             self.swap_label.setText(
                 f"{format_size(ram.swap_used_bytes)} used of {format_size(ram.swap_total_bytes)}"
             )
         else:
             self.swap_bar.setValue(0)
+            self.swap_badge.setText("Disabled")
             self.swap_label.setText("No swap or pagefile is configured on this system.")
 
         self._populate_gpus(report)
-        self.status_label.setText(
-            f"{format_size(ram.available_bytes)} available of {format_size(ram.total_bytes)}"
-        )
 
     def _populate_gpus(self, report):
         while self.gpu_layout.count():
@@ -5028,7 +6033,8 @@ class MemoryView(QWidget):
                 bar = QProgressBar()
                 bar.setRange(0, 100)
                 bar.setValue(int(gpu.percent_used))
-                bar.setFormat("%p% of VRAM used")
+                bar.setFixedHeight(5)
+                bar.setTextVisible(False)
                 box.addWidget(bar)
                 detail = QLabel(
                     f"{format_size(gpu.used_bytes)} used of {format_size(gpu.total_bytes)}, "
@@ -5042,6 +6048,7 @@ class MemoryView(QWidget):
             else:
                 detail = QLabel("This adapter does not report its memory capacity.")
             detail.setProperty("subtle", "true")
+            detail.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
             detail.setWordWrap(True)
             box.addWidget(detail)
             self.gpu_layout.addWidget(holder)
@@ -5056,6 +6063,7 @@ class MemoryView(QWidget):
             )
             consumers.setWordWrap(True)
             consumers.setProperty("subtle", "true")
+            consumers.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
             self.gpu_layout.addWidget(consumers)
 
     def _run_action(self, action_id: str):
@@ -5072,7 +6080,7 @@ class MemoryView(QWidget):
                 "Restart CrapCleaner elevated to use this action.",
             )
             return
-        if action.kind != "vram":
+        if action.kind != "vram" and action.requires_admin:
             confirm = QMessageBox.question(
                 self,
                 action.name,
@@ -5083,7 +6091,10 @@ class MemoryView(QWidget):
 
         self._busy = True
         self.refresh_btn.setEnabled(False)
+        if hasattr(self, "flush_btn"):
+            self.flush_btn.setEnabled(False)
         self.result_label.setText(f"Running: {action.name}...")
+        self.result_banner.setVisible(True)
         from crapcleaner.gui.workers import MemoryActionWorker
 
         worker = MemoryActionWorker(action_id, parent=self)
@@ -5091,24 +6102,60 @@ class MemoryView(QWidget):
         worker.failed.connect(self._on_failed)
         worker.start()
 
+    def _relaunch_admin(self):
+        if elevate():
+            QApplication.quit()
+
     def _on_action_done(self, result):
         self._busy = False
         self.refresh_btn.setEnabled(True)
+        if hasattr(self, "flush_btn"):
+            self.flush_btn.setEnabled(True)
         if not result.success:
             self.result_label.setText(f"Not performed: {result.message}")
+            self.result_icon.setPixmap(
+                material_icon("warning", _c(self._theme, "warning")).pixmap(18, 18)
+            )
+            self.result_banner.setVisible(True)
             return
         if not result.measurable:
             self.result_label.setText(result.message)
+            self.result_icon.setPixmap(
+                material_icon("info", _c(self._theme, "accent")).pixmap(18, 18)
+            )
+            self.result_banner.setVisible(True)
             return
         before = format_size(result.before.available_bytes)
         after = format_size(result.after.available_bytes)
         reclaimed = format_size(result.reclaimed_bytes)
+        extra_tip = ""
+        if (
+            not is_admin()
+            and is_windows()
+            and self._report
+            and getattr(self._report.ram, "cached_bytes", 0) > 500 * 1024**2
+        ):
+            cached_str = format_size(self._report.ram.cached_bytes)
+            extra_tip = (
+                f" (Tip: Relaunch as Administrator to also purge {cached_str} of Standby Cache)."
+            )
         self.result_label.setText(
-            f"{result.message} Available memory {before} to {after} (reclaimed {reclaimed})."
+            f"{result.message} Available memory increased from {before} to {after} (+{reclaimed} reclaimed).{extra_tip}"
         )
+        self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
+        self.result_banner.setVisible(True)
         self.refresh()
 
     def apply_theme(self, theme: str):
         self._theme = theme
+        self.hero_title.setStyleSheet(
+            f"font-size: 24px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
+        self.pressure_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
+        for _, desc, effect, _ in self._action_cards.values():
+            desc.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
+            effect.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'faint')};")
         for effect in self._action_rows.values():
             effect.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'faint')};")

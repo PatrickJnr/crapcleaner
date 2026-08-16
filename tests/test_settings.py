@@ -43,3 +43,56 @@ class TestSettings:
             fh.write("{ not json !!!")
         settings = load_settings()
         assert settings["theme"] == "dark"
+
+
+def test_settings_view_tab_navigation_and_controls(app):
+    from PySide6.QtCore import Qt
+
+    from crapcleaner.gui.views import SettingsView
+
+    class FakeMain:
+        def __init__(self):
+            self._settings = {}
+
+        def apply_settings(self):
+            pass
+
+        def switch_theme(self, t):
+            pass
+
+    fake_main = FakeMain()
+    view = SettingsView(fake_main)
+
+    assert view.tab_stack.count() == 6
+    assert view.tab_stack.currentIndex() == 0
+
+    # Test tab switching
+    view._set_active_tab("safety", 1)
+    assert view.tab_stack.currentIndex() == 1
+    assert view._section_buttons["safety"].property("active") == "true"
+    assert view._section_buttons["themes"].property("active") == "false"
+
+    view._set_active_tab("rules", 4)
+    assert view.tab_stack.currentIndex() == 4
+
+    # Test category batch selection
+    view._disable_all_categories()
+    for i in range(view.cat_list.count()):
+        assert view.cat_list.item(i).checkState() == Qt.CheckState.Unchecked
+
+    view._enable_all_categories()
+    for i in range(view.cat_list.count()):
+        assert view.cat_list.item(i).checkState() == Qt.CheckState.Checked
+
+    view._enable_safe_only_categories()
+    # At least some categories should be checked (the SAFE ones)
+    checked_count = sum(
+        1
+        for i in range(view.cat_list.count())
+        if view.cat_list.item(i).checkState() == Qt.CheckState.Checked
+    )
+    assert 0 < checked_count < view.cat_list.count()
+
+    # Test apply theme
+    view.apply_theme("nord")
+    assert view._theme == "nord"

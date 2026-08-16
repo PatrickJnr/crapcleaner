@@ -68,7 +68,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"CrapCleaner [CCleaner] v{__version__}")
+        self.setWindowTitle(f"CrapCleaner v{__version__}")
         self.setWindowIcon(make_window_icon())
         self.resize(1200, 780)
         self.setMinimumSize(1000, 660)

@@ -49,6 +49,38 @@ class MemoryActionResult:
         return data
 
 
+def _process_working_sets_action() -> MemoryAction:
+    return MemoryAction(
+        id="process_working_sets",
+        name="Flush process working sets",
+        kind=RAM,
+        description=(
+            "Asks the operating system to trim unused working set pages from active processes "
+            "and return physical memory to the available pool. No applications or processes "
+            "are closed, terminated, or disrupted."
+        ),
+        effect=(
+            "Windows: EmptyWorkingSet across all accessible processes. "
+            "Linux: heap trim and page release."
+        ),
+        requires_admin=False,
+    )
+
+
+def _flush_all_action() -> MemoryAction:
+    return MemoryAction(
+        id="flush_all",
+        name="Flush all available memory",
+        kind=RAM,
+        description=(
+            "Performs a comprehensive memory sweep: trims working sets across active processes, "
+            "releases CrapCleaner's own heap, and (if elevated) purges the system standby cache."
+        ),
+        effect="Working set flush + application heap trim + standby purge (if elevated).",
+        requires_admin=False,
+    )
+
+
 def _working_set_action() -> MemoryAction:
     return MemoryAction(
         id="working_set",
@@ -118,7 +150,14 @@ def _vram_action() -> MemoryAction:
 
 
 def available_actions() -> list[MemoryAction]:
-    return [_working_set_action(), _standby_action(), _fs_cache_action(), _vram_action()]
+    return [
+        _flush_all_action(),
+        _process_working_sets_action(),
+        _working_set_action(),
+        _standby_action(),
+        _fs_cache_action(),
+        _vram_action(),
+    ]
 
 
 def get_action(action_id: str) -> MemoryAction | None:
@@ -126,6 +165,111 @@ def get_action(action_id: str) -> MemoryAction | None:
         if action.id == action_id:
             return action
     return None
+
+
+def _trim_process_working_sets() -> tuple[bool, str]:
+    if is_windows():
+        try:
+            import ctypes
+            import gc
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+
+            # Flush modified page list so pending pages can be freed
+            try:
+                cmd_flush_mod = ctypes.c_int(3)
+                ctypes.windll.ntdll.NtSetSystemInformation(
+                    80, ctypes.byref(cmd_flush_mod), ctypes.sizeof(cmd_flush_mod)
+                )
+            except Exception:
+                pass
+
+            PROCESS_QUERY_INFORMATION = 0x0400
+            PROCESS_SET_QUOTA = 0x0100
+
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.SetProcessWorkingSetSize.argtypes = [
+                wintypes.HANDLE,
+                ctypes.c_size_t,
+                ctypes.c_size_t,
+            ]
+            kernel32.SetProcessWorkingSetSize.restype = wintypes.BOOL
+            psapi.EmptyWorkingSet.argtypes = [wintypes.HANDLE]
+            psapi.EmptyWorkingSet.restype = wintypes.BOOL
+            psapi.EnumProcesses.argtypes = [
+                ctypes.POINTER(wintypes.DWORD),
+                wintypes.DWORD,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+            psapi.EnumProcesses.restype = wintypes.BOOL
+
+            pids = (wintypes.DWORD * 4096)()
+            cb_needed = wintypes.DWORD()
+            if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(cb_needed)):
+                return False, f"Could not enumerate processes (error {ctypes.get_last_error()})."
+
+            count = cb_needed.value // ctypes.sizeof(wintypes.DWORD)
+            trimmed_count = 0
+
+            # 2 passes ensure secondary background worker allocations are also cleaned
+            for _ in range(2):
+                for i in range(count):
+                    pid = pids[i]
+                    if pid <= 4:
+                        continue
+                    h = kernel32.OpenProcess(
+                        PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid
+                    )
+                    if h:
+                        try:
+                            if psapi.EmptyWorkingSet(h):
+                                trimmed_count += 1
+                            kernel32.SetProcessWorkingSetSize(
+                                h, ctypes.c_size_t(-1), ctypes.c_size_t(-1)
+                            )
+                        finally:
+                            kernel32.CloseHandle(h)
+
+            gc.collect()
+            return True, f"Flushed working sets across {trimmed_count} process passes."
+        except Exception as exc:
+            return False, f"Process working set flush failed: {exc}"
+    elif is_linux():
+        try:
+            import ctypes
+            import gc
+
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+            gc.collect()
+            return True, "Process heaps trimmed via malloc_trim."
+        except Exception as exc:
+            return False, f"Process memory trim unavailable: {exc}"
+    return False, "Unsupported platform."
+
+
+def _flush_all() -> tuple[bool, str]:
+    msgs = []
+    ok_ws, msg_ws = _trim_process_working_sets()
+    if ok_ws:
+        msgs.append(msg_ws)
+    ok_self, msg_self = _trim_working_set()
+    if ok_self:
+        msgs.append(msg_self)
+    if is_windows() and is_admin():
+        ok_st, msg_st = _purge_standby_list()
+        if ok_st:
+            msgs.append(msg_st)
+    elif is_linux() and is_admin():
+        ok_fc, msg_fc = _drop_caches()
+        if ok_fc:
+            msgs.append("Filesystem cache dropped.")
+
+    return True, " · ".join(msgs) if msgs else "Memory flush completed."
 
 
 def _trim_working_set() -> tuple[bool, str]:
@@ -176,12 +320,7 @@ class PrivilegeStatus:
 
 
 def enable_privilege(name: str) -> PrivilegeStatus:
-    """Enable a Windows privilege on this process token.
-
-    An elevated process still only holds the privileges present in its token,
-    so ``AdjustTokenPrivileges`` succeeding is not enough: Windows reports
-    ERROR_NOT_ALL_ASSIGNED when the privilege is simply not in the token.
-    """
+    """Enable a Windows privilege on this process token."""
     status = PrivilegeStatus(name=name, elevated=is_admin())
     if not is_windows():
         status.stage = "platform"
@@ -281,20 +420,63 @@ def enable_privilege(name: str) -> PrivilegeStatus:
 def _purge_standby_list() -> tuple[bool, str]:
     try:
         import ctypes
+        from ctypes import wintypes
 
         privilege = enable_privilege("SeProfileSingleProcessPrivilege")
+        enable_privilege("SeIncreaseQuotaPrivilege")
         if not privilege.enabled:
             return False, privilege.message
 
         SystemMemoryListInformation = 80
-        MemoryPurgeStandbyList = ctypes.c_int(4)
-        status = ctypes.windll.ntdll.NtSetSystemInformation(
+        ntdll = ctypes.windll.ntdll
+
+        # 1. Flush modified page list
+        cmd_flush_mod = ctypes.c_int(3)
+        ntdll.NtSetSystemInformation(
             SystemMemoryListInformation,
-            ctypes.byref(MemoryPurgeStandbyList),
-            ctypes.sizeof(MemoryPurgeStandbyList),
+            ctypes.byref(cmd_flush_mod),
+            ctypes.sizeof(cmd_flush_mod),
         )
+
+        # 2. Empty all system working sets
+        cmd_empty_ws = ctypes.c_int(2)
+        ntdll.NtSetSystemInformation(
+            SystemMemoryListInformation,
+            ctypes.byref(cmd_empty_ws),
+            ctypes.sizeof(cmd_empty_ws),
+        )
+
+        # 3. Purge all priority standby lists (0-7)
+        cmd_purge_standby = ctypes.c_int(4)
+        status = ntdll.NtSetSystemInformation(
+            SystemMemoryListInformation,
+            ctypes.byref(cmd_purge_standby),
+            ctypes.sizeof(cmd_purge_standby),
+        )
+
+        # 4. Purge low priority standby
+        cmd_purge_low = ctypes.c_int(5)
+        ntdll.NtSetSystemInformation(
+            SystemMemoryListInformation,
+            ctypes.byref(cmd_purge_low),
+            ctypes.sizeof(cmd_purge_low),
+        )
+
+        # 5. Trim Windows System File Cache
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.SetSystemFileCacheSize.argtypes = [
+                ctypes.c_size_t,
+                ctypes.c_size_t,
+                wintypes.DWORD,
+            ]
+            kernel32.SetSystemFileCacheSize.restype = wintypes.BOOL
+            kernel32.SetSystemFileCacheSize(ctypes.c_size_t(-1), ctypes.c_size_t(-1), 0)
+        except Exception:
+            pass
+
         if status == 0:
-            return True, "Standby list purged."
+            return True, "Standby list & system cache purged."
         return False, f"The kernel rejected the request (NTSTATUS 0x{status & 0xFFFFFFFF:08X})."
     except Exception as exc:
         return False, f"Standby list purge failed: {exc}"
@@ -351,7 +533,11 @@ def run_action(action_id: str, dry_run: bool = False) -> MemoryActionResult:
         result.message = f"Dry run: would perform {action.effect}"
         return result
 
-    if action_id == "working_set":
+    if action_id == "flush_all":
+        ok, message = _flush_all()
+    elif action_id == "process_working_sets":
+        ok, message = _trim_process_working_sets()
+    elif action_id == "working_set":
         ok, message = _trim_working_set()
     elif action_id == "standby_list":
         ok, message = _purge_standby_list()

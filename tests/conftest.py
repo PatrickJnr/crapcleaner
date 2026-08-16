@@ -18,3 +18,11 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("OneDrive", str(tmp_path / "onedrive"))
     monkeypatch.setenv("OneDriveConsumer", str(tmp_path / "onedrive_consumer"))
     return tmp_path
+
+
+@pytest.fixture
+def app():
+    from PySide6.QtWidgets import QApplication
+
+    _app = QApplication.instance() or QApplication([])
+    yield _app

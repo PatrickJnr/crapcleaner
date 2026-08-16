@@ -1,10 +1,10 @@
 """Application-wide constants."""
 
 APP_NAME = "CrapCleaner"
-APP_DISPLAY_NAME = "CrapCleaner [CCleaner]"
-VERSION = "1.0.4"
+APP_DISPLAY_NAME = "CrapCleaner"
+VERSION = "1.0.6"
 COMPANY_NAME = "CrapCleaner"
-APP_URL = ""
+APP_URL = "https://github.com/PatrickJnr/crapcleaner"
 
 CONFIG_DIR_NAME = "CrapCleaner"
 CONFIG_FILE = "config.json"

@@ -82,7 +82,35 @@ def qt_app():
 
 
 def test_extended_theme_set_is_available():
-    for expected in ("midnight", "slate", "forest"):
+    for expected in (
+        "midnight",
+        "slate",
+        "forest",
+        "cyberpunk",
+        "dracula",
+        "monokai",
+        "oceanic",
+        "tokyo-night",
+        "nord",
+        "sunset",
+        "matrix",
+        "coffee",
+        "rose-pine",
+        "gruvbox",
+        "synthwave",
+        "amber-crt",
+        "crimson",
+        "emerald",
+        "solar-eclipse",
+        "one-dark",
+        "cobalt",
+        "mint-choco",
+        "matcha",
+        "bubblegum",
+        "lavender",
+        "parchment",
+        "coffee",
+    ):
         assert expected in THEMES
         assert theme_label(expected) != expected
 
@@ -92,3 +120,89 @@ def test_oled_theme_uses_true_black_backgrounds():
     assert oled["window"] == "#000000"
     assert int(oled["panel"].lstrip("#"), 16) < int(PALETTES["dark"]["panel"].lstrip("#"), 16)
     assert oled["text"].lower() not in (oled["window"].lower(), oled["panel"].lower())
+
+
+def test_theme_categories_and_metadata_complete():
+    from crapcleaner.gui.theme import (
+        THEME_CATEGORIES,
+        get_theme_category,
+        get_theme_category_label,
+        get_theme_description,
+        get_theme_swatches,
+        is_dark_theme,
+    )
+
+    for theme_id in THEMES:
+        cat_id = get_theme_category(theme_id)
+        assert cat_id in THEME_CATEGORIES, f"Theme {theme_id} has invalid category {cat_id}"
+        cat_label = get_theme_category_label(theme_id)
+        assert cat_label == THEME_CATEGORIES[cat_id]
+
+        desc = get_theme_description(theme_id)
+        assert len(desc) > 5
+
+        swatches = get_theme_swatches(theme_id)
+        assert len(swatches) == 5
+        for s in swatches:
+            assert s.startswith("#") or s.startswith("rgba")
+
+        dark = is_dark_theme(theme_id)
+        assert isinstance(dark, bool)
+
+
+def test_theme_card_component(qt_app):
+    from crapcleaner.gui.theme_picker import ThemeCard
+
+    card = ThemeCard("tokyo-night")
+    assert card.theme_id == "tokyo-night"
+    assert "Tokyo Night" in card.title_label.text()
+    assert not card._is_active
+
+    card.set_active(True)
+    assert card._is_active
+    assert not card.active_badge.isHidden()
+
+    signals = []
+    card.clicked.connect(signals.append)
+    card.clicked.emit("tokyo-night")
+    assert signals == ["tokyo-night"]
+
+
+def test_theme_gallery_widget_filtering_and_selection(qt_app):
+    from crapcleaner.gui.theme_picker import ThemeGalleryWidget
+
+    gallery = ThemeGalleryWidget("dark")
+    assert gallery.current_theme() == "dark"
+    assert gallery.theme_combo.currentData() == "dark"
+
+    # Test selecting a new theme
+    changed_signals = []
+    gallery.theme_changed.connect(changed_signals.append)
+    gallery.select_theme("nord")
+    assert gallery.current_theme() == "nord"
+    assert gallery.theme_combo.currentData() == "nord"
+    assert changed_signals == ["nord"]
+    assert gallery.hero_name_label.text() == "Nordic Frost"
+
+    # Test category filtering
+    gallery._on_category_selected("retro")
+    visible_retro_cards = [c for c in gallery._cards.values() if not c.isHidden()]
+    assert len(visible_retro_cards) == 8
+    assert not gallery._cards["windows-95"].isHidden()
+    assert gallery._cards["dark"].isHidden()
+
+    # Test search query filtering
+    gallery._on_category_selected("all")
+    gallery._on_search_changed("dracula")
+    visible_search_cards = [c for c in gallery._cards.values() if not c.isHidden()]
+    assert len(visible_search_cards) == 1
+    assert not gallery._cards["dracula"].isHidden()
+
+    # Test search clear
+    gallery._on_search_changed("")
+    visible_all_cards = [c for c in gallery._cards.values() if not c.isHidden()]
+    assert len(visible_all_cards) == len(THEMES)
+
+    # Test random theme
+    gallery._select_random_theme()
+    assert gallery.current_theme() in THEMES

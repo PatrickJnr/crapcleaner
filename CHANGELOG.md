@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.6] - 2026-08-16
+
+Theme Gallery and Preferences redesign release.
+
+### Added
+- **Visual Theme Gallery**: replaces the plain dropdown with an interactive visual gallery displaying all 41 themes. Features real-time 5-color swatch bars, active theme preview banner, category filter chips (*Modern Dark*, *Light & Pastel*, *Retro & Vintage*, *Cyber & Synth*, *Code Palettes*, *Warm & Nature*), live search filtering, "Surprise Me" randomizer, and default reset.
+- **Live System Vitals Dashboard**: introduces zero-overhead real-time telemetry cards on the Dashboard for Network bandwidth (download & upload transfer rates, session transfer totals, and active connection adapter), RAM utilization with dynamic high-memory pressure alerts and quick Memory Cleaner access, real-time multi-core CPU load, GPU temperature monitoring & VRAM utilization, and live system uptime with fluid OutCubic animated transitions.
+- **Hardware Specs Skeleton Loading**: renders modern animated pulsing skeleton placeholder cards across the PC Specs view during async hardware, GPU, and SMART sensor queries, eliminating empty layout states.
+- **Overhauled Memory Cleaner View & Kernel Cache Purging**: redesigns the Memory Cleaner view with a high-impact Hero status banner, 2-column hardware vitals, and a multi-tier memory flush engine. Supports multi-pass process working set trimming (`psapi.EmptyWorkingSet`) for standard users, alongside one-click administrator elevation to purge the Windows kernel standby list (priorities 0–7), modified page list, and system file cache.
+- **Segmented Settings Architecture**: organizes Preferences & Configuration into dedicated sub-tabs (*Appearance & Themes*, *Safety & Protection*, *Exclusions & Roots*, *Scan Performance*, *Category Rules*, *Backup & Sync*) with sticky top actions and quick-tuning performance presets.
+- **Pure Material Icon Typography & View Upgrades**: renders crisp Google Material Icons dynamically colored to match the active theme palette across all preferences, action buttons, category chips, and toolbar controls in every view, alongside real-time active scanning indicators.
+
+### Changed
+- **Branding consistency**: standardizes application title and branding to pure *CrapCleaner*, removing legacy comparison references.
+
+---
+
 ## [1.0.5] - 2026-08-16
 
 Repository reorganization release. Behaviour is unchanged; module paths are not.

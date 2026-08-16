@@ -22,9 +22,8 @@ def test_zero_registry_cleaners_in_categories():
         id_lower = cat.id.lower()
 
         for term in forbidden_terms:
-            assert term not in name_lower, (
-                f"Forbidden term '{term}' found in category name: {cat.name}"
-            )
+            msg = f"Forbidden term '{term}' found in category name: {cat.name}"
+            assert term not in name_lower, msg
             assert term not in id_lower, f"Forbidden term '{term}' found in category id: {cat.id}"
             # Ensure description doesn't promise registry cleaning
             if "registry" in desc_lower:
@@ -49,6 +48,5 @@ def test_no_registry_writing_modules():
             mod = importlib.import_module(f"{package.__name__}.{modname}")
             # Cleaners should never have winreg write functions
             for attr in ["DeleteKey", "DeleteValue", "SetValue", "SetValueEx"]:
-                assert not hasattr(mod, attr), (
-                    f"Cleaner module {modname} contains forbidden winreg attribute: {attr}"
-                )
+                msg = f"Cleaner module {modname} contains forbidden winreg attribute: {attr}"
+                assert not hasattr(mod, attr), msg
