@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.7] - 2026-08-16
+
+Quality of Life, Scan Insights, and Stability release.
+
+### Added
+- **Scan Insights & Space Recommendations**: adds an interactive `ScanInsightsWidget` directly in the Deep Cleanup view providing immediate visual breakdowns of safe vs reviewable reclaimable space, top storage-consuming categories, and actionable recommendations.
+- **Storage Analyzer Quick-Access Bookmarks**: introduces a one-click directory favorites bar in the Storage Breakdown view (Home, Downloads, Documents, AppData / .config, Temp, Videos) for instant storage exploration without manual folder browsing.
+- **Async Worker Thread Lifecycle & Stability**: introduces strict QThread lifecycle management across all async inspectors (`SpecsWorker`, `HealthWorker`, `StorageAnalysisWorker`, `MemoryReportWorker`, `MemoryActionWorker`), ensuring clean thread termination, graceful parent widget destruction, and zero headless CI/Windows access violations.
+- **Theme Fade Transition Polish**: optimizes UI theme cross-fades by safeguarding against widget and animation double-deletion, with resilient fallback handling in headless and virtual display environments.
+
+### Improved
+- **Hardware & GPU Detection**: enhances GPU and VRAM introspection across Windows and Linux platforms with robust error handling for hybrid multi-GPU setups and virtual display environments.
+- **Test Suite Teardown & Isolation**: adds automated Qt top-level widget and thread cleanup fixtures in pytest, ensuring 100% test isolation and zero cross-test event leaks.
+
+---
+
 ## [1.0.6] - 2026-08-16
 
 Theme Gallery and Preferences redesign release.

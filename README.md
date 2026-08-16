@@ -62,8 +62,10 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 
 ## Features
 
-### 1. Storage Dashboard & Live System Vitals
+### 1. Storage Dashboard, Live System Vitals & Quick-Access
 - **Live System Telemetry Dashboard**: real-time network throughput (download/upload rates, session transfer totals, and active connection adapter), RAM load with dynamic high-memory pressure alerts and one-click Memory Cleaner access, real-time multi-core CPU utilization, GPU temperature monitoring & VRAM consumption (NVIDIA NVML & Linux DRM), and live system uptime with fluid exponential moving average (EMA) smoothing and cubic eased animations.
+- **Scan Insights & Space Recommendations**: interactive cleanup summary showing instant visual proportions of Safe vs Reviewable space, top storage-consuming categories, and actionable cleanup tips before execution.
+- **Storage Analyzer Quick-Access Bookmarks**: one-click favorites bar in the Storage Breakdown view (Home, Downloads, Documents, AppData / .config, Temp, Videos) for instant directory navigation and inspection.
 - Real-time disk capacity and reclaimable space calculation across all mounted drives.
 - Storage Breakdown: proportional storage grid where each cell's area maps to its size, so the largest consumers stand out immediately. Drill into folders, navigate with the keyboard (arrows, Enter, Backspace), and hover for full paths; junction, symlink, and loop protection is preserved throughout.
 - Drive health, media type, and TRIM diagnostics are cached briefly and shared across views, so switching views does not re-run the underlying platform query.
