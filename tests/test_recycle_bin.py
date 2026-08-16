@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from crapcleaner.cleaners.recycle_bin import empty_trash, get_recycle_bin_info
+from crapcleaner.analysis.recycle_bin import empty_trash, get_recycle_bin_info
 
 
 def test_get_recycle_bin_info_structure():
@@ -32,10 +32,10 @@ def test_linux_trash_parsing(tmp_path):
         "[Trash Info]\nPath=/home/user/test.txt\nDeletionDate=2026-08-15T12:00:00\n"
     )
 
-    with patch("crapcleaner.cleaners.recycle_bin.is_windows", return_value=False):
-        with patch("crapcleaner.cleaners.recycle_bin.is_linux", return_value=True):
+    with patch("crapcleaner.analysis.recycle_bin.is_windows", return_value=False):
+        with patch("crapcleaner.analysis.recycle_bin.is_linux", return_value=True):
             with patch(
-                "crapcleaner.cleaners.recycle_bin.get_user_profile", return_value=str(tmp_path)
+                "crapcleaner.analysis.recycle_bin.get_user_profile", return_value=str(tmp_path)
             ):
                 info = get_recycle_bin_info()
                 assert info.available
@@ -46,5 +46,5 @@ def test_linux_trash_parsing(tmp_path):
 
 
 def test_empty_trash_wrapper():
-    with patch("crapcleaner.cleaners.recycle_bin._empty_trash", return_value=True):
+    with patch("crapcleaner.analysis.recycle_bin._empty_trash", return_value=True):
         assert empty_trash() is True

@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from crapcleaner.apps.cleanup import get_categories as get_apps_categories
-from crapcleaner.browsers.cleanup import get_categories as get_browser_categories
-from crapcleaner.specs.hardware import (
+from crapcleaner.categories.apps import get_categories as get_apps_categories
+from crapcleaner.categories.browsers import get_categories as get_browser_categories
+from crapcleaner.system.hardware import (
     _get_cpu_specs,
     _get_memory_specs,
     _get_motherboard_specs,
@@ -39,8 +39,8 @@ def test_get_drive_info_linux(mock_win, tmp_path):
     assert info["total"] > 0
 
 
-@patch("crapcleaner.apps.cleanup.is_linux", return_value=True)
-@patch("crapcleaner.apps.cleanup.is_windows", return_value=False)
+@patch("crapcleaner.categories.apps.is_linux", return_value=True)
+@patch("crapcleaner.categories.apps.is_windows", return_value=False)
 def test_linux_app_categories(mock_win, mock_linux):
     cats = get_apps_categories()
     ids = {c.id for c in cats}
@@ -54,8 +54,8 @@ def test_linux_app_categories(mock_win, mock_linux):
     assert "spotify_cache" in ids
 
 
-@patch("crapcleaner.browsers.cleanup.is_linux", return_value=True)
-@patch("crapcleaner.browsers.cleanup.is_windows", return_value=False)
+@patch("crapcleaner.categories.browsers.is_linux", return_value=True)
+@patch("crapcleaner.categories.browsers.is_windows", return_value=False)
 def test_linux_browser_categories(mock_win, mock_linux):
     # Mocking user profile with browser directories
     cats = get_browser_categories()
@@ -74,31 +74,31 @@ def test_read_text_fallback():
     assert _read_text("/nonexistent/file/path/that/does/not/exist") == ""
 
 
-@patch("crapcleaner.specs.hardware.os.name", "posix")
-@patch("crapcleaner.specs.hardware.is_linux", return_value=True)
+@patch("crapcleaner.system.hardware.os.name", "posix")
+@patch("crapcleaner.system.hardware.is_linux", return_value=True)
 def test_linux_os_specs(mock_linux):
     spec = _get_os_specs()
     assert spec.architecture != ""
     assert spec.computer_name != ""
 
 
-@patch("crapcleaner.specs.hardware.os.name", "posix")
-@patch("crapcleaner.specs.hardware.is_linux", return_value=True)
+@patch("crapcleaner.system.hardware.os.name", "posix")
+@patch("crapcleaner.system.hardware.is_linux", return_value=True)
 def test_linux_cpu_specs(mock_linux):
     spec = _get_cpu_specs()
     assert spec.cores_logical >= 1
     assert spec.cores_physical >= 1
 
 
-@patch("crapcleaner.specs.hardware.os.name", "posix")
-@patch("crapcleaner.specs.hardware.is_linux", return_value=True)
+@patch("crapcleaner.system.hardware.os.name", "posix")
+@patch("crapcleaner.system.hardware.is_linux", return_value=True)
 def test_linux_memory_specs(mock_linux):
     spec = _get_memory_specs()
     assert isinstance(spec.total_bytes, int)
 
 
-@patch("crapcleaner.specs.hardware.os.name", "posix")
-@patch("crapcleaner.specs.hardware.is_linux", return_value=True)
+@patch("crapcleaner.system.hardware.os.name", "posix")
+@patch("crapcleaner.system.hardware.is_linux", return_value=True)
 def test_linux_motherboard_specs(mock_linux):
     spec = _get_motherboard_specs()
     assert isinstance(spec.manufacturer, str)

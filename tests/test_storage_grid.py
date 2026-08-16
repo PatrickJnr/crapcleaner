@@ -2,7 +2,7 @@
 
 import pytest
 
-from crapcleaner.storage.analyzer import StorageNode
+from crapcleaner.analysis.storage import StorageNode
 
 
 @pytest.fixture

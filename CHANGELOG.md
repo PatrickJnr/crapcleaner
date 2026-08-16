@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.5] - 2026-08-16
+
+Repository reorganization release. Behaviour is unchanged; module paths are not.
+
+### Changed
+- **Cleanup providers live in one package**: the eleven single-module packages (`crapcleaner.ai`, `apps`, `browsers`, `developer`, `docker`, `dotnet`, `gaming`, `gpu`, `node`, `python`, `windows`) collapse into `crapcleaner.categories.<name>`, so every provider sits side by side instead of behind its own `cleanup.py`.
+- **Scan and cleanup engine sits in `crapcleaner.core`**: `cleaners.cleaner`, `cleaners.actions`, `cleaners.preview`, `scanner.scanner`, `scanner.cache`, `scanner.size`, `safety.protected_paths`, and `scheduler.scanner` move to `core.cleaner`, `core.actions`, `core.preview`, `core.scanner`, `core.cache`, `core.size`, `core.protected_paths`, and `core.scheduler`.
+- **Read-only disk inspection sits in `crapcleaner.analysis`**: `storage.analyzer`, `storage.file_types`, `storage.old_files`, `storage.virtual_machines`, `large_files.scanner`, `large_files.installers`, `duplicates.finder`, `cleaners.crash_dumps`, and `cleaners.recycle_bin` move to `analysis.storage`, `analysis.file_types`, `analysis.old_files`, `analysis.virtual_machines`, `analysis.large_files`, `analysis.installers`, `analysis.duplicates`, `analysis.crash_dumps`, and `analysis.recycle_bin`.
+- **Hardware and memory introspection sits in `crapcleaner.system`**: `specs.hardware`, `specs.storage_health`, `memory.cleaner`, and `memory.report` move to `system.hardware`, `system.storage_health`, `system.memory_actions`, and `system.memory_report`.
+- **Single-module packages flatten to modules**: `config.settings`, `history.store`, and `reports.exporter` become `crapcleaner.config`, `crapcleaner.history`, and `crapcleaner.reports`.
+- **Assets consolidate into `crapcleaner/assets/`**: the Material Icons font, its codepoints, its licence (as `FONT-LICENSE`), and the About-page avatar share one directory, so frozen builds bundle a single `--add-data` path instead of two.
+- **Build tooling moves under `scripts/`**: `build.bat` becomes `scripts/build_windows.bat` and `build_launcher.py` becomes `scripts/launcher.py`, joining the existing `scripts/build_linux.sh`.
+
+### Added
+- Packaging declares `crapcleaner/assets/*` as package data, so a built wheel carries the icon font and avatar rather than relying on an editable install.
+
+### Documentation
+- README gains a Project Structure section describing the current layout.
+- CONTRIBUTING points at `crapcleaner/categories/` for new cleanup categories and documents the build scripts.
+
+---
+
 ## [1.0.4] - 2026-08-15
 
 Linux-focused hotfix release.

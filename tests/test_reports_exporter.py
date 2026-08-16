@@ -2,7 +2,7 @@
 
 import json
 
-from crapcleaner.reports.exporter import export_report
+from crapcleaner.reports import export_report
 
 
 def test_export_report_json():

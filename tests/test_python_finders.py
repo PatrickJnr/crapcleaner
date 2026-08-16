@@ -2,7 +2,7 @@
 
 import os
 
-from crapcleaner.python.cleanup import (
+from crapcleaner.categories.python import (
     _is_skipped_dir,
     find_build_dirs,
     find_egg_info_dirs,
@@ -109,7 +109,7 @@ class TestGetCategories:
         assert len(cats) > 0
 
     def test_include_all_drives_adds_drive_roots(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("crapcleaner.python.cleanup.list_drives", lambda: ["C:\\", "D:\\"])
+        monkeypatch.setattr("crapcleaner.categories.python.list_drives", lambda: ["C:\\", "D:\\"])
         cats = get_categories(scan_roots=[], include_all_drives=True)
         finder_cats = [c for c in cats if c.finder is not None]
         assert finder_cats, "expected at least one finder-based category"

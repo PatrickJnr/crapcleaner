@@ -3,7 +3,7 @@
 import os
 import time
 
-from crapcleaner.storage.old_files import find_old_files
+from crapcleaner.analysis.old_files import find_old_files
 
 
 def test_find_old_files_filtering(tmp_path):

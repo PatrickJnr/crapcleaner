@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
 )
 
 from crapcleaner import __version__
-from crapcleaner.config.settings import load_settings, update_settings
+from crapcleaner.config import load_settings, update_settings
+from crapcleaner.core.cache import ScanCache
 from crapcleaner.gui.dialogs import ConfirmCleanupDialog, ReportDialog
 from crapcleaner.gui.sidebar import Sidebar
 from crapcleaner.gui.theme import apply_theme, make_window_icon
@@ -42,10 +43,9 @@ from crapcleaner.gui.workers import (
     LargeFilesWorker,
     ScanWorker,
 )
-from crapcleaner.history.store import append as history_append
+from crapcleaner.history import append as history_append
 from crapcleaner.models.history import HistoryEntry
 from crapcleaner.registry import get_all_categories
-from crapcleaner.scanner.cache import ScanCache
 from crapcleaner.utils.format import format_datetime, format_size
 
 
@@ -258,7 +258,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Scan cancelled by user.", 4000)
 
     def start_scan(self):
-        from crapcleaner.scanner.scanner import ScanEngine
+        from crapcleaner.core.scanner import ScanEngine
 
         ttl = float(self._settings.get("scan_cache_ttl", 300))
         self._scan_cache = ScanCache(ttl=ttl)

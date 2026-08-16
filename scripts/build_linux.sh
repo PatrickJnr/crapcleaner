@@ -19,7 +19,7 @@ fi
 
 "$PYTHON_BIN" -m pip install -e .
 "$PYTHON_BIN" -m pip install pyinstaller
-"$PYTHON_BIN" -m PyInstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --add-data "crapcleaner/gui/assets:crapcleaner/gui/assets" --add-data "crapcleaner/assets:crapcleaner/assets" build_launcher.py
+"$PYTHON_BIN" -m PyInstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --add-data "crapcleaner/assets:crapcleaner/assets" scripts/launcher.py
 
 echo "Linux binary built at: $DIST_DIR/crapcleaner-linux-x86_64"
 ls -lh "$DIST_DIR/crapcleaner-linux-x86_64"

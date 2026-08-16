@@ -4,9 +4,9 @@ import os
 
 import pytest
 
-from crapcleaner.storage.analyzer import analyze_storage_hierarchy
-from crapcleaner.storage.file_types import analyze_file_types
-from crapcleaner.storage.virtual_machines import detect_virtual_machine_storage
+from crapcleaner.analysis.file_types import analyze_file_types
+from crapcleaner.analysis.storage import analyze_storage_hierarchy
+from crapcleaner.analysis.virtual_machines import detect_virtual_machine_storage
 
 
 def test_analyze_storage_hierarchy(tmp_path):
@@ -56,9 +56,11 @@ def test_detect_virtual_machine_storage(tmp_path):
 
     from unittest.mock import patch
 
-    with patch("crapcleaner.storage.virtual_machines.get_user_profile", return_value=str(tmp_path)):
+    with patch(
+        "crapcleaner.analysis.virtual_machines.get_user_profile", return_value=str(tmp_path)
+    ):
         with patch(
-            "crapcleaner.storage.virtual_machines.get_local_appdata", return_value=str(tmp_path)
+            "crapcleaner.analysis.virtual_machines.get_local_appdata", return_value=str(tmp_path)
         ):
             items = detect_virtual_machine_storage()
             assert any(i.platform == "VirtualBox" for i in items)
@@ -69,7 +71,7 @@ def test_detect_virtual_machine_storage(tmp_path):
 
 
 def test_analyzer_results_are_stable_and_bounded(tmp_path):
-    from crapcleaner.storage.analyzer import analyze_storage_hierarchy
+    from crapcleaner.analysis.storage import analyze_storage_hierarchy
 
     (tmp_path / "a").mkdir()
     (tmp_path / "a" / "deep").mkdir()
@@ -96,7 +98,7 @@ def test_analyzer_results_are_stable_and_bounded(tmp_path):
 def test_analyzer_cancels_promptly(tmp_path):
     import threading
 
-    from crapcleaner.storage.analyzer import analyze_storage_hierarchy
+    from crapcleaner.analysis.storage import analyze_storage_hierarchy
 
     for i in range(30):
         d = tmp_path / f"dir{i}"
@@ -112,7 +114,7 @@ def test_analyzer_cancels_promptly(tmp_path):
 
 def test_symlinked_directory_is_not_counted_twice(tmp_path):
 
-    from crapcleaner.storage.analyzer import analyze_storage_hierarchy
+    from crapcleaner.analysis.storage import analyze_storage_hierarchy
 
     real = tmp_path / "real"
     real.mkdir()
@@ -128,7 +130,7 @@ def test_symlinked_directory_is_not_counted_twice(tmp_path):
 
 
 def test_linux_pseudo_subtrees_are_skipped(monkeypatch, tmp_path):
-    from crapcleaner.storage import analyzer as analyzer_mod
+    from crapcleaner.analysis import storage as analyzer_mod
 
     monkeypatch.setattr(analyzer_mod, "is_linux", lambda: True)
     monkeypatch.setattr(

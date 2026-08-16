@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crapcleaner"
-version = "1.0.4"
+version = "1.0.5"
 description = "Modern cleanup and disk-analysis utility (CCleaner-style)"
 requires-python = ">=3.10"
 dependencies = ["PySide6>=6.5"]
@@ -14,6 +14,9 @@ crapcleaner = "crapcleaner.app:main"
 
 [tool.setuptools.packages.find]
 include = ["crapcleaner*"]
+
+[tool.setuptools.package-data]
+crapcleaner = ["assets/*"]
 
 [tool.ruff]
 target-version = "py310"

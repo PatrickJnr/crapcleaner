@@ -3,7 +3,7 @@
 import json
 import os
 
-from crapcleaner.config.settings import (
+from crapcleaner.config import (
     config_dir,
     config_path,
     load_settings,

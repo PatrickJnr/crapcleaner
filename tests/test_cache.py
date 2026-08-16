@@ -2,7 +2,7 @@
 
 import time
 
-from crapcleaner.scanner.cache import ScanCache
+from crapcleaner.core.cache import ScanCache
 
 
 def _tree(path, spec):
@@ -87,8 +87,8 @@ class TestScanCache:
 
 
 def test_scan_category_uses_cache(tmp_path):
+    from crapcleaner.core.scanner import scan_category
     from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-    from crapcleaner.scanner.scanner import scan_category
 
     _tree(tmp_path / "t", {"a.txt": b"x" * 100})
     cat = CleanupCategory(

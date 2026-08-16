@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crapcleaner.config.settings import config_path, load_settings, save_settings
+from crapcleaner.config import config_path, load_settings, save_settings
 from crapcleaner.constants import DEFAULT_CONFIG
 from crapcleaner.gui.dialogs import (
     ConfirmDeleteDialog,
@@ -59,14 +59,14 @@ from crapcleaner.gui.dialogs import (
 )
 from crapcleaner.gui.theme import THEMES, theme_label
 from crapcleaner.gui.theme import color as theme_color
-from crapcleaner.history.store import clear as clear_history
-from crapcleaner.history.store import load as load_history
-from crapcleaner.memory import available_actions as available_memory_actions
-from crapcleaner.memory import get_action as get_memory_action
+from crapcleaner.history import clear as clear_history
+from crapcleaner.history import load as load_history
 from crapcleaner.models.category import SafetyLevel
 from crapcleaner.models.report import ScanReport
 from crapcleaner.registry import get_all_categories
-from crapcleaner.reports.exporter import export_report
+from crapcleaner.reports import export_report
+from crapcleaner.system.memory_actions import available_actions as available_memory_actions
+from crapcleaner.system.memory_actions import get_action as get_memory_action
 from crapcleaner.utils.contributors import fetch_avatar_file, fetch_contributors
 from crapcleaner.utils.format import (
     format_datetime,
@@ -3377,7 +3377,7 @@ class SpecsView(QWidget):
         import contextlib
         import io
 
-        from crapcleaner.specs.hardware import print_specs_summary
+        from crapcleaner.system.hardware import print_specs_summary
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -4748,7 +4748,7 @@ class HelpSafetyView(QWidget):
         import platform
 
         from crapcleaner import __version__
-        from crapcleaner.config.settings import load_settings
+        from crapcleaner.config import load_settings
 
         settings = load_settings()
         excl_count = len(settings.get("excluded_paths", []))

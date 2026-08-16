@@ -2,8 +2,8 @@
 
 import os
 
-import crapcleaner.cleaners.cleaner as cleaner_mod
-from crapcleaner.cleaners.cleaner import clean_categories
+import crapcleaner.core.cleaner as cleaner_mod
+from crapcleaner.core.cleaner import clean_categories
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
 
 

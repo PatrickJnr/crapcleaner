@@ -18,6 +18,7 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 - [Installation](#installation)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Project Structure](#project-structure)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -224,6 +225,33 @@ crapcleaner --specs
 | `F5` | Refresh the active view |
 | `Ctrl+F` | Focus the search box in views that have one |
 | `Esc` | Cancel the running scan |
+
+---
+
+## Project Structure
+
+```
+crapcleaner/
+  app.py            Entry point that dispatches to the GUI or the CLI
+  cli.py            Command line interface
+  registry.py       Assembles cleanup categories from every provider
+  config.py         Settings load/save and config directory resolution
+  history.py        Local cleanup audit log
+  reports.py        JSON / CSV / TXT report exporter
+  constants.py      Shared constants
+  categories/       Cleanup category providers (windows, browsers, gaming, ...)
+  core/             Scan and cleanup engine, safety rules, scheduler
+  analysis/         Storage breakdown, duplicates, large files, recycle bin, crash dumps
+  system/           Hardware specs, disk health, memory reporting and reclamation
+  gui/              PySide6 interface (views, theme, icons, workers)
+  models/           Dataclasses for categories, scan results, and reports
+  utils/            Platform helpers, safe file operations, formatting, updater
+  assets/           Bundled fonts and images
+scripts/            Build scripts and the PyInstaller entry point
+tests/              Test suite
+```
+
+Category providers expose a `get_categories()` function and are wired together in `crapcleaner/registry.py`.
 
 ---
 

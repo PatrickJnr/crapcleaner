@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from crapcleaner.safety.protected_paths import (
+from crapcleaner.core.protected_paths import (
     get_protected_rules_summary,
     get_protected_system_roots,
     is_path_protected,
@@ -60,7 +60,7 @@ def test_is_path_protected_browser_credentials_windows():
 
 @windows_only
 def test_is_path_protected_system_roots_windows():
-    with patch("crapcleaner.safety.protected_paths.get_windows_dir", return_value="C:\\Windows"):
+    with patch("crapcleaner.core.protected_paths.get_windows_dir", return_value="C:\\Windows"):
         assert is_path_protected("C:\\Windows")
         assert is_path_protected("C:\\Windows\\System32")
 

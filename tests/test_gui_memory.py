@@ -2,7 +2,7 @@
 
 import pytest
 
-from crapcleaner.memory.report import GpuMemoryStats, MemoryReport, MemoryStats
+from crapcleaner.system.memory_report import GpuMemoryStats, MemoryReport, MemoryStats
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ def test_error_state(memory_view):
 
 
 def test_action_failure_is_reported(memory_view):
-    from crapcleaner.memory.cleaner import MemoryActionResult
+    from crapcleaner.system.memory_actions import MemoryActionResult
 
     memory_view._on_action_done(
         MemoryActionResult(action_id="standby_list", success=False, message="Needs admin.")
@@ -85,7 +85,7 @@ def test_action_failure_is_reported(memory_view):
 
 
 def test_read_only_action_result_has_no_reclaim_claim(memory_view):
-    from crapcleaner.memory.cleaner import MemoryActionResult
+    from crapcleaner.system.memory_actions import MemoryActionResult
 
     memory_view._on_action_done(
         MemoryActionResult(

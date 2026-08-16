@@ -83,7 +83,7 @@ def test_report_separates_permission_failures_from_errors():
 
 
 def test_protected_paths_are_skips_not_errors(tmp_path, monkeypatch):
-    from crapcleaner.cleaners import cleaner as cleaner_mod
+    from crapcleaner.core import cleaner as cleaner_mod
 
     monkeypatch.setattr(cleaner_mod, "validate_cleanup_path", lambda path: (False, "protected"))
     result = cleaner_mod._delete_target_files(str(tmp_path), (), True, False, True, None, False)

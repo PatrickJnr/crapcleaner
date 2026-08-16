@@ -22,7 +22,7 @@ jobs:
           pip install pyinstaller
       - name: Build Standalone Windows Executable
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name CrapCleaner --add-data "crapcleaner/gui/assets;crapcleaner/gui/assets" --add-data "crapcleaner/assets;crapcleaner/assets" build_launcher.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name CrapCleaner --add-data "crapcleaner/assets;crapcleaner/assets" scripts/launcher.py
       - name: Generate SHA-256 Checksum
         run: |
           cd dist
@@ -55,7 +55,7 @@ jobs:
           pip install pyinstaller
       - name: Build Standalone Linux Binary
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --add-data "crapcleaner/gui/assets:crapcleaner/gui/assets" --add-data "crapcleaner/assets:crapcleaner/assets" build_launcher.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --add-data "crapcleaner/assets:crapcleaner/assets" scripts/launcher.py
           chmod +x dist/crapcleaner-linux-x86_64
       - name: Package Tarball and Checksum
         run: |

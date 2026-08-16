@@ -3,11 +3,11 @@
 import os
 import tempfile
 
-from crapcleaner.safety.protected_paths import (
+from crapcleaner.core.protected_paths import (
     is_path_excluded,
     validate_cleanup_path,
 )
-from crapcleaner.scanner.size import compute_dir_size
+from crapcleaner.core.size import compute_dir_size
 
 
 def test_is_path_excluded():
@@ -58,7 +58,7 @@ def test_compute_dir_size_skips_excluded():
         from unittest.mock import patch
 
         with patch(
-            "crapcleaner.config.settings.load_settings",
+            "crapcleaner.config.load_settings",
             return_value={"excluded_paths": [nested_dir]},
         ):
             total_excl, count_excl, skipped_excl = compute_dir_size(tmpdir)

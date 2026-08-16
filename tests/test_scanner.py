@@ -1,8 +1,8 @@
 """Tests for scan engine and directory size computation."""
 
+from crapcleaner.core.scanner import ScanEngine, scan_category
+from crapcleaner.core.size import compute_dir_size
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.scanner.scanner import ScanEngine, scan_category
-from crapcleaner.scanner.size import compute_dir_size
 
 
 def _make_tree(tmp_path, spec):

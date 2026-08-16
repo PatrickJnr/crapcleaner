@@ -1,6 +1,6 @@
 """Unit tests for the pre-cleanup preview engine."""
 
-from crapcleaner.cleaners.preview import generate_cleanup_preview
+from crapcleaner.core.preview import generate_cleanup_preview
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
 
 

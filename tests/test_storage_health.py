@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from crapcleaner.specs.storage_health import (
+from crapcleaner.system.storage_health import (
     DiskHealthInfo,
     _get_fallback_storage_health,
     _get_windows_trim_status,
@@ -12,7 +12,7 @@ from crapcleaner.specs.storage_health import (
 
 def test_get_windows_trim_status():
     with patch(
-        "crapcleaner.specs.storage_health.run_command",
+        "crapcleaner.system.storage_health.run_command",
         return_value={
             "stdout": "NTFS DisableDeleteNotify = 0 (Disabled)\nReFS DisableDeleteNotify = 0"
         },
@@ -22,7 +22,7 @@ def test_get_windows_trim_status():
         assert enabled is True
 
     with patch(
-        "crapcleaner.specs.storage_health.run_command",
+        "crapcleaner.system.storage_health.run_command",
         return_value={"stdout": "NTFS DisableDeleteNotify = 1 (Enabled)"},
     ):
         supp, enabled = _get_windows_trim_status()
@@ -49,7 +49,7 @@ def test_fallback_storage_health():
 
 
 def _disk(device_id="C:"):
-    from crapcleaner.specs.storage_health import DiskHealthInfo
+    from crapcleaner.system.storage_health import DiskHealthInfo
 
     return DiskHealthInfo(
         device_id=device_id,
@@ -67,7 +67,7 @@ def _disk(device_id="C:"):
 
 
 def test_health_report_is_cached_between_calls(monkeypatch):
-    from crapcleaner.specs import storage_health
+    from crapcleaner.system import storage_health
 
     storage_health.clear_storage_health_cache()
     calls = []
@@ -95,7 +95,7 @@ def test_health_report_is_cached_between_calls(monkeypatch):
 
 
 def test_cached_report_is_a_copy(monkeypatch):
-    from crapcleaner.specs import storage_health
+    from crapcleaner.system import storage_health
 
     storage_health.clear_storage_health_cache()
     monkeypatch.setattr(

@@ -24,6 +24,12 @@ Thank you for your interest in contributing to **CrapCleaner**. We welcome contr
    - GUI mode: `python -m crapcleaner.app`
    - CLI mode: `python -m crapcleaner.cli --scan`
 
+4. **Build a Standalone Binary** (optional):
+   - Windows: `scripts\build_windows.bat` (add `onedir` for a folder build)
+   - Linux: `sh scripts/build_linux.sh`
+
+The repository layout is documented in the [Project Structure](README.md#project-structure) section of the README.
+
 ---
 
 ## Testing and Code Quality
@@ -46,7 +52,7 @@ mypy crapcleaner
 
 To add support for a new application or cache directory:
 
-1. Locate the appropriate category provider module under `crapcleaner/` (such as `crapcleaner/developer/cleanup.py` or `crapcleaner/apps/cleanup.py`).
+1. Locate the appropriate category provider module under `crapcleaner/categories/` (such as `crapcleaner/categories/developer.py` or `crapcleaner/categories/apps.py`), then register it in `crapcleaner/registry.py` if you added a new provider module.
 2. Add a `CleanupCategory` definition:
    ```python
    from crapcleaner.models.category import CleanupCategory, CacheTarget, SafetyLevel

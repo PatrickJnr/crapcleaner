@@ -9,26 +9,26 @@ from datetime import datetime
 from typing import Any
 
 from crapcleaner import __version__
-from crapcleaner.cleaners.actions import run_action
-from crapcleaner.cleaners.cleaner import clean_categories
-from crapcleaner.cleaners.preview import generate_cleanup_preview
-from crapcleaner.cleaners.recycle_bin import empty_trash, get_recycle_bin_info
-from crapcleaner.config.settings import load_settings
-from crapcleaner.duplicates.finder import find_duplicates
-from crapcleaner.large_files.installers import scan_installers
-from crapcleaner.large_files.scanner import scan_large_files
+from crapcleaner.analysis.duplicates import find_duplicates
+from crapcleaner.analysis.file_types import analyze_file_types
+from crapcleaner.analysis.installers import scan_installers
+from crapcleaner.analysis.large_files import scan_large_files
+from crapcleaner.analysis.recycle_bin import empty_trash, get_recycle_bin_info
+from crapcleaner.analysis.storage import analyze_storage_hierarchy
+from crapcleaner.config import load_settings
+from crapcleaner.core.actions import run_action
+from crapcleaner.core.cleaner import clean_categories
+from crapcleaner.core.preview import generate_cleanup_preview
+from crapcleaner.core.protected_paths import (
+    get_protected_rules_summary,
+)
+from crapcleaner.core.scanner import ScanEngine
+from crapcleaner.core.size import compute_dir_size
 from crapcleaner.models.category import CleanupCategory, SafetyLevel
 from crapcleaner.models.report import CleanupReport, ScanReport
 from crapcleaner.registry import find_categories, get_all_categories
-from crapcleaner.reports.exporter import export_report
-from crapcleaner.safety.protected_paths import (
-    get_protected_rules_summary,
-)
-from crapcleaner.scanner.scanner import ScanEngine
-from crapcleaner.scanner.size import compute_dir_size
-from crapcleaner.specs.storage_health import get_storage_health_report
-from crapcleaner.storage.analyzer import analyze_storage_hierarchy
-from crapcleaner.storage.file_types import analyze_file_types
+from crapcleaner.reports import export_report
+from crapcleaner.system.storage_health import get_storage_health_report
 from crapcleaner.utils.format import format_datetime, format_size, parse_size
 from crapcleaner.utils.platform import (
     get_drive_info,
@@ -369,8 +369,9 @@ def _print_memory_report(report, json_output: bool) -> None:
 
 
 def _run_memory(args, settings: dict) -> int:
-    from crapcleaner.memory import available_actions, get_memory_report
-    from crapcleaner.memory import run_action as run_memory_action
+    from crapcleaner.system.memory_actions import available_actions
+    from crapcleaner.system.memory_actions import run_action as run_memory_action
+    from crapcleaner.system.memory_report import get_memory_report
 
     action_id = args.memory_clean
     if not action_id:
@@ -643,7 +644,7 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     if args.history:
-        from crapcleaner.history.store import load as load_hist
+        from crapcleaner.history import load as load_hist
 
         records = load_hist()
         if args.export:
@@ -666,7 +667,7 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     if args.specs:
-        from crapcleaner.specs.hardware import get_system_specs, print_specs_summary
+        from crapcleaner.system.hardware import get_system_specs, print_specs_summary
 
         specs = get_system_specs()
         print_specs_summary(specs, json_output=args.json)
@@ -789,7 +790,7 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     if args.scan:
-        from crapcleaner.scanner.cache import ScanCache
+        from crapcleaner.core.cache import ScanCache
 
         categories = get_all_categories()
         cache = ScanCache(ttl=float(settings.get("scan_cache_ttl", 300)))
@@ -890,7 +891,7 @@ def run(argv: list[str] | None = None) -> int:
         )
         _print_cleanup(cleanup_report, json_output=args.json)
         if not dry_run:
-            from crapcleaner.history.store import append
+            from crapcleaner.history import append
             from crapcleaner.models.history import HistoryEntry
 
             append(HistoryEntry.from_report(cleanup_report))

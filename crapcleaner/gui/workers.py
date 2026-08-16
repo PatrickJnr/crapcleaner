@@ -4,8 +4,8 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-from crapcleaner.cleaners.cleaner import clean_categories
-from crapcleaner.scanner.scanner import ScanEngine
+from crapcleaner.core.cleaner import clean_categories
+from crapcleaner.core.scanner import ScanEngine
 
 _MAX_GUI_LARGE_FILES = 5000
 _MAX_GUI_DUPLICATE_GROUPS = 1000
@@ -85,7 +85,7 @@ class LargeFilesWorker(QThread):
         self._stop.set()
 
     def run(self):
-        from crapcleaner.large_files.scanner import scan_large_files
+        from crapcleaner.analysis.large_files import scan_large_files
 
         try:
             files = scan_large_files(
@@ -116,7 +116,7 @@ class DuplicatesWorker(QThread):
         self._stop.set()
 
     def run(self):
-        from crapcleaner.duplicates.finder import find_duplicates
+        from crapcleaner.analysis.duplicates import find_duplicates
 
         try:
             self.result_groups = find_duplicates(
@@ -144,7 +144,7 @@ class AiDataWorker(QThread):
         self._stop.set()
 
     def run(self):
-        from crapcleaner.ai.cleanup import get_ai_data
+        from crapcleaner.categories.ai import get_ai_data
 
         try:
             self.done.emit(get_ai_data(min_size=self._min_size))
@@ -160,7 +160,7 @@ class DockerWorker(QThread):
         super().__init__(parent)
 
     def run(self):
-        from crapcleaner.docker.cleanup import docker_system_df, wsl_disk_report
+        from crapcleaner.categories.docker import docker_system_df, wsl_disk_report
 
         try:
             self.done.emit(docker_system_df(), wsl_disk_report())
@@ -176,7 +176,7 @@ class DockerInfoWorker(QThread):
         super().__init__(parent)
 
     def run(self):
-        from crapcleaner.docker.cleanup import docker_system_df, wsl_disk_report
+        from crapcleaner.categories.docker import docker_system_df, wsl_disk_report
 
         try:
             self.done.emit(docker_system_df(), wsl_disk_report())
@@ -193,7 +193,7 @@ class DockerPruneWorker(QThread):
         self._action_name = action_name
 
     def run(self):
-        from crapcleaner.cleaners.actions import run_action
+        from crapcleaner.core.actions import run_action
 
         try:
             self.done.emit(run_action(self._action_name, dry_run=False))
@@ -217,8 +217,8 @@ class SpecsWorker(QThread):
 
     def run(self):
         try:
-            from crapcleaner.specs.hardware import get_system_specs
-            from crapcleaner.specs.storage_health import get_storage_health_report
+            from crapcleaner.system.hardware import get_system_specs
+            from crapcleaner.system.storage_health import get_storage_health_report
 
             specs = get_system_specs()
             try:
@@ -242,7 +242,7 @@ class HealthWorker(QThread):
 
     def run(self):
         try:
-            from crapcleaner.specs.storage_health import get_storage_health_report
+            from crapcleaner.system.storage_health import get_storage_health_report
 
             self.done.emit(get_storage_health_report(force_refresh=self._force_refresh))
         except Exception as exc:  # pragma: no cover - defensive
@@ -269,10 +269,10 @@ class StorageAnalysisWorker(QThread):
 
     def run(self):
         try:
-            from crapcleaner.storage.analyzer import analyze_storage_hierarchy
-            from crapcleaner.storage.file_types import analyze_file_types
-            from crapcleaner.storage.old_files import find_old_files
-            from crapcleaner.storage.virtual_machines import detect_virtual_machine_storage
+            from crapcleaner.analysis.file_types import analyze_file_types
+            from crapcleaner.analysis.old_files import find_old_files
+            from crapcleaner.analysis.storage import analyze_storage_hierarchy
+            from crapcleaner.analysis.virtual_machines import detect_virtual_machine_storage
 
             root_node = analyze_storage_hierarchy(self._path, max_depth=self._depth)
             self.tree_done.emit(root_node)
@@ -299,7 +299,7 @@ class MemoryReportWorker(QThread):
 
     def run(self):
         try:
-            from crapcleaner.memory import get_memory_report
+            from crapcleaner.system.memory_report import get_memory_report
 
             self.done.emit(get_memory_report())
         except Exception as exc:  # pragma: no cover - defensive
@@ -319,7 +319,7 @@ class MemoryActionWorker(QThread):
 
     def run(self):
         try:
-            from crapcleaner.memory import run_action
+            from crapcleaner.system.memory_actions import run_action
 
             self.done.emit(run_action(self._action_id, dry_run=self._dry_run))
         except Exception as exc:  # pragma: no cover - defensive

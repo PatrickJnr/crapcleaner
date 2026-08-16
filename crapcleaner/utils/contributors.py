@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from crapcleaner import __version__
-from crapcleaner.config.settings import config_dir
+from crapcleaner.config import config_dir
 
 _logger = logging.getLogger(__name__)
 

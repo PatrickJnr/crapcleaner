@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from crapcleaner.history.store import append, clear, load
+from crapcleaner.history import append, clear, load
 from crapcleaner.models.history import HistoryEntry
 
 

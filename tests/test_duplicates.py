@@ -1,6 +1,6 @@
 """Tests for duplicate finder."""
 
-from crapcleaner.duplicates.finder import DuplicateGroup, find_duplicates
+from crapcleaner.analysis.duplicates import DuplicateGroup, find_duplicates
 
 
 def _write(tmp_path, rel, data):

@@ -2,10 +2,10 @@
 
 import json
 
-from crapcleaner.memory import cleaner as cleaner_mod
-from crapcleaner.memory import report as report_mod
-from crapcleaner.memory.cleaner import available_actions, get_action, run_action
-from crapcleaner.memory.report import (
+from crapcleaner.system import memory_actions as cleaner_mod
+from crapcleaner.system import memory_report as report_mod
+from crapcleaner.system.memory_actions import available_actions, get_action, run_action
+from crapcleaner.system.memory_report import (
     GpuMemoryStats,
     MemoryReport,
     MemoryStats,
@@ -299,7 +299,7 @@ def test_privilege_message_does_not_blame_elevation_when_elevated(monkeypatch):
 
 
 def test_standby_purge_reports_privilege_failure(monkeypatch):
-    from crapcleaner.memory.cleaner import PrivilegeStatus
+    from crapcleaner.system.memory_actions import PrivilegeStatus
 
     monkeypatch.setattr(cleaner_mod, "is_windows", lambda: True)
     monkeypatch.setattr(cleaner_mod, "is_linux", lambda: False)

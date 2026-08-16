@@ -2,8 +2,8 @@
 
 from unittest.mock import patch
 
-from crapcleaner.cleaners.crash_dumps import _extract_app_name, find_crash_dumps
-from crapcleaner.large_files.installers import scan_installers
+from crapcleaner.analysis.crash_dumps import _extract_app_name, find_crash_dumps
+from crapcleaner.analysis.installers import scan_installers
 
 
 def test_extract_app_name():
@@ -16,12 +16,12 @@ def test_find_crash_dumps(tmp_path):
     dmp_file = tmp_path / "app.exe.100.dmp"
     dmp_file.write_bytes(b"\x00" * 512)
 
-    with patch("crapcleaner.cleaners.crash_dumps.is_windows", return_value=True):
+    with patch("crapcleaner.analysis.crash_dumps.is_windows", return_value=True):
         with patch(
-            "crapcleaner.cleaners.crash_dumps.get_local_appdata", return_value=str(tmp_path)
+            "crapcleaner.analysis.crash_dumps.get_local_appdata", return_value=str(tmp_path)
         ):
             with patch(
-                "crapcleaner.cleaners.crash_dumps.get_windows_dir", return_value=str(tmp_path)
+                "crapcleaner.analysis.crash_dumps.get_windows_dir", return_value=str(tmp_path)
             ):
                 # Make CrashDumps subfolder
                 crash_dir = tmp_path / "CrashDumps"

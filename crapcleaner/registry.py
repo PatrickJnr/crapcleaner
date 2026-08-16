@@ -2,18 +2,18 @@
 
 from collections.abc import Callable
 
-from crapcleaner.ai import get_categories as ai_categories
-from crapcleaner.apps.cleanup import get_categories as apps_categories
-from crapcleaner.browsers import get_categories as browser_categories
-from crapcleaner.developer import get_categories as developer_categories
-from crapcleaner.docker import get_categories as docker_categories
-from crapcleaner.dotnet import get_categories as dotnet_categories
-from crapcleaner.gaming import get_categories as gaming_categories
-from crapcleaner.gpu import get_categories as gpu_categories
+from crapcleaner.categories.ai import get_categories as ai_categories
+from crapcleaner.categories.apps import get_categories as apps_categories
+from crapcleaner.categories.browsers import get_categories as browser_categories
+from crapcleaner.categories.developer import get_categories as developer_categories
+from crapcleaner.categories.docker import get_categories as docker_categories
+from crapcleaner.categories.dotnet import get_categories as dotnet_categories
+from crapcleaner.categories.gaming import get_categories as gaming_categories
+from crapcleaner.categories.gpu import get_categories as gpu_categories
+from crapcleaner.categories.node import get_categories as node_categories
+from crapcleaner.categories.python import get_categories as python_categories
+from crapcleaner.categories.windows import get_categories as windows_categories
 from crapcleaner.models.category import CleanupCategory
-from crapcleaner.node import get_categories as node_categories
-from crapcleaner.python import get_categories as python_categories
-from crapcleaner.windows import get_categories as windows_categories
 
 SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = [
     ("Windows", windows_categories),
@@ -30,7 +30,7 @@ SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = [
 
 
 def get_all_categories() -> list[CleanupCategory]:
-    from crapcleaner.config.settings import load_settings
+    from crapcleaner.config import load_settings
 
     settings = load_settings()
     scan_roots = settings.get("scan_roots", [])

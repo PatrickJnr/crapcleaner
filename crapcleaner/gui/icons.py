@@ -1,7 +1,7 @@
 """Google Material Icons for the CrapCleaner GUI.
 
 Icons are rendered from the bundled Google Material Icons font
-(MaterialIcons-Regular.ttf, Apache 2.0 - see assets/LICENSE). Glyphs are drawn
+(MaterialIcons-Regular.ttf, Apache 2.0 - see crapcleaner/assets/FONT-LICENSE). Glyphs are drawn
 as crisp 2x pixmaps and cached per (name, color).
 """
 
@@ -20,7 +20,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 
-_ASSETS = Path(__file__).resolve().parent / "assets"
+_ASSETS = Path(__file__).resolve().parent.parent / "assets"
 _FONT_PATH = _ASSETS / "MaterialIcons-Regular.ttf"
 _CODEPOINTS_PATH = _ASSETS / "MaterialIcons-Regular.codepoints"
 

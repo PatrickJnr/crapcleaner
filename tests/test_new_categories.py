@@ -1,7 +1,7 @@
 """Tests for new gaming, developer, and application cleanup categories."""
 
-from crapcleaner.developer.cleanup import get_categories as get_dev_categories
-from crapcleaner.gaming.cleanup import get_categories as get_gaming_categories
+from crapcleaner.categories.developer import get_categories as get_dev_categories
+from crapcleaner.categories.gaming import get_categories as get_gaming_categories
 from crapcleaner.registry import get_all_categories
 
 

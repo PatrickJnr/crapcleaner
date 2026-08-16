@@ -41,12 +41,14 @@ def test_no_registry_writing_modules():
     import importlib
     import pkgutil
 
-    import crapcleaner.cleaners
+    import crapcleaner.categories
+    import crapcleaner.core
 
-    for _, modname, _ in pkgutil.iter_modules(crapcleaner.cleaners.__path__):
-        mod = importlib.import_module(f"crapcleaner.cleaners.{modname}")
-        # Cleaners should never have winreg write functions
-        for attr in ["DeleteKey", "DeleteValue", "SetValue", "SetValueEx"]:
-            assert not hasattr(mod, attr), (
-                f"Cleaner module {modname} contains forbidden winreg attribute: {attr}"
-            )
+    for package in (crapcleaner.core, crapcleaner.categories):
+        for _, modname, _ in pkgutil.iter_modules(package.__path__):
+            mod = importlib.import_module(f"{package.__name__}.{modname}")
+            # Cleaners should never have winreg write functions
+            for attr in ["DeleteKey", "DeleteValue", "SetValue", "SetValueEx"]:
+                assert not hasattr(mod, attr), (
+                    f"Cleaner module {modname} contains forbidden winreg attribute: {attr}"
+                )

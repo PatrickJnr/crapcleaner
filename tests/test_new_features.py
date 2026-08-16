@@ -3,9 +3,10 @@
 import json
 import os
 
-from crapcleaner.apps.cleanup import get_categories as get_apps_categories
+from crapcleaner.categories.apps import get_categories as get_apps_categories
+from crapcleaner.categories.developer import get_categories as get_dev_categories
+from crapcleaner.categories.windows import get_categories as get_win_categories
 from crapcleaner.cli import run
-from crapcleaner.developer.cleanup import get_categories as get_dev_categories
 from crapcleaner.registry import get_all_categories
 from crapcleaner.utils.files import (
     normalize_long_path,
@@ -13,7 +14,6 @@ from crapcleaner.utils.files import (
     remove_file,
     remove_tree,
 )
-from crapcleaner.windows.cleanup import get_categories as get_win_categories
 
 
 def test_developer_categories_expansion():

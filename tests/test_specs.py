@@ -4,7 +4,7 @@ import json
 import time
 
 from crapcleaner.cli import run
-from crapcleaner.specs.hardware import (
+from crapcleaner.system.hardware import (
     CpuSpec,
     DriveSpec,
     GpuSpec,
