@@ -100,9 +100,14 @@ jobs:
           cd release-assets
           sha256sum CrapCleaner.exe crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums.txt
           cat checksums.txt
+      - name: Extract Release Notes from CHANGELOG.md
+        run: |
+          python scripts/extract_changelog.py "${{ github.ref_name }}" -o release_notes.md
+          cat release_notes.md
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release_notes.md
           files: |
             release-assets/CrapCleaner.exe
             release-assets/crapcleaner-linux-x86_64
@@ -110,4 +115,4 @@ jobs:
             release-assets/checksums.txt
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
