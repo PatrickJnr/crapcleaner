@@ -115,4 +115,4 @@ jobs:
             release-assets/checksums.txt
           draft: false
           prerelease: false
-          generate_release_notes: false
+          generate_release_notes: true
