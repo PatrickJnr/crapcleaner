@@ -3772,10 +3772,22 @@ class SpecsView(QWidget):
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("Loading...")
 
+        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait(2000)
+
         worker = SpecsWorker(parent=self)
+        self._worker = worker
         worker.done.connect(self._on_specs_loaded)
         worker.failed.connect(self._on_specs_failed)
+        worker.finished.connect(worker.deleteLater)
         worker.start()
+
+    def closeEvent(self, event):
+        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait(2000)
+        super().closeEvent(event)
 
     def _on_specs_loaded(self, specs, health_data):
         self._specs = specs
@@ -5259,6 +5271,7 @@ class StorageBreakdownView(QWidget):
         worker.failed.connect(
             lambda msg: self.health_info_label.setText(f"Unable to read health metrics: {msg}")
         )
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_health_loaded(self, health_data: list):
@@ -5302,14 +5315,24 @@ class StorageBreakdownView(QWidget):
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.setText("Analyzing...")
 
+        if (
+            hasattr(self, "_analysis_worker")
+            and self._analysis_worker
+            and self._analysis_worker.isRunning()
+        ):
+            self._analysis_worker.quit()
+            self._analysis_worker.wait(2000)
+
         depth = self.depth_spin.value()
         worker = StorageAnalysisWorker(target_path, depth, parent=self)
+        self._analysis_worker = worker
         worker.tree_done.connect(self._on_tree_done)
         worker.types_done.connect(self._on_types_done)
         worker.old_done.connect(self._on_old_done)
         worker.vms_done.connect(self._on_vms_done)
         worker.finished_all.connect(self._on_analysis_done)
         worker.failed.connect(self._on_analysis_failed)
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_tree_done(self, root_node):
@@ -6073,9 +6096,19 @@ class MemoryView(QWidget):
         self.status_label.setText("Reading memory statistics...")
         from crapcleaner.gui.workers import MemoryReportWorker
 
+        if (
+            hasattr(self, "_report_worker")
+            and self._report_worker
+            and self._report_worker.isRunning()
+        ):
+            self._report_worker.quit()
+            self._report_worker.wait(2000)
+
         worker = MemoryReportWorker(parent=self)
+        self._report_worker = worker
         worker.done.connect(self._on_report)
         worker.failed.connect(self._on_failed)
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_failed(self, message: str):
@@ -6245,9 +6278,19 @@ class MemoryView(QWidget):
         self.result_banner.setVisible(True)
         from crapcleaner.gui.workers import MemoryActionWorker
 
+        if (
+            hasattr(self, "_action_worker")
+            and self._action_worker
+            and self._action_worker.isRunning()
+        ):
+            self._action_worker.quit()
+            self._action_worker.wait(2000)
+
         worker = MemoryActionWorker(action_id, parent=self)
+        self._action_worker = worker
         worker.done.connect(self._on_action_done)
         worker.failed.connect(self._on_failed)
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _relaunch_admin(self):

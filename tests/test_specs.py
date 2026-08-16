@@ -156,5 +156,16 @@ def test_gui_about_and_specs_views():
         time.sleep(0.05)
     assert specs_view._specs is not None
 
+    if hasattr(specs_view, "_worker") and specs_view._worker:
+        specs_view._worker.wait(5000)
+
     about_view = AboutView(dummy)
     assert about_view is not None
+
+    specs_view.close()
+    specs_view.deleteLater()
+    about_view.close()
+    about_view.deleteLater()
+    widget.close()
+    widget.deleteLater()
+    app.processEvents()

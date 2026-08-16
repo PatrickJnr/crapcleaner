@@ -5,13 +5,6 @@ import pytest
 from crapcleaner.analysis.storage import StorageNode
 
 
-@pytest.fixture
-def qt_app():
-    from PySide6.QtWidgets import QApplication
-
-    return QApplication.instance() or QApplication([])
-
-
 def _node(name, size, children=(), path=""):
     node = StorageNode(name=name, path=path or f"C:/{name}", size=size)
     node.children = list(children)

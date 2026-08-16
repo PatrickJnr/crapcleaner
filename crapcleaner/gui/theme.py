@@ -1878,6 +1878,13 @@ def fade_theme_change(window, apply_callback, duration_ms: int = 180) -> None:
     from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
     from PySide6.QtWidgets import QGraphicsOpacityEffect, QLabel
 
+    if hasattr(window, "_theme_fade_overlay") and window._theme_fade_overlay:
+        try:
+            window._theme_fade_overlay.deleteLater()
+        except Exception:
+            pass
+        window._theme_fade_overlay = None
+
     snapshot = None
     if duration_ms > 0 and window is not None and window.isVisible():
         try:
@@ -1887,22 +1894,26 @@ def fade_theme_change(window, apply_callback, duration_ms: int = 180) -> None:
     apply_callback()
     if snapshot is None or snapshot.isNull():
         return
-    overlay = QLabel(window)
-    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-    overlay.setPixmap(snapshot)
-    overlay.setGeometry(0, 0, snapshot.width(), snapshot.height())
-    effect = QGraphicsOpacityEffect(overlay)
-    overlay.setGraphicsEffect(effect)
-    overlay.show()
-    overlay.raise_()
-    animation = QPropertyAnimation(effect, b"opacity", overlay)
-    animation.setDuration(duration_ms)
-    animation.setStartValue(1.0)
-    animation.setEndValue(0.0)
-    animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-    animation.finished.connect(overlay.deleteLater)
-    animation.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
-    window._theme_fade_overlay = overlay
+    try:
+        overlay = QLabel(window)
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay.setPixmap(snapshot)
+        overlay.setGeometry(0, 0, snapshot.width(), snapshot.height())
+        effect = QGraphicsOpacityEffect(overlay)
+        overlay.setGraphicsEffect(effect)
+        overlay.show()
+        overlay.raise_()
+        animation = QPropertyAnimation(effect, b"opacity", overlay)
+        animation.setDuration(duration_ms)
+        animation.setStartValue(1.0)
+        animation.setEndValue(0.0)
+        animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        animation.finished.connect(overlay.deleteLater)
+        overlay._theme_anim = animation
+        animation.start()
+        window._theme_fade_overlay = overlay
+    except Exception:
+        pass
 
 
 def color(theme: str, name: str) -> str:

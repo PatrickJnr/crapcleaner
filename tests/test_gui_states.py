@@ -1,14 +1,5 @@
 """Empty, loading, and result states across the deep-scan views."""
 
-import pytest
-
-
-@pytest.fixture
-def qt_app():
-    from PySide6.QtWidgets import QApplication
-
-    return QApplication.instance() or QApplication([])
-
 
 class DummyMain:
     _settings = {}

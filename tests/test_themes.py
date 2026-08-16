@@ -1,7 +1,5 @@
 """Tests for the theme palettes and the theme cross-fade helper."""
 
-import pytest
-
 from crapcleaner.gui.theme import (
     DARK,
     PALETTES,
@@ -57,6 +55,8 @@ def test_fade_runs_the_swap_even_without_a_visible_window(qt_app):
     calls = []
     fade_theme_change(window, lambda: calls.append(True), duration_ms=0)
     assert calls == [True]
+    window.deleteLater()
+    qt_app.processEvents()
 
 
 def test_fade_with_visible_window_does_not_block(qt_app):
@@ -70,15 +70,11 @@ def test_fade_with_visible_window_does_not_block(qt_app):
     fade_theme_change(window, lambda: calls.append(True), duration_ms=40)
     assert calls == [True]
     qt_app.processEvents()
+    if hasattr(window, "_theme_fade_overlay") and window._theme_fade_overlay:
+        window._theme_fade_overlay.deleteLater()
     window.close()
-
-
-@pytest.fixture
-def qt_app():
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance() or QApplication([])
-    yield app
+    window.deleteLater()
+    qt_app.processEvents()
 
 
 def test_extended_theme_set_is_available():

@@ -26,3 +26,34 @@ def app():
 
     _app = QApplication.instance() or QApplication([])
     yield _app
+
+
+@pytest.fixture
+def qt_app(app):
+    yield app
+
+
+@pytest.fixture(autouse=True)
+def cleanup_qt_widgets():
+    yield
+    try:
+        from PySide6.QtCore import QThread
+        from PySide6.QtWidgets import QApplication
+
+        application = QApplication.instance()
+        if application is not None:
+            application.processEvents()
+            for widget in list(application.topLevelWidgets()):
+                try:
+                    for thread in widget.findChildren(QThread):
+                        if thread.isRunning():
+                            thread.quit()
+                            thread.wait(2000)
+                    if widget.isVisible():
+                        widget.close()
+                    widget.deleteLater()
+                except Exception:
+                    pass
+            application.processEvents()
+    except Exception:
+        pass
