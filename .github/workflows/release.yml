@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      target_tag:
+        description: 'Release Tag to build and update (e.g. v1.0.7.1, v1.0.8)'
+        required: false
+        default: 'v1.0.8'
 
 jobs:
   build-windows-exe:
@@ -75,7 +80,7 @@ jobs:
 
   publish-release:
     needs: [build-windows-exe, build-linux-bin]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -100,13 +105,22 @@ jobs:
           cd release-assets
           sha256sum CrapCleaner.exe crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums.txt
           cat checksums.txt
+      - name: Determine Target Tag
+        id: tag_info
+        run: |
+          TAG="${{ github.event.inputs.target_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
       - name: Extract Release Notes from CHANGELOG.md
         run: |
-          python scripts/extract_changelog.py "${{ github.ref_name }}" -o release_notes.md
+          python scripts/extract_changelog.py "${{ steps.tag_info.outputs.tag }}" -o release_notes.md || echo "Release ${{ steps.tag_info.outputs.tag }}" > release_notes.md
           cat release_notes.md
-      - name: Create GitHub Release
+      - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag_info.outputs.tag }}
           body_path: release_notes.md
           files: |
             release-assets/CrapCleaner.exe
