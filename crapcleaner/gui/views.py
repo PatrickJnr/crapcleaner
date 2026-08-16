@@ -14,15 +14,16 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QUrl,
     QVariantAnimation,
     Signal,
 )
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QDesktopServices,
     QFont,
     QKeySequence,
-    QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
@@ -313,20 +314,12 @@ class StorageDonut(QWidget):
         painter.drawArc(rect, 0, 360 * 16)
 
         pct = int(self._fraction * 100)
-        if pct > 85:
-            fill_color = pal["danger"]
-        elif pct >= 70:
-            fill_color = pal["warning"]
-        else:
-            fill_color = pal["accent"]
+        fill_color = pal["accent"]
 
         if self._fraction > 0.001:
-            gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            gradient.setColorAt(0.0, QColor(fill_color))
-            gradient.setColorAt(1.0, QColor(pal["accent_hover"]))
             painter.setPen(
                 QPen(
-                    QBrush(gradient),
+                    QColor(fill_color),
                     pen_width,
                     Qt.PenStyle.SolidLine,
                     Qt.PenCapStyle.RoundCap,
@@ -4367,6 +4360,65 @@ class SpecsView(QWidget):
             self._show_skeletons()
 
 
+class ContributorCard(QFrame):
+    """Polished, responsive card representing a community GitHub contributor."""
+
+    def __init__(
+        self, contributor, avatar_file: str | None = None, theme: str = "dark", parent=None
+    ):
+        super().__init__(parent)
+        self._theme = theme
+        self.setProperty("card", "true")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(64)
+        self.setMinimumWidth(240)
+        self.setMaximumWidth(420)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(12)
+
+        # Squircle Avatar
+        initials = contributor.login[:2].upper() if contributor.login else "??"
+        avatar = SquircleAvatarWidget(
+            image_path=avatar_file or "",
+            size=40,
+            radius=12,
+            initials=initials,
+            parent=self,
+        )
+        lay.addWidget(avatar)
+
+        # Info Box (Username & Contribution Badge)
+        info_lay = QVBoxLayout()
+        info_lay.setSpacing(3)
+        info_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        name_lbl = QLabel(f"@{contributor.login}")
+        name_lbl.setStyleSheet("font-size: 13px; font-weight: 700;")
+        info_lay.addWidget(name_lbl)
+
+        cnt_str = f"{contributor.contributions} {'contribution' if contributor.contributions == 1 else 'contributions'}"
+        sub_badge = badge(cnt_str, "accent")
+        sub_badge.setFixedHeight(18)
+        sub_badge.setStyleSheet("font-size: 10px; font-weight: 600; padding: 0 6px;")
+        info_lay.addWidget(sub_badge)
+
+        lay.addLayout(info_lay)
+        lay.addStretch(1)
+
+        # Compact profile button
+        profile_btn = QPushButton("Profile ↗")
+        profile_btn.setProperty("secondary", "true")
+        profile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        profile_btn.setFixedHeight(28)
+        profile_btn.setStyleSheet("font-size: 11px; padding: 2px 12px;")
+        profile_btn.clicked.connect(
+            lambda _=False, url=contributor.html_url: QDesktopServices.openUrl(QUrl(url))
+        )
+        lay.addWidget(profile_btn)
+
+
 class AboutView(QWidget):
     """Modern About view featuring Patrick Jr.'s profile, mission, tech stack, and links."""
 
@@ -4439,7 +4491,7 @@ class AboutView(QWidget):
         gh_btn.setIcon(material_icon("code", _c(self._theme, "text")))
         gh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         gh_btn.clicked.connect(
-            lambda: subprocess.Popen(["explorer", "https://github.com/PatrickJnr/crapcleaner"])
+            lambda: QDesktopServices.openUrl(QUrl("https://github.com/PatrickJnr/crapcleaner"))
         )
         links_row.addWidget(gh_btn)
 
@@ -4448,11 +4500,20 @@ class AboutView(QWidget):
         issue_btn.setIcon(material_icon("bug_report", _c(self._theme, "text")))
         issue_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         issue_btn.clicked.connect(
-            lambda: subprocess.Popen(
-                ["explorer", "https://github.com/PatrickJnr/crapcleaner/issues"]
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/PatrickJnr/crapcleaner/issues")
             )
         )
         links_row.addWidget(issue_btn)
+
+        help_guide_btn = QPushButton("Help && Safety Guide")
+        help_guide_btn.setProperty("secondary", "true")
+        help_guide_btn.setIcon(material_icon("help", _c(self._theme, "text")))
+        help_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        help_guide_btn.clicked.connect(
+            lambda: getattr(self._main, "show_help_dialog", lambda: None)()
+        )
+        links_row.addWidget(help_guide_btn)
 
         update_btn = QPushButton("Check for Updates")
         update_btn.setProperty("primary", "true")
@@ -4540,10 +4601,19 @@ class AboutView(QWidget):
             item_box.addWidget(d_lbl)
             s_lay.addLayout(item_box)
 
+        doc_btn = QPushButton("Read Full Safety Philosophy && FAQs →")
+        doc_btn.setProperty("subtle", "true")
+        doc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        doc_btn.setStyleSheet(
+            f"font-size: 11px; font-weight: 600; text-align: left; padding: 4px 0; color: {_c(self._theme, 'accent')}; background: transparent; border: none;"
+        )
+        doc_btn.clicked.connect(lambda: getattr(self._main, "show_help_dialog", lambda: None)())
+        s_lay.addWidget(doc_btn)
+
         grid_lay.addWidget(safety_card, 1)
         c_lay.addLayout(grid_lay)
 
-        # 3. Contributors & Credits Card
+        # 3. Contributors & Credits Card (Responsive Grid Layout)
         contrib_card = QFrame()
         contrib_card.setProperty("card", "true")
         contrib_lay = QVBoxLayout(contrib_card)
@@ -4551,22 +4621,96 @@ class AboutView(QWidget):
         contrib_lay.setSpacing(12)
 
         c_header = QHBoxLayout()
-        c_title = QLabel("GitHub Contributors & Credits")
+        c_header.setSpacing(10)
+        c_title = QLabel("Community Contributors & Credits")
         c_title.setStyleSheet("font-size: 15px; font-weight: 700;")
         c_header.addWidget(c_title)
+
+        self.contrib_count_badge = badge("0", "accent")
+        self.contrib_count_badge.setFixedHeight(20)
+        self.contrib_count_badge.setVisible(False)
+        c_header.addWidget(self.contrib_count_badge)
+
         c_header.addStretch(1)
 
         refresh_contrib_btn = QPushButton("Refresh")
         refresh_contrib_btn.setProperty("secondary", "true")
+        refresh_contrib_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
         refresh_contrib_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_contrib_btn.clicked.connect(lambda: self._populate_contributors(force_refresh=True))
         c_header.addWidget(refresh_contrib_btn)
+
+        contribute_btn = QPushButton("Contribute on GitHub ↗")
+        contribute_btn.setProperty("primary", "true")
+        contribute_btn.setIcon(material_icon("code", "#ffffff"))
+        contribute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        contribute_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/PatrickJnr/crapcleaner/blob/master/CONTRIBUTING.md")
+            )
+        )
+        c_header.addWidget(contribute_btn)
         contrib_lay.addLayout(c_header)
 
-        self.contrib_box = QVBoxLayout()
-        self.contrib_box.setSpacing(8)
-        contrib_lay.addLayout(self.contrib_box)
+        c_sub = QLabel(
+            "Recognizing community members who have contributed pull requests, bug fixes, and documentation to CrapCleaner."
+        )
+        c_sub.setProperty("subtle", "true")
+        c_sub.setStyleSheet(f"font-size: 12px; color: {_c(self._theme, 'muted')};")
+        contrib_lay.addWidget(c_sub)
+
+        self.contrib_grid = QGridLayout()
+        self.contrib_grid.setSpacing(12)
+        self.contrib_grid.setColumnStretch(0, 1)
+        self.contrib_grid.setColumnStretch(1, 1)
+        contrib_lay.addLayout(self.contrib_grid)
         c_lay.addWidget(contrib_card)
+
+        # 4. Sponsor & Support Card (Interactive FUNDING links)
+        sponsor_card = QFrame()
+        sponsor_card.setProperty("card", "true")
+        sponsor_lay = QVBoxLayout(sponsor_card)
+        sponsor_lay.setContentsMargins(18, 16, 18, 16)
+        sponsor_lay.setSpacing(12)
+
+        s_top = QHBoxLayout()
+        s_title = QLabel("Support CrapCleaner Development")
+        s_title.setStyleSheet("font-size: 15px; font-weight: 700;")
+        s_top.addWidget(s_title)
+        s_top.addStretch(1)
+        sponsor_lay.addLayout(s_top)
+
+        s_desc = QLabel(
+            "CrapCleaner is 100% free, non-commercial, and open source without advertisements or telemetry. "
+            "If it helps keep your PC fast and clean, consider supporting ongoing maintenance and new features!"
+        )
+        s_desc.setProperty("subtle", "true")
+        s_desc.setStyleSheet(
+            f"font-size: 12px; color: {_c(self._theme, 'muted')}; line-height: 1.4;"
+        )
+        s_desc.setWordWrap(True)
+        sponsor_lay.addWidget(s_desc)
+
+        sponsor_row = QHBoxLayout()
+        sponsor_row.setSpacing(10)
+
+        sponsors_links = [
+            ("GitHub Sponsors", "https://github.com/sponsors/PatrickJnr", "favorite"),
+            ("Buy Me a Coffee", "https://buymeacoffee.com/PatrickJr", "local_cafe"),
+            ("Ko-fi", "https://ko-fi.com/patrickjr", "local_cafe"),
+            ("PayPal", "https://www.paypal.me/PatrickJnrC", "payments"),
+        ]
+        for name, url, icon_name in sponsors_links:
+            s_btn = QPushButton(name)
+            s_btn.setProperty("secondary", "true")
+            s_btn.setIcon(material_icon(icon_name, _c(self._theme, "text")))
+            s_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            s_btn.clicked.connect(lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+            sponsor_row.addWidget(s_btn)
+
+        sponsor_row.addStretch(1)
+        sponsor_lay.addLayout(sponsor_row)
+        c_lay.addWidget(sponsor_card)
 
         c_lay.addStretch(1)
         scroll.setWidget(content)
@@ -4574,8 +4718,8 @@ class AboutView(QWidget):
         self._populate_contributors()
 
     def _populate_contributors(self, force_refresh: bool = False):
-        while self.contrib_box.count():
-            item = self.contrib_box.takeAt(0)
+        while self.contrib_grid.count():
+            item = self.contrib_grid.takeAt(0)
             if item is not None:
                 w = item.widget()
                 if w is not None:
@@ -4590,59 +4734,45 @@ class AboutView(QWidget):
                                 if sub_w is not None:
                                     sub_w.deleteLater()
 
+        self.contrib_grid.setColumnStretch(0, 1)
+        self.contrib_grid.setColumnStretch(1, 1)
+
         try:
             contributors = fetch_contributors(timeout_seconds=3.0, force_refresh=force_refresh)
             # Filter out project creator/maintainer since they have the primary creator hero card
             community = [
                 c for c in contributors if c.login.lower() not in ("patrickjnr", "patrickjr")
             ]
+            if hasattr(self, "contrib_count_badge"):
+                self.contrib_count_badge.setText(
+                    f"{len(community)} {'Contributor' if len(community) == 1 else 'Contributors'}"
+                )
+                self.contrib_count_badge.setVisible(len(community) > 0)
+
             if not community:
                 empty_lbl = QLabel(
-                    "No community contributors yet. Contributions welcome on GitHub!"
+                    "No community contributors cached yet. Contributions welcome on GitHub!"
                 )
                 empty_lbl.setProperty("subtle", "true")
-                self.contrib_box.addWidget(empty_lbl)
+                self.contrib_grid.addWidget(empty_lbl, 0, 0)
                 return
 
-            for c in community:
-                row = QHBoxLayout()
-                row.setSpacing(12)
-
-                # Contributor Avatar
+            for idx, c in enumerate(community):
                 avatar_file = fetch_avatar_file(c.avatar_url, c.login, timeout_seconds=1.5)
-                initials = c.login[:2].upper() if c.login else "??"
-                av_widget = SquircleAvatarWidget(
-                    image_path=avatar_file or "",
-                    size=36,
-                    radius=10,
-                    initials=initials,
-                )
-                row.addWidget(av_widget)
+                card = ContributorCard(c, avatar_file, self._theme, self)
+                row = idx // 2
+                col = idx % 2
+                self.contrib_grid.addWidget(card, row, col)
 
-                name_lbl = QLabel(f"<b>@{c.login}</b>")
-                name_lbl.setStyleSheet("font-size: 13px;")
-                row.addWidget(name_lbl)
-
-                badge_lbl = badge(
-                    f"{c.contributions} {'contribution' if c.contributions == 1 else 'contributions'}",
-                    "accent",
-                )
-                badge_lbl.setFixedHeight(20)
-                row.addWidget(badge_lbl)
-                row.addStretch(1)
-
-                gh_profile_btn = QPushButton("GitHub Profile")
-                gh_profile_btn.setProperty("secondary", "true")
-                gh_profile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                gh_profile_btn.clicked.connect(
-                    lambda _=False, url=c.html_url: subprocess.Popen(["explorer", url])
-                )
-                row.addWidget(gh_profile_btn)
-                self.contrib_box.addLayout(row)
+            if len(community) % 2 != 0:
+                # Add empty spacer widget to keep the 2-column grid balanced when odd count
+                spacer = QWidget()
+                spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+                self.contrib_grid.addWidget(spacer, len(community) // 2, 1)
         except Exception as exc:
             err_lbl = QLabel(f"Could not load contributors: {exc}")
             err_lbl.setProperty("subtle", "true")
-            self.contrib_box.addWidget(err_lbl)
+            self.contrib_grid.addWidget(err_lbl, 0, 0)
 
     def _check_updates(self):
         from crapcleaner import __version__
@@ -4666,7 +4796,7 @@ class AboutView(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if ans == QMessageBox.StandardButton.Yes:
-                subprocess.Popen(["explorer", info.html_url])
+                QDesktopServices.openUrl(QUrl(info.html_url))
         else:
             QMessageBox.information(
                 self,

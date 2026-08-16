@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from crapcleaner.models.category import CleanupCategory
@@ -357,3 +358,48 @@ class ConfirmDeleteDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+
+class HelpSafetyDialog(QDialog):
+    """Modal dialog displaying comprehensive Help, Safety Philosophy, Technical Documentation, and FAQ."""
+
+    def __init__(self, main_window=None, parent=None):
+        qparent = (
+            parent
+            if isinstance(parent, QWidget)
+            else (main_window if isinstance(main_window, QWidget) else None)
+        )
+        super().__init__(qparent)
+        self.setObjectName("HelpSafetyDialog")
+        self.setWindowTitle("CrapCleaner — Help, Safety & Technical Philosophy")
+        self.resize(980, 680)
+        self.setMinimumSize(800, 520)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        from crapcleaner.gui.views import HelpSafetyView
+
+        self.help_view = HelpSafetyView(main_window, self)
+        layout.addWidget(self.help_view, 1)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(12, 0, 12, 6)
+
+        hint = QLabel("Tip: Press F1 anytime to open this guide.")
+        hint.setProperty("subtle", "true")
+        hint.setStyleSheet("font-size: 11px;")
+        bottom_row.addWidget(hint)
+        bottom_row.addStretch(1)
+
+        close_btn = QPushButton("Close")
+        close_btn.setProperty("primary", "true")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.clicked.connect(self.accept)
+        bottom_row.addWidget(close_btn)
+        layout.addLayout(bottom_row)
+
+    def apply_theme(self, theme: str):
+        if hasattr(self, "help_view") and hasattr(self.help_view, "apply_theme"):
+            self.help_view.apply_theme(theme)

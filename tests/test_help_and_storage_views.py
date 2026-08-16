@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 from PySide6.QtWidgets import QApplication
 
+from crapcleaner.gui.dialogs import HelpSafetyDialog
 from crapcleaner.gui.views import HelpSafetyView, StorageBreakdownView
 
 # Ensure QApplication exists for GUI widget tests
@@ -27,6 +28,17 @@ def test_help_safety_view():
     view.search_edit.setText("telemetry")
     visible_cards = [c for _, c, _ in view._cards if not c.isHidden()]
     assert len(visible_cards) >= 1
+
+
+def test_help_safety_dialog():
+    mock_main = MagicMock()
+    dlg = HelpSafetyDialog(mock_main)
+    assert dlg.help_view is not None
+    assert len(dlg.help_view._cards) >= 9
+    dlg.apply_theme("cyberpunk")
+    assert dlg.help_view._theme == "cyberpunk"
+    dlg.close()
+    dlg.deleteLater()
 
 
 def test_storage_breakdown_view():
