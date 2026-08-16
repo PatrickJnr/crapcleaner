@@ -1944,12 +1944,21 @@ def fade_theme_change(window, apply_callback, duration_ms: int = 180) -> None:
     from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
     from PySide6.QtWidgets import QGraphicsOpacityEffect, QLabel
 
-    if hasattr(window, "_theme_fade_overlay") and window._theme_fade_overlay:
+    fade_anim = getattr(window, "_theme_fade_anim", None)
+    if fade_anim:
         try:
-            window._theme_fade_overlay.deleteLater()
+            fade_anim.stop()
         except Exception:
             pass
-        window._theme_fade_overlay = None
+        setattr(window, "_theme_fade_anim", None)
+
+    fade_overlay = getattr(window, "_theme_fade_overlay", None)
+    if fade_overlay:
+        try:
+            fade_overlay.deleteLater()
+        except Exception:
+            pass
+        setattr(window, "_theme_fade_overlay", None)
 
     snapshot = None
     if duration_ms > 0 and window is not None and window.isVisible():
@@ -1975,9 +1984,9 @@ def fade_theme_change(window, apply_callback, duration_ms: int = 180) -> None:
         animation.setEndValue(0.0)
         animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
         animation.finished.connect(overlay.deleteLater)
-        overlay._theme_anim = animation
+        setattr(window, "_theme_fade_anim", animation)
+        setattr(window, "_theme_fade_overlay", overlay)
         animation.start()
-        window._theme_fade_overlay = overlay
     except Exception:
         pass
 

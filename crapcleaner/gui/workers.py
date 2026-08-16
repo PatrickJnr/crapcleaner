@@ -11,6 +11,33 @@ _MAX_GUI_LARGE_FILES = 5000
 _MAX_GUI_DUPLICATE_GROUPS = 1000
 
 
+def is_worker_running(worker: QThread | None) -> bool:
+    """Safely check if a Qt QThread/worker is alive and running without raising Shiboken RuntimeError."""
+    if worker is None:
+        return False
+    try:
+        from shiboken6 import isValid
+
+        if not isValid(worker):
+            return False
+    except ImportError:
+        pass
+    try:
+        return bool(worker.isRunning())
+    except (RuntimeError, AttributeError):
+        return False
+
+
+def stop_worker(worker: QThread | None, wait_ms: int = 2000) -> None:
+    """Safely quit and wait for a worker thread if it is still valid and running."""
+    if is_worker_running(worker) and worker is not None:
+        try:
+            worker.quit()
+            worker.wait(wait_ms)
+        except (RuntimeError, AttributeError):
+            pass
+
+
 class ScanWorker(QThread):
     progress = Signal(str, str, int)
     done = Signal(object)

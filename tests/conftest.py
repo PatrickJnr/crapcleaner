@@ -40,15 +40,16 @@ def cleanup_qt_widgets():
         from PySide6.QtCore import QThread
         from PySide6.QtWidgets import QApplication
 
+        from crapcleaner.gui.workers import is_worker_running, stop_worker
+
         application = QApplication.instance()
         if application is not None:
             application.processEvents()
             for widget in list(application.topLevelWidgets()):
                 try:
                     for thread in widget.findChildren(QThread):
-                        if thread.isRunning():
-                            thread.quit()
-                            thread.wait(2000)
+                        if is_worker_running(thread):
+                            stop_worker(thread, wait_ms=2000)
                     if widget.isVisible():
                         widget.close()
                     widget.deleteLater()

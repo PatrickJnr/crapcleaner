@@ -3767,26 +3767,29 @@ class SpecsView(QWidget):
     def refresh_specs(self):
         if self._specs is None:
             self._show_skeletons()
-        from crapcleaner.gui.workers import SpecsWorker
+        from crapcleaner.gui.workers import SpecsWorker, stop_worker
 
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("Loading...")
 
-        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
-            self._worker.quit()
-            self._worker.wait(2000)
+        stop_worker(getattr(self, "_worker", None))
 
         worker = SpecsWorker(parent=self)
         self._worker = worker
         worker.done.connect(self._on_specs_loaded)
         worker.failed.connect(self._on_specs_failed)
+        worker.finished.connect(
+            lambda: (
+                setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            )
+        )
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def closeEvent(self, event):
-        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
-            self._worker.quit()
-            self._worker.wait(2000)
+        from crapcleaner.gui.workers import stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
         super().closeEvent(event)
 
     def _on_specs_loaded(self, specs, health_data):
@@ -5255,9 +5258,9 @@ class StorageBreakdownView(QWidget):
         self.content_stack.setCurrentIndex(idx_map.get(section_key, 0))
 
     def refresh_health(self, force: bool = False):
-        from crapcleaner.gui.workers import HealthWorker
+        from crapcleaner.gui.workers import HealthWorker, is_worker_running
 
-        if self._health_worker is not None and self._health_worker.isRunning():
+        if is_worker_running(getattr(self, "_health_worker", None)):
             return
 
         self.health_info_label.setText("<b>Storage Device Health:</b> Checking...")
@@ -5270,6 +5273,13 @@ class StorageBreakdownView(QWidget):
         worker.done.connect(self._on_health_loaded)
         worker.failed.connect(
             lambda msg: self.health_info_label.setText(f"Unable to read health metrics: {msg}")
+        )
+        worker.finished.connect(
+            lambda: (
+                setattr(self, "_health_worker", None)
+                if getattr(self, "_health_worker", None) is worker
+                else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -5310,18 +5320,12 @@ class StorageBreakdownView(QWidget):
             QMessageBox.warning(self, "Invalid Path", f"Target directory not found:\n{target_path}")
             return
 
-        from crapcleaner.gui.workers import StorageAnalysisWorker
+        from crapcleaner.gui.workers import StorageAnalysisWorker, stop_worker
 
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.setText("Analyzing...")
 
-        if (
-            hasattr(self, "_analysis_worker")
-            and self._analysis_worker
-            and self._analysis_worker.isRunning()
-        ):
-            self._analysis_worker.quit()
-            self._analysis_worker.wait(2000)
+        stop_worker(getattr(self, "_analysis_worker", None))
 
         depth = self.depth_spin.value()
         worker = StorageAnalysisWorker(target_path, depth, parent=self)
@@ -5332,8 +5336,22 @@ class StorageBreakdownView(QWidget):
         worker.vms_done.connect(self._on_vms_done)
         worker.finished_all.connect(self._on_analysis_done)
         worker.failed.connect(self._on_analysis_failed)
+        worker.finished.connect(
+            lambda: (
+                setattr(self, "_analysis_worker", None)
+                if getattr(self, "_analysis_worker", None) is worker
+                else None
+            )
+        )
         worker.finished.connect(worker.deleteLater)
         worker.start()
+
+    def closeEvent(self, event):
+        from crapcleaner.gui.workers import stop_worker
+
+        stop_worker(getattr(self, "_health_worker", None))
+        stop_worker(getattr(self, "_analysis_worker", None))
+        super().closeEvent(event)
 
     def _on_tree_done(self, root_node):
         self._current_node = root_node
@@ -6094,20 +6112,21 @@ class MemoryView(QWidget):
         if hasattr(self, "flush_btn"):
             self.flush_btn.setEnabled(False)
         self.status_label.setText("Reading memory statistics...")
-        from crapcleaner.gui.workers import MemoryReportWorker
+        from crapcleaner.gui.workers import MemoryReportWorker, stop_worker
 
-        if (
-            hasattr(self, "_report_worker")
-            and self._report_worker
-            and self._report_worker.isRunning()
-        ):
-            self._report_worker.quit()
-            self._report_worker.wait(2000)
+        stop_worker(getattr(self, "_report_worker", None))
 
         worker = MemoryReportWorker(parent=self)
         self._report_worker = worker
         worker.done.connect(self._on_report)
         worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: (
+                setattr(self, "_report_worker", None)
+                if getattr(self, "_report_worker", None) is worker
+                else None
+            )
+        )
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
@@ -6276,22 +6295,30 @@ class MemoryView(QWidget):
             self.flush_btn.setEnabled(False)
         self.result_label.setText(f"Running: {action.name}...")
         self.result_banner.setVisible(True)
-        from crapcleaner.gui.workers import MemoryActionWorker
+        from crapcleaner.gui.workers import MemoryActionWorker, stop_worker
 
-        if (
-            hasattr(self, "_action_worker")
-            and self._action_worker
-            and self._action_worker.isRunning()
-        ):
-            self._action_worker.quit()
-            self._action_worker.wait(2000)
+        stop_worker(getattr(self, "_action_worker", None))
 
         worker = MemoryActionWorker(action_id, parent=self)
         self._action_worker = worker
         worker.done.connect(self._on_action_done)
         worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: (
+                setattr(self, "_action_worker", None)
+                if getattr(self, "_action_worker", None) is worker
+                else None
+            )
+        )
         worker.finished.connect(worker.deleteLater)
         worker.start()
+
+    def closeEvent(self, event):
+        from crapcleaner.gui.workers import stop_worker
+
+        stop_worker(getattr(self, "_report_worker", None))
+        stop_worker(getattr(self, "_action_worker", None))
+        super().closeEvent(event)
 
     def _relaunch_admin(self):
         if elevate():

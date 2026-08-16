@@ -53,3 +53,45 @@ def test_storage_breakdown_presets_update_path():
     view = StorageBreakdownView(mock_main)
     view._apply_storage_preset(view.path_edit.text())
     assert view.path_edit.text()
+
+
+def test_is_worker_running_and_stop_worker_with_deleted_qobject():
+    import shiboken6
+
+    from crapcleaner.gui.workers import HealthWorker, is_worker_running, stop_worker
+
+    assert is_worker_running(None) is False
+    stop_worker(None)
+
+    worker = HealthWorker()
+    shiboken6.delete(worker)
+
+    # Must return False and not raise RuntimeError: libshiboken: Internal C++ object already deleted
+    assert is_worker_running(worker) is False
+    stop_worker(worker)
+
+
+def test_storage_breakdown_refresh_health_lifecycle_and_deleted_worker():
+    import shiboken6
+
+    from crapcleaner.gui.workers import HealthWorker
+
+    mock_main = MagicMock()
+    view = StorageBreakdownView(mock_main)
+
+    # Case 1: First call starts worker
+    view.refresh_health()
+    worker1 = view._health_worker
+    assert worker1 is not None
+
+    # Case 2: Manually simulate worker deletion as done by Qt deleteLater()
+    worker_to_delete = HealthWorker(parent=view)
+    shiboken6.delete(worker_to_delete)
+    view._health_worker = worker_to_delete
+
+    # Case 3: Second call must not crash with Shiboken deleted object RuntimeError
+    view.refresh_health()
+    assert view._health_worker is not worker_to_delete
+    if view._health_worker is not None:
+        view._health_worker.wait(2000)
+    view.close()

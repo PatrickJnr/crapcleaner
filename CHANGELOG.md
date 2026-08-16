@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.7.1] - 2026-08-16
+
+Theme additions and worker lifecycle stability patch.
+
+### Added
+- **Adwaita Themes**: adds GNOME-inspired *Adwaita Dark* (neutral dark surfaces with restrained blue accents) and *Adwaita Light* (clean light surfaces with understated blue accents) color palettes, expanding the theme gallery to 43 curated themes.
+- **Dynamic Theme Category Counts**: calculates theme category counts dynamically in the Theme Gallery filter chips (*Modern Dark (7)*, *Light & Pastel (5)*, *Retro & Vintage (8)*, *Cyber & Synth (4)*, *Code Palettes (8)*, *Warm & Nature (11)*).
+
+### Fixed
+- **Worker Thread Internal C++ Object Deletion**: resolves Shiboken `RuntimeError: libshiboken: Internal C++ object (...) already deleted` when re-triggering storage health diagnostics (`refresh_health`), hardware queries (`refresh_specs`), storage analysis (`run_analysis`), or memory actions by introducing `is_worker_running` and `stop_worker` safe lifecycle helpers and automatically clearing finished worker references.
+
+---
+
 ## [1.0.7] - 2026-08-16
 
 Quality of Life, Scan Insights, and Stability release.
