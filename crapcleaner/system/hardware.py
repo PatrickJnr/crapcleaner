@@ -671,34 +671,16 @@ def _get_motherboard_specs() -> MotherboardSpec:
 
 def _get_network_specs() -> list[NetworkSpec]:
     adapters: list[NetworkSpec] = []
-    if os.name == "nt":
-        cmd = [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike '*Loopback*' -and $_.IPAddress -notlike '169.254*' } | Select-Object InterfaceAlias, IPAddress | ConvertTo-Json -Compress",
-        ]
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if res.returncode == 0 and res.stdout.strip():
-                raw = json.loads(res.stdout.strip())
-                items = [raw] if isinstance(raw, dict) else raw
-                for it in items:
-                    name = it.get("InterfaceAlias") or "Network Adapter"
-                    ip = it.get("IPAddress") or ""
-                    if ip and not ip.startswith("127."):
-                        adapters.append(
-                            NetworkSpec(adapter_name=name, ip_address=ip, status="Connected")
-                        )
-        except Exception:
-            pass
 
-    if not adapters:
-        hostname = socket.gethostname()
-        try:
-            ip = socket.gethostbyname(hostname)
-        except Exception:
-            ip = "127.0.0.1"
+    # Prefer the stdlib path first. It is fast, cross-platform, and avoids the
+    # PowerShell subprocess crash surface occasionally seen on Windows CI when
+    # this function is called from a Qt worker thread.
+    hostname = socket.gethostname()
+    try:
+        ip = socket.gethostbyname(hostname)
+    except Exception:
+        ip = "127.0.0.1"
+    if ip and not ip.startswith("127."):
         adapters.append(
             NetworkSpec(
                 adapter_name="Primary Network Interface",
@@ -707,7 +689,18 @@ def _get_network_specs() -> list[NetworkSpec]:
                 status="Connected",
             )
         )
-    return adapters
+
+    if adapters:
+        return adapters
+
+    return [
+        NetworkSpec(
+            adapter_name="Primary Network Interface",
+            ip_address=ip,
+            mac_address="",
+            status="Connected",
+        )
+    ]
 
 
 def get_system_specs() -> SystemSpecs:
