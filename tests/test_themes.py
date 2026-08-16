@@ -13,7 +13,7 @@ from crapcleaner.gui.theme import (
 
 def test_all_themes_are_registered():
     assert set(THEMES) == set(PALETTES)
-    for expected in ("dark", "light", "oled", "high-contrast"):
+    for expected in ("dark", "light", "oled", "high-contrast", "adwaita-dark", "adwaita-light"):
         assert expected in THEMES
 
 
@@ -106,6 +106,8 @@ def test_extended_theme_set_is_available():
         "lavender",
         "parchment",
         "coffee",
+        "adwaita-dark",
+        "adwaita-light",
     ):
         assert expected in THEMES
         assert theme_label(expected) != expected
@@ -171,6 +173,10 @@ def test_theme_gallery_widget_filtering_and_selection(qt_app):
     assert gallery.current_theme() == "dark"
     assert gallery.theme_combo.currentData() == "dark"
 
+    chip_texts = [button.text().replace("&&", "&") for button in gallery.chip_group.buttons()]
+    assert "Modern Dark (7)" in chip_texts
+    assert "Light & Pastel (5)" in chip_texts
+
     # Test selecting a new theme
     changed_signals = []
     gallery.theme_changed.connect(changed_signals.append)
@@ -180,6 +186,10 @@ def test_theme_gallery_widget_filtering_and_selection(qt_app):
     assert changed_signals == ["nord"]
     assert gallery.hero_name_label.text() == "Nordic Frost"
 
+    gallery.select_theme("adwaita-dark")
+    assert gallery.current_theme() == "adwaita-dark"
+    assert gallery.hero_name_label.text() == "Adwaita Dark"
+
     # Test category filtering
     gallery._on_category_selected("retro")
     visible_retro_cards = [c for c in gallery._cards.values() if not c.isHidden()]
@@ -188,6 +198,11 @@ def test_theme_gallery_widget_filtering_and_selection(qt_app):
     assert gallery._cards["dark"].isHidden()
 
     # Test search query filtering
+    gallery._on_category_selected("light")
+    visible_light_cards = [c for c in gallery._cards.values() if not c.isHidden()]
+    assert len(visible_light_cards) == 5
+    assert not gallery._cards["adwaita-light"].isHidden()
+
     gallery._on_category_selected("all")
     gallery._on_search_changed("dracula")
     visible_search_cards = [c for c in gallery._cards.values() if not c.isHidden()]

@@ -317,14 +317,18 @@ class ThemeGalleryWidget(QWidget):
         self.chip_group = QButtonGroup(self)
         self.chip_group.setExclusive(True)
 
-        categories_def = [
-            ("all", f"All ({len(THEMES)})"),
-            ("modern-dark", "Modern Dark (6)"),
-            ("light", "Light & Pastel (4)"),
-            ("retro", "Retro & Vintage (8)"),
-            ("cyber", "Cyber & Synth (4)"),
-            ("code", "Code Palettes (8)"),
-            ("nature", "Warm & Nature (11)"),
+        category_counts = {
+            category_id: sum(
+                1 for theme_id in THEMES if get_theme_category(theme_id) == category_id
+            )
+            for category_id in THEME_CATEGORIES
+        }
+        categories_def = [("all", f"All ({len(THEMES)})")] + [
+            (
+                category_id,
+                f"{category_label} ({category_counts.get(category_id, 0)})",
+            )
+            for category_id, category_label in THEME_CATEGORIES.items()
         ]
 
         for cat_id, cat_title in categories_def:
