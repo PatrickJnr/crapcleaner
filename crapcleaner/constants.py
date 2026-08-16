@@ -33,4 +33,6 @@ DEFAULT_CONFIG = {
     "show_command_preview": True,
     "reduce_motion": False,
     "window_geometry": "",
+    "storage_favorites": [],
+    "last_scan_snapshot": {},
 }

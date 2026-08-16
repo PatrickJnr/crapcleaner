@@ -61,7 +61,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crapcleaner.config import config_path, load_settings, save_settings
+from crapcleaner.config import config_path, load_settings, save_settings, update_settings
 from crapcleaner.constants import DEFAULT_CONFIG
 from crapcleaner.gui.dialogs import (
     ConfirmDeleteDialog,
@@ -1094,6 +1094,7 @@ class CleanupView(QWidget):
         self._last_checked = set()
         self._safety_filter = "ALL"
         self._sort_descending = True
+        self._current_explained_category = None
         self._build()
 
     def _build(self):
@@ -1220,6 +1221,7 @@ class CleanupView(QWidget):
         self.tree.customContextMenuRequested.connect(self._show_tree_menu)
         self.tree.itemClicked.connect(self._on_group_clicked)
         self.tree.itemChanged.connect(self._on_item_changed)
+        self.tree.currentItemChanged.connect(self._on_current_item_changed)
         tree_card_lay.addWidget(self.tree)
         layout.addWidget(tree_card, 1)
 
@@ -1258,6 +1260,27 @@ class CleanupView(QWidget):
         summary_lay.addLayout(progress_row)
 
         layout.addWidget(summary_card)
+
+        self.scan_delta_label = QLabel("Run a scan to compare it with the previous one.")
+        self.scan_delta_label.setWordWrap(True)
+        self.scan_delta_label.setProperty("subtle", "true")
+        layout.addWidget(self.scan_delta_label)
+
+        explain_card = QFrame()
+        explain_card.setProperty("card", "true")
+        explain_lay = QVBoxLayout(explain_card)
+        explain_lay.setContentsMargins(14, 12, 14, 12)
+        explain_lay.setSpacing(6)
+        explain_title = QLabel("Why is this here?")
+        explain_title.setStyleSheet("font-size: 14px; font-weight: 700;")
+        explain_lay.addWidget(explain_title)
+        self.explain_label = QLabel(
+            "Select a cleanup category to see what it contains, why it grows, why it is safe to remove, and what will be regenerated."
+        )
+        self.explain_label.setWordWrap(True)
+        self.explain_label.setProperty("subtle", "true")
+        explain_lay.addWidget(self.explain_label)
+        layout.addWidget(explain_card)
 
     def tree_expand_all(self):
         for i in range(self.tree.topLevelItemCount()):
@@ -1328,6 +1351,62 @@ class CleanupView(QWidget):
                 )
         finally:
             self.tree.blockSignals(False)
+
+    def _on_current_item_changed(self, item, _previous):
+        category = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        self._current_explained_category = category
+        if category is None:
+            self.explain_label.setText(
+                "Select a cleanup category to see what it contains, why it grows, why it is safe to remove, and what will be regenerated."
+            )
+            return
+        parts = [f"<b>{category.name}</b>", category.description]
+        if category.what_it_contains:
+            parts.append(f"<b>Contains:</b> {category.what_it_contains}")
+        if category.why_it_grows:
+            parts.append(f"<b>Why it grows:</b> {category.why_it_grows}")
+        if category.why_safe_to_delete:
+            parts.append(f"<b>Why safe to delete:</b> {category.why_safe_to_delete}")
+        if category.regeneration_behavior:
+            parts.append(f"<b>After cleanup:</b> {category.regeneration_behavior}")
+        if category.requires_admin:
+            parts.append("<b>Permission:</b> Requires administrator privileges.")
+        if not category.reversible:
+            parts.append("<b>Reversibility:</b> This action is not reversible.")
+        self.explain_label.setText("<br><br>".join(parts))
+
+    def set_scan_delta(self, previous_snapshot, current_snapshot):
+        if not previous_snapshot:
+            self.scan_delta_label.setText("Run a scan to compare it with the previous one.")
+            return
+        previous_total = int(previous_snapshot.get("total_identified", 0) or 0)
+        if not current_snapshot:
+            self.scan_delta_label.setText(
+                f"Last scan found {format_size(previous_total)} reclaimable. Run another scan to see what changed."
+            )
+            return
+        current_total = int(current_snapshot.get("total_identified", 0) or 0)
+        delta = current_total - previous_total
+        prev_categories = previous_snapshot.get("categories", {}) or {}
+        curr_categories = current_snapshot.get("categories", {}) or {}
+        changes = []
+        for category in self._categories:
+            before = int(prev_categories.get(category.id, 0) or 0)
+            after = int(curr_categories.get(category.id, 0) or 0)
+            diff = after - before
+            if diff > 0:
+                changes.append((diff, category.name))
+        changes.sort(reverse=True)
+        if delta > 0:
+            headline = f"Since the last scan: reclaimable space increased by {format_size(delta)}."
+        elif delta < 0:
+            headline = f"Since the last scan: reclaimable space decreased by {format_size(abs(delta))}."
+        else:
+            headline = "Since the last scan: total reclaimable space is unchanged."
+        if changes:
+            top = ", ".join(f"{name} (+{format_size(diff)})" for diff, name in changes[:3])
+            headline += f" Biggest growth: {top}."
+        self.scan_delta_label.setText(headline)
 
     def _on_group_clicked(self, item, column):
         if column != 0:
@@ -4918,6 +4997,36 @@ class StorageBreakdownView(QWidget):
         self.drive_combo.currentTextChanged.connect(self._on_drive_changed)
         toolbar.addWidget(self.drive_combo)
 
+        preset_btn = QPushButton("Home")
+        preset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        preset_btn.clicked.connect(lambda: self._apply_storage_preset(get_user_profile()))
+        toolbar.addWidget(preset_btn)
+
+        cache_btn = QPushButton("Cache")
+        cache_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cache_btn.clicked.connect(
+            lambda: self._apply_storage_preset(os.path.join(get_user_profile(), ".cache"))
+        )
+        toolbar.addWidget(cache_btn)
+
+        downloads_btn = QPushButton("Downloads")
+        downloads_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        downloads_btn.clicked.connect(
+            lambda: self._apply_storage_preset(os.path.join(get_user_profile(), "Downloads"))
+        )
+        toolbar.addWidget(downloads_btn)
+
+        self.favorite_combo = QComboBox()
+        self.favorite_combo.setFixedWidth(180)
+        self._reload_storage_favorites()
+        self.favorite_combo.currentTextChanged.connect(self._on_favorite_selected)
+        toolbar.addWidget(self.favorite_combo)
+
+        favorite_btn = QPushButton("Save Favorite")
+        favorite_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        favorite_btn.clicked.connect(self._save_current_storage_favorite)
+        toolbar.addWidget(favorite_btn)
+
         self.path_edit = QLineEdit()
         self.path_edit.setText(drives[0] if drives else get_user_profile())
         toolbar.addWidget(self.path_edit, 1)
@@ -5072,6 +5181,43 @@ class StorageBreakdownView(QWidget):
 
         root_lay.addWidget(self.content_stack, 1)
         self.refresh_health()
+
+    def _reload_storage_favorites(self):
+        settings = load_settings()
+        favorites = settings.get("storage_favorites", []) or []
+        current = self.favorite_combo.currentText() if hasattr(self, "favorite_combo") else ""
+        if hasattr(self, "favorite_combo"):
+            self.favorite_combo.blockSignals(True)
+            self.favorite_combo.clear()
+            self.favorite_combo.addItem("Favorites...")
+            for path in favorites:
+                self.favorite_combo.addItem(path)
+            if current and current in favorites:
+                self.favorite_combo.setCurrentText(current)
+            else:
+                self.favorite_combo.setCurrentIndex(0)
+            self.favorite_combo.blockSignals(False)
+
+    def _save_current_storage_favorite(self):
+        path = self.path_edit.text().strip()
+        if not path:
+            return
+        settings = load_settings()
+        favorites = [p for p in (settings.get("storage_favorites", []) or []) if p]
+        if path not in favorites:
+            favorites.append(path)
+            update_settings(storage_favorites=favorites)
+        self._reload_storage_favorites()
+        self.favorite_combo.setCurrentText(path)
+
+    def _on_favorite_selected(self, text: str):
+        if text and text != "Favorites...":
+            self._apply_storage_preset(text)
+
+    def _apply_storage_preset(self, path: str):
+        if path and os.path.exists(path):
+            self.path_edit.setText(path)
+            self.refresh_health()
 
     def _on_drive_changed(self, text: str):
         if text:

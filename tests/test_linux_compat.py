@@ -115,8 +115,7 @@ def test_dedupe_linux_mounts(tmp_path):
     from crapcleaner.utils.platform import _dedupe_linux_mounts
 
     mounts = [str(tmp_path)]
-    metadata = {str(tmp_path): {"source": "/dev/sda1", "filesystem": "ext4"}}
-    res = _dedupe_linux_mounts(mounts, metadata)
+    res = _dedupe_linux_mounts(mounts)
     assert len(res) == 1
 
 
@@ -129,11 +128,7 @@ def test_dedupe_linux_mounts_drops_duplicate_aliases(tmp_path):
     except (OSError, NotImplementedError, AttributeError):
         pytest.skip("symlink creation is not permitted in this environment")
     mounts = [str(tmp_path), str(alias)]
-    metadata = {
-        str(tmp_path): {"source": "/dev/nvme0n1p2", "filesystem": "btrfs"},
-        str(alias): {"source": "/dev/nvme0n1p2", "filesystem": "btrfs"},
-    }
-    res = _dedupe_linux_mounts(mounts, metadata)
+    res = _dedupe_linux_mounts(mounts)
     assert res == [str(tmp_path)]
 
 
@@ -155,6 +150,19 @@ def test_visible_linux_mount_is_strict_about_user_storage_paths():
     assert _is_visible_linux_mount("/tmp", "ext4") is False
     assert _is_visible_linux_mount("/var", "ext4") is False
     assert _is_visible_linux_mount("/usr", "ext4") is False
+
+
+def test_linux_drive_display_helpers():
+    from crapcleaner.utils.platform import linux_drive_display_kind, linux_drive_display_name
+
+    assert linux_drive_display_name("/") == "System Root (/)"
+    assert linux_drive_display_name("/home") == "Home"
+    assert linux_drive_display_name("/mnt/data") == "Mounted Volume (data)"
+    assert linux_drive_display_name("/media/will/FastSSD") == "External Drive (FastSSD)"
+    assert linux_drive_display_kind("/") == "SYSTEM"
+    assert linux_drive_display_kind("/home") == "HOME"
+    assert linux_drive_display_kind("/mnt/data") == "MOUNTED"
+    assert linux_drive_display_kind("/media/will/FastSSD") == "EXTERNAL"
 
 
 def test_linux_trash_helpers(tmp_path):

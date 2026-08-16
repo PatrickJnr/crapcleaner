@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self.dashboard.refresh()
         self.cleanup_view.populate(self._categories)
+        self.cleanup_view.set_scan_delta(self._settings.get("last_scan_snapshot", {}), None)
         self.history_view.refresh()
         theme = self._settings.get("theme", "dark")
         self._apply_theme_to_views(theme)
@@ -240,6 +241,7 @@ class MainWindow(QMainWindow):
         disabled = set(self._settings.get("disabled_categories", []))
         self._categories = [c for c in get_all_categories() if c.id not in disabled]
         self.cleanup_view.populate(self._categories)
+        self.cleanup_view.set_scan_delta(self._settings.get("last_scan_snapshot", {}), None)
         self.dashboard.refresh()
         self.history_view.refresh()
 
@@ -300,6 +302,14 @@ class MainWindow(QMainWindow):
         self.cleanup_view.clear_highlight()
         self.dashboard.set_scan(report)
         self.cleanup_view.update_sizes()
+        previous_snapshot = self._settings.get("last_scan_snapshot", {})
+        current_snapshot = {
+            "total_identified": report.total_size,
+            "categories": {c.id: int(c.size) for c in self._categories},
+            "started": report.started.isoformat(timespec="seconds"),
+        }
+        self.cleanup_view.set_scan_delta(previous_snapshot, current_snapshot)
+        self._settings = update_settings(last_scan_snapshot=current_snapshot)
         if self._scan_cache is not None:
             self._scan_cache.save()
         hits, _ = self._scan_cache.stats if self._scan_cache is not None else (0, 0)

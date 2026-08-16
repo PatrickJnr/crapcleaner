@@ -128,7 +128,7 @@ def _linux_mount_sort_key(mount_point: str) -> tuple[int, int, str]:
     return (priority, len(mount_point), mount_point)
 
 
-def _dedupe_linux_mounts(mounts: list[str], metadata: dict[str, dict[str, str]]) -> list[str]:
+def _dedupe_linux_mounts(mounts: list[str]) -> list[str]:
     deduped: list[str] = []
     seen_devices: set[tuple[int, int]] = set()
 
@@ -225,7 +225,7 @@ def list_drives() -> list[str]:
     except OSError:
         mounts = ["/"]
 
-    return _dedupe_linux_mounts(mounts, metadata) or ["/"]
+    return _dedupe_linux_mounts(mounts) or ["/"]
 
 
 def is_admin() -> bool:

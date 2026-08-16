@@ -35,6 +35,7 @@ def test_storage_breakdown_view():
     assert view.storage_grid is not None
     assert view.types_table is not None
     assert view.vm_table is not None
+    assert view.favorite_combo is not None
 
     # Test section switching
     view._set_active_section("TYPES")
@@ -45,3 +46,10 @@ def test_storage_breakdown_view():
 
     view._set_active_section("VMS")
     assert view.content_stack.currentIndex() == 3
+
+
+def test_storage_breakdown_presets_update_path():
+    mock_main = MagicMock()
+    view = StorageBreakdownView(mock_main)
+    view._apply_storage_preset(view.path_edit.text())
+    assert view.path_edit.text()

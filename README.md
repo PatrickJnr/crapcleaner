@@ -6,7 +6,7 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3b82f6.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue.svg)](#)
-[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Lint & Format: Ruff](https://img.shields.io/badge/lint%20%26%20format-ruff-7f52ff.svg)](https://github.com/astral-sh/ruff)
 
 ---
 
@@ -17,6 +17,7 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 - [Features](#features)
 - [Installation](#installation)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
+- [Development](#development)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
@@ -138,6 +139,32 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - Segmented sub-tabbed settings view for *Appearance & Themes*, *Safety & Protection*, *Exclusions & Roots*, *Scan Performance*, *Category Rules*, and *Backup & Sync*.
 - Preferences, theme, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
 - The config file is versioned, so future releases can migrate older files; unknown, malformed, or wrongly typed entries fall back to defaults instead of preventing startup.
+
+---
+
+## Development
+
+### Run locally
+
+```sh
+python3 -m venv .venv
+./.venv/bin/python -m pip install --upgrade pip
+./.venv/bin/python -m pip install -r requirements-dev.txt
+./.venv/bin/python -m crapcleaner
+```
+
+### Test
+
+```sh
+./.venv/bin/python -m pytest -q
+```
+
+### Lint and format
+
+```sh
+ruff check crapcleaner tests
+ruff format --check crapcleaner tests
+```
 - Full JSON export, import, and factory reset support for settings migration.
 
 ---
