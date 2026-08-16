@@ -152,7 +152,8 @@ def test_visible_linux_mount_is_strict_about_user_storage_paths():
     assert _is_visible_linux_mount("/usr", "ext4") is False
 
 
-def test_linux_drive_display_helpers():
+@patch("crapcleaner.utils.platform.is_windows", return_value=False)
+def test_linux_drive_display_helpers(_mock_win):
     from crapcleaner.utils.platform import linux_drive_display_kind, linux_drive_display_name
 
     assert linux_drive_display_name("/") == "System Root (/)"
