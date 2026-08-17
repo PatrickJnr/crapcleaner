@@ -141,6 +141,12 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - Segmented sub-tabbed settings view for *Appearance & Themes*, *Safety & Protection*, *Exclusions & Roots*, *Scan Performance*, *Category Rules*, and *Backup & Sync*.
 - Preferences, theme, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
 - The config file is versioned, so future releases can migrate older files; unknown, malformed, or wrongly typed entries fall back to defaults instead of preventing startup.
+- Full JSON export, import, and factory reset support for settings migration.
+
+### 15. Help, Safety Philosophy & Technical Documentation
+- **Dedicated Modal Dialog**: comprehensive 9-part interactive documentation guide (`HelpSafetyDialog`) covering core design principles, technical justification for omitting registry cleaners, performance and placebo disclaimers, protected paths safety architecture (`.git`, SSH keys, credentials, user document folders), and regeneration behavior of temporary files.
+- Features real-time FAQ search, category filter chips, and a one-click **Copy System Diagnostics** button for bug reporting.
+- Accessible globally via `F1`, the sidebar "Safety First" footer card, and the About view.
 
 ---
 
@@ -167,7 +173,6 @@ python3 -m venv .venv
 ruff check crapcleaner tests
 ruff format --check crapcleaner tests
 ```
-- Full JSON export, import, and factory reset support for settings migration.
 
 ---
 
@@ -223,7 +228,9 @@ crapcleaner --installers
 
 # Report RAM, swap/pagefile, and graphics memory (add --json for machine-readable output)
 crapcleaner --memory
+```
 
+```bash
 # List the memory actions this system supports
 crapcleaner --memory-clean list
 
@@ -257,7 +264,8 @@ crapcleaner --specs
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+1` ... `Ctrl+9`, `Ctrl+0` | Jump to a sidebar view in order (Dashboard, Cleanup, Storage, Large Files, Duplicates, AI Data, Docker, PC Specs, Memory Cleaner, History) |
+| `Ctrl+1` ... `Ctrl+9`, `Ctrl+0` | Jump to a sidebar view in order (Dashboard, Cleanup, Storage, Large Files, Duplicates, AI Data, Docker, PC Specs, Memory Cleaner, History, Settings, About) |
+| `F1` | Open the Help, Safety Philosophy & Technical Documentation modal dialog |
 | `Ctrl+R` | Start a scan |
 | `F5` | Refresh the active view |
 | `Ctrl+F` | Focus the search box in views that have one |

@@ -125,10 +125,12 @@ def test_cli_specs_json(capsys):
 
 def test_gui_about_and_specs_views():
     import os
+    from unittest.mock import patch
 
     from PySide6.QtWidgets import QApplication
 
-    from crapcleaner.gui.views import AboutView, SpecsView, SquircleAvatarWidget
+    from crapcleaner.gui.views import AboutView, ContributorCard, SpecsView, SquircleAvatarWidget
+    from crapcleaner.utils.contributors import ContributorInfo
 
     app = QApplication.instance()
     if app is None:
@@ -140,6 +142,19 @@ def test_gui_about_and_specs_views():
     widget = SquircleAvatarWidget(os.path.abspath(avatar_path), size=100, radius=20)
     assert widget.width() == 100
     assert widget.height() == 100
+
+    # Test ContributorCard
+    sample_contrib = ContributorInfo(
+        login="Foxils",
+        avatar_url="https://avatar.url",
+        html_url="https://github.com/Foxils",
+        contributions=12,
+    )
+    card = ContributorCard(sample_contrib, avatar_file="", theme="dark")
+    assert card is not None
+    assert card.minimumWidth() == 240
+    card.close()
+    card.deleteLater()
 
     # Test dummy main window object
     class DummyMain:
@@ -159,8 +174,11 @@ def test_gui_about_and_specs_views():
     if hasattr(specs_view, "_worker") and specs_view._worker:
         specs_view._worker.wait(5000)
 
-    about_view = AboutView(dummy)
-    assert about_view is not None
+    with patch("crapcleaner.gui.views.fetch_contributors", return_value=[sample_contrib]):
+        about_view = AboutView(dummy)
+        assert about_view is not None
+        if hasattr(about_view, "contrib_worker") and about_view.contrib_worker:
+            about_view.contrib_worker.wait(5000)
 
     specs_view.close()
     specs_view.deleteLater()

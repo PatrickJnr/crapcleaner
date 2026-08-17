@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.8] - 2026-08-16
+
+Help & Safety modal dialog architecture, sidebar reorganization, sponsorship integration, and standalone packaging fixes.
+
+### Added
+- **Help & Safety Modal Dialog**: introduces `HelpSafetyDialog`, a dedicated modal window housing the comprehensive 9-part safety philosophy, technical documentation, troubleshooting guide, live FAQ search, category filter chips, and one-click system diagnostics copier.
+- **Global Help & Documentation Access**: adds global `F1` shortcut trigger, sidebar "Safety First" footer card action buttons, and direct About view links to open the Help & Safety modal dialog from anywhere in the application.
+- **GitHub Funding Configuration**: adds `.github/FUNDING.yml` configuration supporting GitHub Sponsors, Ko-fi, Buy Me a Coffee, and custom PayPal donation endpoints.
+- **PyInstaller Packaging Specification (`CrapCleaner.spec`)**: introduces a dedicated spec file collecting all `crapcleaner` subpackages, assets, and PySide6 Qt6 platform plugins, resolving standalone executable packaging across Windows and Linux.
+
+### Changed
+- **Sidebar Navigation Reorganization**: streamlines the left navigation rail into four logical, ordered tiers (*Overview*, *Deep Scan*, *System*, and *Preferences*), placing *Settings* and *About* at the bottom of the navigation rail for intuitive desktop navigation.
+- **Drive Usage Donut Theme Palette Integration**: renders the Dashboard storage capacity ring using the active theme's accent color (`pal["accent"]`), replacing the diagonal linear gradient for consistent visual cohesion across all 43 themes.
+- **Contributor Card Layout**: bounds community contributor cards to a proportional maximum width in a balanced two-column grid.
+
+### Fixed
+- **PyInstaller Standalone Executable Packaging**: resolves `ModuleNotFoundError: No module named 'crapcleaner.gui'` in compiled Windows and Linux release binaries by updating release workflows to use full package installs and `CrapCleaner.spec`.
+
+---
+
 ## [1.0.7.1] - 2026-08-16
 
 Theme additions and worker lifecycle stability patch.

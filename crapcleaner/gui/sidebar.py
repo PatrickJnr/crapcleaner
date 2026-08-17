@@ -39,8 +39,12 @@ NAV_SECTIONS = [
             ("specs", "PC Specs", "specs"),
             ("memory", "Memory Cleaner", "memory"),
             ("history", "History", "history"),
+        ],
+    ),
+    (
+        "PREFERENCES",
+        [
             ("settings", "Settings", "settings"),
-            ("help", "Help & Safety", "help"),
             ("about", "About", "about"),
         ],
     ),
@@ -73,6 +77,7 @@ class NavButton(QPushButton):
 
 class Sidebar(QFrame):
     navigation_requested = Signal(str)
+    help_requested = Signal()
 
     def __init__(self, version: str, parent=None):
         super().__init__(parent)
@@ -148,19 +153,41 @@ class Sidebar(QFrame):
         footer_card.setStyleSheet("border-radius: 8px; padding: 8px;")
         footer_lay = QVBoxLayout(footer_card)
         footer_lay.setContentsMargins(10, 8, 10, 8)
-        footer_lay.setSpacing(3)
+        footer_lay.setSpacing(4)
 
+        top_foot = QHBoxLayout()
         tip_title = QLabel("Safety First")
         tip_title.setStyleSheet(
             f"font-size: 11px; font-weight: 700; color: {theme_color(self._theme, 'accent')};"
         )
+        top_foot.addWidget(tip_title, 1)
+
+        help_btn = QPushButton("?")
+        help_btn.setFixedSize(18, 18)
+        help_btn.setToolTip("Help, Safety Philosophy & FAQs (F1)")
+        help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        help_btn.setStyleSheet("font-size: 10px; font-weight: 700; border-radius: 9px; padding: 0;")
+        help_btn.clicked.connect(self.help_requested.emit)
+        top_foot.addWidget(help_btn)
+        footer_lay.addLayout(top_foot)
+
         self.footer = QLabel("Scans never delete files.\nCleanups use Recycle Bin.")
         self.footer.setProperty("subtle", "true")
         self.footer.setStyleSheet(f"font-size: 11px; color: {theme_color(self._theme, 'muted')};")
         self.footer.setWordWrap(True)
-
-        footer_lay.addWidget(tip_title)
         footer_lay.addWidget(self.footer)
+
+        learn_btn = QPushButton("Help && Safety Guide →")
+        learn_btn.setProperty("subtle", "true")
+        learn_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        learn_btn.setStyleSheet(
+            f"font-size: 10px; font-weight: 600; text-align: left; padding: 2px 0; color: {theme_color(self._theme, 'accent')}; background: transparent; border: none;"
+        )
+        learn_btn.clicked.connect(self.help_requested.emit)
+        footer_lay.addWidget(learn_btn)
+        self._learn_btn = learn_btn
+        self._tip_title = tip_title
+
         layout.addWidget(footer_card)
 
     def set_active(self, key: str):
@@ -183,6 +210,14 @@ class Sidebar(QFrame):
     def apply_theme(self, theme: str):
         self._theme = theme
         self.footer.setStyleSheet(f"font-size: 11px; color: {theme_color(theme, 'muted')};")
+        if hasattr(self, "_tip_title"):
+            self._tip_title.setStyleSheet(
+                f"font-size: 11px; font-weight: 700; color: {theme_color(theme, 'accent')};"
+            )
+        if hasattr(self, "_learn_btn"):
+            self._learn_btn.setStyleSheet(
+                f"font-size: 10px; font-weight: 600; text-align: left; padding: 2px 0; color: {theme_color(theme, 'accent')}; background: transparent; border: none;"
+            )
         for key, button in self._buttons.items():
             active = button.property("active") == "true"
             button.setIcon(

@@ -17,9 +17,13 @@ if [ ! -x "$PYTHON_BIN" ]; then
     fi
 fi
 
-"$PYTHON_BIN" -m pip install -e .
+"$PYTHON_BIN" -m pip install .
 "$PYTHON_BIN" -m pip install pyinstaller
-"$PYTHON_BIN" -m PyInstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --add-data "crapcleaner/assets:crapcleaner/assets" scripts/launcher.py
+if [ -f "CrapCleaner.spec" ]; then
+    "$PYTHON_BIN" -m PyInstaller --noconfirm --clean CrapCleaner.spec
+else
+    "$PYTHON_BIN" -m PyInstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --paths . --collect-all crapcleaner --add-data "crapcleaner/assets:crapcleaner/assets" scripts/launcher.py
+fi
 
 echo "Linux binary built at: $DIST_DIR/crapcleaner-linux-x86_64"
 ls -lh "$DIST_DIR/crapcleaner-linux-x86_64"

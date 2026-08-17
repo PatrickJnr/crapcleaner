@@ -10,7 +10,6 @@ env/
 # Build artifacts
 build/
 dist/
-*.spec
 release/
 artifacts/
 
@@ -30,3 +29,9 @@ Desktop.ini
 
 # Local runtime data
 *.log
+
+# Generated image and SVG assets
+*.svg
+*.png
+assets/
+scripts/render_social_preview.py

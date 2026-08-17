@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from crapcleaner import __version__
 from crapcleaner.config import load_settings, update_settings
 from crapcleaner.core.cache import ScanCache
-from crapcleaner.gui.dialogs import ConfirmCleanupDialog, ReportDialog
+from crapcleaner.gui.dialogs import ConfirmCleanupDialog, HelpSafetyDialog, ReportDialog
 from crapcleaner.gui.sidebar import Sidebar
 from crapcleaner.gui.theme import apply_theme, make_window_icon
 from crapcleaner.gui.views import (
@@ -26,7 +26,6 @@ from crapcleaner.gui.views import (
     DashboardView,
     DockerView,
     DuplicatesView,
-    HelpSafetyView,
     HistoryView,
     LargeFilesView,
     MemoryView,
@@ -62,7 +61,6 @@ class MainWindow(QMainWindow):
         "memory",
         "history",
         "settings",
-        "help",
         "about",
     ]
 
@@ -87,6 +85,7 @@ class MainWindow(QMainWindow):
 
         self.sidebar = Sidebar(__version__)
         self.sidebar.navigation_requested.connect(self.navigate)
+        self.sidebar.help_requested.connect(self.show_help_dialog)
         root_layout.addWidget(self.sidebar)
 
         self.stack = QStackedWidget()
@@ -101,7 +100,6 @@ class MainWindow(QMainWindow):
         self.memory_view = MemoryView(self)
         self.history_view = HistoryView(self)
         self.settings_view = SettingsView(self)
-        self.help_view = HelpSafetyView(self)
         self.about_view = AboutView(self)
         for page in (
             self.dashboard,
@@ -115,7 +113,6 @@ class MainWindow(QMainWindow):
             self.memory_view,
             self.history_view,
             self.settings_view,
-            self.help_view,
             self.about_view,
         ):
             self.stack.addWidget(page)
@@ -139,6 +136,10 @@ class MainWindow(QMainWindow):
             sc = QShortcut(QKeySequence(f"Ctrl+{key_num}"), self)
             sc.activated.connect(lambda k=key: self.navigate(k))
 
+        # F1 for Help & Safety Dialog
+        help_sc = QShortcut(QKeySequence("F1"), self)
+        help_sc.activated.connect(self.show_help_dialog)
+
         # Ctrl+R to start scan
         scan_sc = QShortcut(QKeySequence("Ctrl+R"), self)
         scan_sc.activated.connect(self.start_scan)
@@ -150,6 +151,13 @@ class MainWindow(QMainWindow):
         # Escape to cancel scan
         esc_sc = QShortcut(QKeySequence("Escape"), self)
         esc_sc.activated.connect(self.cancel_active_scan)
+
+    def show_help_dialog(self):
+        """Open the Help, Safety Philosophy, and FAQ modal dialog."""
+        dlg = HelpSafetyDialog(self)
+        theme = self._settings.get("theme", "dark")
+        dlg.apply_theme(theme)
+        dlg.exec()
 
     def _refresh_active_view(self):
         idx = self.stack.currentIndex()
@@ -203,7 +211,6 @@ class MainWindow(QMainWindow):
             self.memory_view,
             self.history_view,
             self.settings_view,
-            self.help_view,
             self.about_view,
         ):
             apply = getattr(view, "apply_theme", None)

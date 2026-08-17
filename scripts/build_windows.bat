@@ -43,10 +43,14 @@ REM Font assets must be bundled so icons render in the frozen exe.
 set "DATAFLAG=--add-data "crapcleaner/assets;crapcleaner/assets""
 
 echo [build] Building %MODE% executable...
-if "%MODE%"=="onefile" (
-    %PY% -m PyInstaller --noconfirm --clean --onefile --windowed --name CrapCleaner %DATAFLAG% scripts/launcher.py
+if exist "CrapCleaner.spec" (
+    %PY% -m PyInstaller --noconfirm --clean CrapCleaner.spec
 ) else (
-    %PY% -m PyInstaller --noconfirm --clean --onedir --windowed --name CrapCleaner %DATAFLAG% scripts/launcher.py
+    if "%MODE%"=="onefile" (
+        %PY% -m PyInstaller --noconfirm --clean --onefile --windowed --name CrapCleaner --paths . --collect-all crapcleaner %DATAFLAG% scripts/launcher.py
+    ) else (
+        %PY% -m PyInstaller --noconfirm --clean --onedir --windowed --name CrapCleaner --paths . --collect-all crapcleaner %DATAFLAG% scripts/launcher.py
+    )
 )
 if errorlevel 1 (
     echo [build] ERROR: build failed.
