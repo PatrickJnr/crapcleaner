@@ -16,7 +16,6 @@ if ! command -v uv &> /dev/null; then
 fi
 
 # Create virtual environment if it doesn't exist
-# Create virtual environment if it doesn't exist
 if [ ! -d ".venv" ]; then
     echo "📦 Creating virtual environment (.venv)..."
     uv venv

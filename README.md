@@ -7,6 +7,7 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue.svg)](#)
 [![Lint & Format: Ruff](https://img.shields.io/badge/lint%20%26%20format-ruff-7f52ff.svg)](https://github.com/astral-sh/ruff)
+[![Package Manager: uv](https://img.shields.io/badge/package%20manager-uv-de5fe9.svg)](https://github.com/astral-sh/uv)
 
 ---
 
@@ -150,32 +151,6 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 
 ---
 
-## Development
-
-### Run locally
-
-```sh
-python3 -m venv .venv
-./.venv/bin/python -m pip install --upgrade pip
-./.venv/bin/python -m pip install -r requirements-dev.txt
-./.venv/bin/python -m crapcleaner
-```
-
-### Test
-
-```sh
-./.venv/bin/python -m pytest -q
-```
-
-### Lint and format
-
-```sh
-ruff check crapcleaner tests
-ruff format --check crapcleaner tests
-```
-
----
-
 ## Installation
 
 ### Option 1: Download Pre-compiled Binary (Recommended)
@@ -185,11 +160,23 @@ Download the latest standalone executable from the [GitHub Releases](https://git
 - **Windows (64-bit)**: `CrapCleaner.exe` (portable binary, no Python or installation required).
 - **Linux (64-bit)**: `crapcleaner` (ELF executable, compatible with Ubuntu, Fedora, Arch, Debian).
 
-### Option 2: Run via uv / pip
+### Option 2: Run via Astral uv / pip
 
 ```bash
 git clone https://github.com/PatrickJnr/crapcleaner.git
 cd crapcleaner
+
+# Option A: Run directly with uv (fastest)
+./scripts/runuv.sh
+
+# Option B: Run manually with uv
+uv venv
+uv pip install -e .
+uv run crapcleaner --gui
+
+# Option C: Run with standard pip
+python3 -m venv .venv
+# Activate .venv
 pip install -e .
 crapcleaner --gui
 ```
@@ -260,6 +247,70 @@ crapcleaner --specs
 
 ---
 
+## Development
+
+### Run locally
+
+#### Using `uv` (Fastest)
+
+```sh
+# Automated bootstrap and run:
+./scripts/runuv.sh
+
+# Or manually:
+uv venv
+uv pip install -r requirements-dev.txt
+uv pip install -e .
+uv run python -m crapcleaner
+```
+
+#### Using standard `pip` / `venv`
+
+```sh
+python3 -m venv .venv
+./.venv/bin/python -m pip install --upgrade pip
+./.venv/bin/python -m pip install -r requirements-dev.txt
+./.venv/bin/python -m pip install -e .
+./.venv/bin/python -m crapcleaner
+```
+
+### Build Standalone Executables
+
+```sh
+# Fast PyInstaller build using Astral uv:
+./scripts/builduv.sh
+
+# Windows (Batch script):
+scripts\build_windows.bat
+
+# Linux (Shell script):
+scripts/build_linux.sh
+```
+
+### Test
+
+```sh
+# With uv:
+uv run pytest -q
+
+# With standard pytest in active environment:
+pytest -q
+```
+
+### Lint and format
+
+```sh
+# With uv:
+uv run ruff check crapcleaner tests scripts
+uv run ruff format --check crapcleaner tests scripts
+
+# Or directly with ruff:
+ruff check crapcleaner tests scripts
+ruff format --check crapcleaner tests scripts
+```
+
+---
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -292,7 +343,13 @@ crapcleaner/
   models/           Dataclasses for categories, scan results, and reports
   utils/            Platform helpers, safe file operations, formatting, updater
   assets/           Bundled fonts and images
-scripts/            Build scripts and the PyInstaller entry point
+scripts/            Build scripts, run helpers, and PyInstaller launcher
+  builduv.sh        Build standalone executable using Astral uv
+  runuv.sh          Setup environment and run application using Astral uv
+  build_windows.bat Build standalone Windows executable via PyInstaller
+  build_linux.sh    Build standalone Linux binary via PyInstaller
+  launcher.py       PyInstaller launcher entry point
+  extract_changelog.py  Extract version release notes from CHANGELOG.md
 tests/              Test suite
 ```
 

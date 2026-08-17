@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.8.1] - 2026-08-17
+
+Astral uv build and development scripts, dependency lockfile, and documentation updates.
+
+### Added
+- **Astral uv Build & Run Scripts**: adds `scripts/builduv.sh` and `scripts/runuv.sh` for fast virtual environment bootstrapping, automated dependency synchronization, and PyInstaller binary compilation using Astral `uv`.
+- **Dependency Lockfile (`uv.lock`)**: introduces `uv.lock` for deterministic, reproducible dependency resolution across environments while preserving the existing pip/venv workflow.
+
+### Documentation
+- **Updated Setup & Run Guides**: expands `README.md` with uv-based workflow instructions for local execution, development, testing, and executable builds alongside standard pip commands.
+
+---
+
 ## [1.0.8] - 2026-08-16
 
 Help & Safety modal dialog architecture, sidebar reorganization, sponsorship integration, and standalone packaging fixes.
