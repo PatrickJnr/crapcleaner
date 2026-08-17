@@ -9,6 +9,7 @@ import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from crapcleaner.utils.files import walk_safe_entries
 
 FILE_CATEGORY_MAP: dict[str, str] = {
     # Images
@@ -182,33 +183,34 @@ def analyze_file_types(
     total_bytes = 0
     visited_files = 0
 
-    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+    # walk_safe_entries hands back the DirEntry objects from the directory listing,
+    # which already carry the size. Re-stat'ing each file by path cost one syscall per
+    # file and dominated the whole Storage Breakdown view.
+    for dirpath, file_entries in walk_safe_entries(root):
         if stop_event is not None and stop_event.is_set():
             break
-        # Do not follow symlinks
-        dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
 
-        for name in filenames:
+        for entry in file_entries:
             if stop_event is not None and stop_event.is_set():
                 break
-            full = os.path.join(dirpath, name)
             try:
-                st = os.stat(full)
-                sz = st.st_size
-                visited_files += 1
-            except (OSError, PermissionError):
+                sz = entry.stat(follow_symlinks=False).st_size
+            except OSError:
                 continue
+            visited_files += 1
 
-            ext = os.path.splitext(name)[1].lower()
+            ext = os.path.splitext(entry.name)[1].lower()
             category = FILE_CATEGORY_MAP.get(ext, "Other")
 
-            if category not in groups:
-                groups[category] = {"size": 0, "count": 0, "extensions": set()}
+            group = groups.get(category)
+            if group is None:
+                group = {"size": 0, "count": 0, "extensions": set()}
+                groups[category] = group
 
-            groups[category]["size"] = int(groups[category]["size"]) + sz
-            groups[category]["count"] = int(groups[category]["count"]) + 1
+            group["size"] += sz
+            group["count"] += 1
             if ext:
-                groups[category]["extensions"].add(ext)
+                group["extensions"].add(ext)
             total_bytes += sz
 
             if progress_cb is not None and visited_files % 1500 == 0:

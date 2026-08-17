@@ -14,6 +14,7 @@ from crapcleaner.utils.files import (
     recycle_tree,
     remove_file,
     remove_tree,
+    walk_safe,
 )
 from crapcleaner.utils.platform import is_admin
 
@@ -86,7 +87,7 @@ def _delete_target_files(
             skip_reasons.append(reason)
             return
         if dry_run:
-            for root, dirs, files in os.walk(path):
+            for root, dirs, files in walk_safe(path):
                 if stop_event is not None and stop_event.is_set():
                     raise _Stopped
                 for name in files:
@@ -99,7 +100,7 @@ def _delete_target_files(
         if use_recycle_bin and not patterns:
             size = 0
             count = 0
-            for root, dirs, files in os.walk(path):
+            for root, dirs, files in walk_safe(path):
                 if stop_event is not None and stop_event.is_set():
                     raise _Stopped
                 for name in files:
@@ -117,7 +118,7 @@ def _delete_target_files(
             return
         total_size = 0
         total_files = 0
-        for root, dirs, files in os.walk(path, topdown=False):
+        for root, dirs, files in walk_safe(path, topdown=False):
             if stop_event is not None and stop_event.is_set():
                 raise _Stopped
             for name in files:

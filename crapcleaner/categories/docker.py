@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from crapcleaner.models.category import CleanupCategory, SafetyLevel
 from crapcleaner.utils.platform import run_command, which
+from crapcleaner.utils.files import walk_safe
 
 
 @dataclass
@@ -102,7 +103,7 @@ def wsl_disk_report() -> list[dict[str, object]]:
     ):
         if not os.path.isdir(base):
             continue
-        for root, _dirs, files in os.walk(base):
+        for root, _dirs, files in walk_safe(base):
             for name in files:
                 if name.lower().endswith(".vhdx"):
                     full = os.path.join(root, name)

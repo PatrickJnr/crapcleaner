@@ -31,6 +31,12 @@ from crapcleaner.utils.platform import (
     which,
 )
 
+from crapcleaner.utils.windows_errors import (
+    WINDOWS_ERROR_MAP,
+    explain_windows_error,
+    extract_error_code,
+)
+
 __all__ = [
     "format_size",
     "parse_size",
@@ -56,4 +62,7 @@ __all__ = [
     "move_to_recycle_bin",
     "empty_recycle_bin",
     "path_is_locked",
+    "explain_windows_error",
+    "extract_error_code",
+    "WINDOWS_ERROR_MAP",
 ]

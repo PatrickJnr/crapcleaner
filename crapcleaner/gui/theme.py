@@ -1499,6 +1499,12 @@ def _build_stylesheet(p: dict) -> str:
         border-color: {p["border2"]};
         background-color: {p["surface"]};
     }}
+    /* Driven by effects.elevate(). A property toggle rather than a geometry change,
+       so a lifting card cannot reflow the row it sits in. */
+    QFrame[hovered="true"] {{
+        border: 1px solid {p["accent"]};
+        background-color: {p["elevated"]};
+    }}
     QFrame[statCard="true"] {{
         background-color: {p["panel"]};
         border: 1px solid {p["border"]};
@@ -1769,6 +1775,10 @@ def _build_stylesheet(p: dict) -> str:
         color: {p["faint"]};
         font-weight: 600;
         font-size: 12px;
+    }}
+    QHeaderView::section:hover {{
+        background-color: {p["surface2"]};
+        color: {p["text"]};
     }}
     QGroupBox {{
         border: 1px solid {p["border"]};

@@ -13,6 +13,7 @@ from datetime import datetime
 
 from crapcleaner.core.protected_paths import validate_cleanup_path
 from crapcleaner.models.category import CleanupCategory
+from crapcleaner.utils.files import walk_safe
 
 
 @dataclass
@@ -222,7 +223,7 @@ def generate_cleanup_preview(
                                 except OSError:
                                     continue
                 else:
-                    for root, dirs, files in os.walk(target.path, topdown=True):
+                    for root, dirs, files in walk_safe(target.path, topdown=True):
                         if stop_event is not None and stop_event.is_set():
                             break
                         if total_cat_items >= max_items_per_category:

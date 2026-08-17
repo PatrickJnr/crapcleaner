@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
+from typing import Any
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -64,6 +66,7 @@ from PySide6.QtWidgets import (
 
 from crapcleaner.config import config_path, load_settings, save_settings, update_settings
 from crapcleaner.constants import DEFAULT_CONFIG
+from crapcleaner.gui.effects import AnimatedNumber, SegmentedBar, Sparkline, add_depth, glow
 from crapcleaner.gui.dialogs import (
     ConfirmDeleteDialog,
     DuplicateFilesDialog,
@@ -79,10 +82,18 @@ from crapcleaner.models.category import SafetyLevel
 from crapcleaner.models.report import ScanReport
 from crapcleaner.registry import get_all_categories
 from crapcleaner.reports import export_report
+from crapcleaner.system.capabilities import (
+    SERVICES,
+    STARTUP,
+    SYSTEM_UPDATES,
+    get_capability,
+)
 from crapcleaner.system.live_metrics import sample_live_metrics
+from crapcleaner.system.services import startup_types as service_startup_types
 from crapcleaner.system.memory_actions import available_actions as available_memory_actions
 from crapcleaner.system.memory_actions import get_action as get_memory_action
 from crapcleaner.utils.contributors import fetch_avatar_file, fetch_contributors
+from crapcleaner.utils.files import file_manager_name, reveal_in_file_manager
 from crapcleaner.utils.format import (
     format_datetime,
     format_duration,
@@ -91,6 +102,7 @@ from crapcleaner.utils.format import (
 )
 from crapcleaner.utils.platform import (
     elevate,
+    get_appdata,
     get_drive_info,
     get_user_profile,
     is_admin,
@@ -132,7 +144,9 @@ class _SizeSortedItem(QTreeWidgetItem):
             mine = self.data(3, self._SIZE_ROLE) or 0
             theirs = other.data(3, self._SIZE_ROLE) or 0
             return mine < theirs
-        return super().__lt__(other)
+        # No super().__lt__() here: PySide re-dispatches it back into this
+        # override, which recurses until RecursionError.
+        return self.text(column).lower() < other.text(column).lower()
 
 
 def page_header(title: str, subtitle: str = "") -> QWidget:
@@ -194,6 +208,17 @@ def stat_card(
     return card, v_lbl, s_lbl
 
 
+def restyle_stat_card(value_label: QLabel, sub_label: QLabel, theme: str) -> None:
+    """Re-apply stat card colours after a theme change.
+
+    `stat_card` bakes the theme into an inline stylesheet, which outranks the global
+    sheet. Without this, switching from a dark theme to a light one leaves the value
+    near-white on a near-white card.
+    """
+    value_label.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {_c(theme, 'text')};")
+    sub_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
+
+
 class SkeletonBlock(QFrame):
     """A rounded placeholder block simulating text or UI elements during async data fetching."""
 
@@ -239,7 +264,9 @@ class NumericItem(QTableWidgetItem):
         b = other.data(Qt.ItemDataRole.UserRole)
         if a is not None and b is not None and a != b:
             return a < b
-        return super().__lt__(other)
+        # No super().__lt__() here: PySide re-dispatches it back into this
+        # override, which recurses until RecursionError.
+        return self.text().lower() < other.text().lower()
 
 
 class CrapTable(QTableWidget):
@@ -403,15 +430,13 @@ class DriveCard(QFrame):
 
     def _show_menu(self, pos):
         menu = QMenu(self)
-        open_action = menu.addAction("Open in File Explorer")
+        open_action = menu.addAction(f"Open in {file_manager_name()}")
         action = menu.exec(self.mapToGlobal(pos))
         if action == open_action:
-            if is_windows():
-                path = f"{self.drive}\\"
-                if os.path.exists(path):
-                    subprocess.Popen(["explorer", path])
-            elif os.path.exists(self.drive):
-                subprocess.Popen(["xdg-open", self.drive])
+            # A drive is named "C:" on Windows and needs the trailing separator to be a
+            # path; on Linux it is already a mount point.
+            target = f"{self.drive}\\" if is_windows() else self.drive
+            reveal_in_file_manager(target, select=False)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
@@ -456,6 +481,8 @@ class DashboardView(QWidget):
         self._main = main
         self._theme = "dark"
         self._used_fraction = 0.0
+        #: Last scan report, kept so a theme change can redraw the breakdown rows.
+        self._last_report: ScanReport | None = None
         self._build()
 
     def _build(self):
@@ -491,7 +518,10 @@ class DashboardView(QWidget):
         hero_top.addWidget(self.status_badge)
         hero_lay.addLayout(hero_top)
 
-        self.reclaimable_label = QLabel("Not scanned yet")
+        # The headline figure counts up when a scan lands - the single most satisfying
+        # moment in the app, and the one place motion earns its keep.
+        self.reclaimable_label = AnimatedNumber(formatter=format_size)
+        self.reclaimable_label.setText("Not scanned yet")
         self.reclaimable_label.setProperty("heroValue", "true")
         self.reclaimable_label.setStyleSheet(
             f"font-size: 32px; font-weight: 800; color: {_c(self._theme, 'text')};"
@@ -513,6 +543,9 @@ class DashboardView(QWidget):
         hero_lay.addSpacing(10)
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
+        # Qt clips a QGraphicsEffect to the widget's own rect, so the primary button's
+        # halo needs a few pixels of room around the row or it is never seen.
+        buttons.setContentsMargins(0, 6, 0, 6)
         self.scan_button = QPushButton("Scan for Crap")
         self.scan_button.setProperty("primary", "true")
         self.scan_button.setIcon(material_icon("search", "#ffffff"))
@@ -540,6 +573,8 @@ class DashboardView(QWidget):
         buttons.addWidget(self.review_button)
         buttons.addStretch(1)
         hero_lay.addLayout(buttons)
+        # The primary action is the one thing on this page a new user must find.
+        glow(self.scan_button, self._theme)
 
         self.scan_progress = QProgressBar()
         self.scan_progress.setRange(0, 100)
@@ -612,6 +647,10 @@ class DashboardView(QWidget):
         self.ram_bar.setProperty("good", "true")
         rc_lay.addWidget(self.ram_bar)
 
+        # Sparklines share the vitals tick below, so no card owns a timer of its own.
+        self.ram_spark = Sparkline(self._theme, "accent")
+        rc_lay.addWidget(self.ram_spark)
+
         self.ram_sub = QLabel("Click to open Memory Cleaner ->")
         self.ram_sub.setProperty("subtle", "true")
         self.ram_sub.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
@@ -648,6 +687,9 @@ class DashboardView(QWidget):
         self.cpu_bar.setProperty("thin", "true")
         self.cpu_bar.setProperty("good", "true")
         cpu_lay.addWidget(self.cpu_bar)
+
+        self.cpu_spark = Sparkline(self._theme, "info")
+        cpu_lay.addWidget(self.cpu_spark)
 
         self.cpu_sub = QLabel("Uptime: -- · AC Power")
         self.cpu_sub.setProperty("subtle", "true")
@@ -686,6 +728,9 @@ class DashboardView(QWidget):
         self.gpu_bar.setProperty("good", "true")
         gpu_lay.addWidget(self.gpu_bar)
 
+        self.gpu_spark = Sparkline(self._theme, "success")
+        gpu_lay.addWidget(self.gpu_spark)
+
         self.gpu_sub = QLabel("VRAM: -- / --")
         self.gpu_sub.setProperty("subtle", "true")
         self.gpu_sub.setStyleSheet(f"font-size: 10px; color: {_c(self._theme, 'muted')};")
@@ -723,6 +768,11 @@ class DashboardView(QWidget):
         net_rates_row.addWidget(self.net_out_label)
         net_rates_row.addStretch(1)
         net_lay.addLayout(net_rates_row)
+
+        # Throughput has no natural ceiling, so this sparkline auto-scales to its peak.
+        self.net_spark = Sparkline(self._theme, "safe")
+        self.net_spark.set_ceiling(0)
+        net_lay.addWidget(self.net_spark)
 
         self.net_sub = QLabel("Session: 0 B in · 0 B out")
         self.net_sub.setProperty("subtle", "true")
@@ -782,11 +832,46 @@ class DashboardView(QWidget):
         for drive in self.drives:
             card = DriveCard(drive)
             card.clicked.connect(self._select_drive)
+            # Painted hover rather than a graphics effect: these repeat inside a scroll
+            # area, where an offscreen pixmap per card costs a repaint each.
+            add_depth(card, self._theme, "card")
             cards_row.addWidget(card)
             self._cards[drive] = card
         cards_row.addStretch(1)
         cards_scroll.setWidget(cards_container)
         layout.addWidget(cards_scroll)
+
+        # Reclaimable breakdown - fills the space below the drives, and previews the
+        # categories a scan would check so the panel is never blank before a first run.
+        layout.addWidget(section_label("Reclaimable Breakdown"))
+        self.breakdown_card = QFrame()
+        self.breakdown_card.setProperty("card", "true")
+        bd_lay = QVBoxLayout(self.breakdown_card)
+        bd_lay.setContentsMargins(18, 16, 18, 16)
+        bd_lay.setSpacing(10)
+
+        bd_top = QHBoxLayout()
+        self.breakdown_total = AnimatedNumber(formatter=format_size)
+        self.breakdown_total.setText("Not scanned yet")
+        self.breakdown_total.setStyleSheet(
+            f"font-size: 18px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
+        bd_top.addWidget(self.breakdown_total)
+        bd_top.addStretch(1)
+        self.breakdown_badge = badge("PREVIEW", "muted")
+        bd_top.addWidget(self.breakdown_badge)
+        bd_lay.addLayout(bd_top)
+
+        self.breakdown_bar = SegmentedBar(self._theme, height=12)
+        bd_lay.addWidget(self.breakdown_bar)
+
+        self.breakdown_rows = QVBoxLayout()
+        self.breakdown_rows.setSpacing(4)
+        bd_lay.addLayout(self.breakdown_rows)
+
+        layout.addWidget(self.breakdown_card)
+        self._show_breakdown_preview()
+
         layout.addStretch(1)
 
         scroll.setWidget(container)
@@ -860,8 +945,139 @@ class DashboardView(QWidget):
             self.drive_detail.setText(f"{drive}<br>Unavailable")
         self.drive_detail.setStyleSheet(f"color: {_c(self._theme, 'muted')};")
 
+    # ------------------------------------------------------------------
+    # Reclaimable breakdown
+    # ------------------------------------------------------------------
+
+    #: Safety level -> palette token, so a row is coloured by how risky it is to clean.
+    # `safe` and `success` are the same green in most palettes, which made SAFE and
+    # LOW_RISK indistinguishable in the bar. LOW_RISK takes the info token instead.
+    _BREAKDOWN_TOKENS = {
+        "SAFE": "safe",
+        "LOW_RISK": "info",
+        "REVIEW": "review",
+        "DANGEROUS": "danger",
+    }
+
+    def _clear_breakdown_rows(self) -> None:
+        while self.breakdown_rows.count():
+            item = self.breakdown_rows.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _breakdown_row(self, token: str, name: str, detail: str, dim: bool = False) -> QWidget:
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+
+        swatch = QLabel()
+        swatch.setFixedSize(10, 10)
+        swatch.setStyleSheet(
+            f"background-color: {_c(self._theme, 'faint' if dim else token)}; border-radius: 3px;"
+        )
+        lay.addWidget(swatch)
+
+        label = QLabel(name)
+        label.setStyleSheet(
+            f"font-size: 11px; color: {_c(self._theme, 'muted' if dim else 'text')};"
+        )
+        lay.addWidget(label)
+        lay.addStretch(1)
+
+        value = QLabel(detail)
+        value.setStyleSheet(
+            f"font-size: 11px; font-weight: {'600' if not dim else '400'}; "
+            f"color: {_c(self._theme, 'muted' if dim else 'text')};"
+        )
+        lay.addWidget(value)
+        return row
+
+    def _show_breakdown_preview(self) -> None:
+        """Before any scan, list what a scan would look at rather than showing nothing."""
+        self._clear_breakdown_rows()
+        categories = getattr(self._main, "_categories", None) or []
+
+        groups: list[str] = []
+        for category in categories:
+            group = getattr(category, "group", "") or "Other"
+            if group not in groups:
+                groups.append(group)
+        preview = groups[:5]
+
+        # Stop any in-flight count-up before overwriting the text, or it would tick
+        # straight back over "Not scanned yet".
+        self.breakdown_total.stop()
+        self.breakdown_total.set_value(0)
+        self.breakdown_total.setText("Not scanned yet")
+        self.breakdown_badge.setText("PREVIEW")
+        self.breakdown_badge.setProperty("level", "muted")
+        self.breakdown_badge.style().unpolish(self.breakdown_badge)
+        self.breakdown_badge.style().polish(self.breakdown_badge)
+
+        if not preview:
+            self.breakdown_bar.set_segments([], muted=True)
+            self.breakdown_rows.addWidget(
+                self._breakdown_row("faint", "No categories enabled", "", dim=True)
+            )
+            return
+
+        # Equal-width placeholder segments: the categories are known, the sizes are not.
+        self.breakdown_bar.set_segments([(name, 1.0, "faint") for name in preview], muted=True)
+        for name in preview:
+            self.breakdown_rows.addWidget(self._breakdown_row("faint", name, "not scanned", dim=True))
+
+        # The rows above are groups, so the summary counts groups too - counting
+        # categories here read as a mismatch against the five rows shown.
+        summary = f"{len(categories)} categories across {len(groups)} groups ready to scan"
+        self.breakdown_rows.addWidget(self._breakdown_row("faint", summary, "", dim=True))
+
+    def _show_breakdown_results(self, report: ScanReport) -> None:
+        self._last_report = report
+        self._clear_breakdown_rows()
+        found = sorted(
+            (r for r in report.results if r.size > 0), key=lambda r: r.size, reverse=True
+        )
+
+        self.breakdown_total.animate_to(report.total_size)
+        self.breakdown_badge.setText(f"{len(found)} CATEGORIES")
+        self.breakdown_badge.setProperty("level", "accent" if found else "muted")
+        self.breakdown_badge.style().unpolish(self.breakdown_badge)
+        self.breakdown_badge.style().polish(self.breakdown_badge)
+
+        if not found:
+            self.breakdown_bar.set_segments([], muted=True)
+            self.breakdown_rows.addWidget(
+                self._breakdown_row("safe", "Nothing to reclaim - system is clean", "", dim=True)
+            )
+            return
+
+        top = found[:5]
+        segments = [
+            (r.name, float(r.size), self._BREAKDOWN_TOKENS.get(str(r.safety_level), "accent"))
+            for r in top
+        ]
+        others = sum(r.size for r in found[5:])
+        if others > 0:
+            segments.append(("Other categories", float(others), "muted"))
+
+        self.breakdown_bar.set_segments(segments)
+        for result in top:
+            token = self._BREAKDOWN_TOKENS.get(str(result.safety_level), "accent")
+            self.breakdown_rows.addWidget(
+                self._breakdown_row(token, result.name, format_size(result.size))
+            )
+        if others > 0:
+            self.breakdown_rows.addWidget(
+                self._breakdown_row(
+                    "muted", f"{len(found) - len(top)} other categories", format_size(others)
+                )
+            )
+
     def set_scan(self, report: ScanReport):
-        self.reclaimable_label.setText(format_size(report.total_size))
+        self._show_breakdown_results(report)
+        self.reclaimable_label.animate_to(report.total_size)
         categories = [r for r in report.results if r.size > 0]
         self.last_scan_label.setText(
             f"Last scan: {format_datetime(report.started)} · {len(categories)} categories identified"
@@ -927,11 +1143,25 @@ class DashboardView(QWidget):
         setattr(self, anim_attr, anim)
         anim.start()
 
+    def _push_sparklines(self, snap) -> None:
+        """Feed one live sample into each vitals sparkline.
+
+        Percentages plot against a fixed 0-100 ceiling so the shape is comparable over
+        time; network throughput has no ceiling and auto-scales to its own peak.
+        """
+        self.ram_spark.push(snap.ram.percent_used)
+        self.cpu_spark.push(snap.cpu.percent_used)
+        # Track the same figure the GPU bar shows, so the two agree.
+        self.gpu_spark.push(snap.gpu.utilization_pct if snap.gpu.available else 0.0)
+        self.net_spark.push(snap.network.bytes_in_sec + snap.network.bytes_out_sec)
+
     def _update_live_vitals(self):
         if not self.isVisible():
             return
         try:
             snap = sample_live_metrics()
+            self._push_sparklines(snap)
+
             # 1. Update RAM
             ram_pct = int(snap.ram.percent_used)
             self.ram_val.setText(f"{snap.ram.used_str} / {snap.ram.total_str} ({ram_pct}%)")
@@ -1074,6 +1304,33 @@ class DashboardView(QWidget):
         self.cpu_sub.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'muted')};")
         self.gpu_sub.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'muted')};")
         self.net_sub.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'muted')};")
+
+        for pair in (
+            (self.c1_val, self.c1_sub),
+            (self.c2_val, self.c2_sub),
+            (self.c3_val, self.c3_sub),
+            (self.c4_val, self.c4_sub),
+        ):
+            restyle_stat_card(pair[0], pair[1], theme)
+
+        # Same baked-in-stylesheet problem as the stat cards.
+        self.admin_label.setStyleSheet(
+            f"color: {_c(theme, 'success' if is_admin() else 'muted')}; font-size: 12px;"
+        )
+
+        # Custom-painted widgets read the palette directly, so they need telling.
+        for spark in (self.ram_spark, self.cpu_spark, self.gpu_spark, self.net_spark):
+            spark.apply_theme(theme)
+        self.breakdown_bar.apply_theme(theme)
+        self.breakdown_total.setStyleSheet(
+            f"font-size: 18px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
+        glow(self.scan_button, theme)
+        # Rebuild the breakdown rows so their swatches and text pick up the new palette.
+        if self._last_report is not None:
+            self._show_breakdown_results(self._last_report)
+        else:
+            self._show_breakdown_preview()
 
 
 class CleanupView(QWidget):
@@ -1310,7 +1567,7 @@ class CleanupView(QWidget):
             if category.targets:
                 first_target = category.targets[0].path
                 if os.path.exists(first_target):
-                    open_folder_action = menu.addAction("Open Target in File Explorer")
+                    open_folder_action = menu.addAction(f"Open Target in {file_manager_name()}")
 
             action = menu.exec(self.tree.viewport().mapToGlobal(pos))
             if action == toggle_action and (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
@@ -1328,9 +1585,9 @@ class CleanupView(QWidget):
             elif open_folder_action and action == open_folder_action:
                 target_path = category.targets[0].path
                 if os.path.isdir(target_path):
-                    subprocess.Popen(["explorer", target_path])
+                    reveal_in_file_manager(target_path, select=False)
                 else:
-                    subprocess.Popen(["explorer", "/select,", target_path])
+                    reveal_in_file_manager(target_path)
 
     def _set_children_checked(self, group_item, checked: bool):
         self.tree.blockSignals(True)
@@ -1828,11 +2085,13 @@ class LargeFilesView(QWidget):
         opts_row.setSpacing(8)
         opts_row.addWidget(QLabel("Presets:"))
 
+        # get_appdata() resolves to %APPDATA% on Windows and $XDG_CONFIG_HOME (or
+        # ~/.config) on Linux; gettempdir() honours TMPDIR/TEMP on either platform.
         presets = [
             ("User Profile", get_user_profile()),
             ("Downloads", os.path.join(get_user_profile(), "Downloads")),
-            ("AppData", os.path.join(get_user_profile(), "AppData")),
-            ("Temp", os.environ.get("TEMP", "C:\\Windows\\Temp")),
+            ("App Config" if not is_windows() else "AppData", get_appdata()),
+            ("Temp", tempfile.gettempdir()),
         ]
         for label, path in presets:
             if os.path.exists(path):
@@ -1935,7 +2194,7 @@ class LargeFilesView(QWidget):
 
     def _open_folder(self, path: str):
         if os.path.exists(path):
-            subprocess.Popen(["explorer", "/select,", path])
+            reveal_in_file_manager(path)
 
     def _open_row(self, item):
         row = item.row()
@@ -2045,7 +2304,7 @@ class LargeFilesView(QWidget):
         file_path = path_item.text()
 
         menu = QMenu(self)
-        open_folder = menu.addAction("Reveal in File Explorer")
+        open_folder = menu.addAction(f"Reveal in {file_manager_name()}")
         copy_path = menu.addAction("Copy Path")
         menu.addSeparator()
         to_recycle = menu.addAction("Move to Recycle Bin")
@@ -2409,7 +2668,7 @@ class AiDataView(QWidget):
         row = item.row()
         path_item = self.table.item(row, 0)
         if path_item is not None and os.path.exists(path_item.text()):
-            subprocess.Popen(["explorer", "/select,", path_item.text()])
+            reveal_in_file_manager(path_item.text())
 
     def show_items(self, items):
         if not items:
@@ -2465,11 +2724,11 @@ class AiDataView(QWidget):
             return
         path = item.text()
         menu = QMenu(self)
-        open_folder = menu.addAction("Reveal in File Explorer")
+        open_folder = menu.addAction(f"Reveal in {file_manager_name()}")
         copy_path = menu.addAction("Copy Path")
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
         if action == open_folder and os.path.exists(path):
-            subprocess.Popen(["explorer", "/select,", path])
+            reveal_in_file_manager(path)
         elif action == copy_path:
             QApplication.clipboard().setText(path)
 
@@ -2770,6 +3029,8 @@ class HistoryView(QWidget):
     def apply_theme(self, theme: str):
         self._theme = theme
         self.table.set_empty_text(theme, "No history yet. Run a scan or cleanup to get started.")
+        for pair in ((self.c1_val, self.c1_sub), (self.c2_val, self.c2_sub), (self.c3_val, self.c3_sub)):
+            restyle_stat_card(pair[0], pair[1], theme)
 
 
 class SettingsView(QWidget):
@@ -5197,6 +5458,14 @@ class StorageBreakdownView(QWidget):
         self.analyze_btn.clicked.connect(self.run_analysis)
         toolbar.addWidget(self.analyze_btn)
 
+        # Analysing a large drive takes tens of seconds, so it has to be stoppable.
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setIcon(material_icon("close", _c(self._theme, "text")))
+        self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cancel_btn.clicked.connect(self._cancel_analysis)
+        self.cancel_btn.setVisible(False)
+        toolbar.addWidget(self.cancel_btn)
+
         self.export_btn = QPushButton("Export Report...")
         self.export_btn.setIcon(material_icon("file_download", _c(self._theme, "text")))
         self.export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -5204,6 +5473,13 @@ class StorageBreakdownView(QWidget):
         toolbar.addWidget(self.export_btn)
 
         root_lay.addLayout(toolbar)
+
+        # Live feedback while a long analysis runs, so the view never looks frozen.
+        self.progress_label = QLabel("")
+        self.progress_label.setProperty("subtle", "true")
+        self.progress_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
+        self.progress_label.setVisible(False)
+        root_lay.addWidget(self.progress_label)
 
         # Drive Health & Diagnostics Header Card
         self.health_card = QFrame()
@@ -5454,6 +5730,9 @@ class StorageBreakdownView(QWidget):
 
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.setText("Analyzing...")
+        self.cancel_btn.setVisible(True)
+        self.progress_label.setVisible(True)
+        self.progress_label.setText("Starting analysis...")
 
         stop_worker(getattr(self, "_analysis_worker", None))
 
@@ -5464,7 +5743,9 @@ class StorageBreakdownView(QWidget):
         worker.types_done.connect(self._on_types_done)
         worker.old_done.connect(self._on_old_done)
         worker.vms_done.connect(self._on_vms_done)
+        worker.progress.connect(self._on_analysis_progress)
         worker.finished_all.connect(self._on_analysis_done)
+        worker.cancelled.connect(self._on_analysis_cancelled)
         worker.failed.connect(self._on_analysis_failed)
         worker.finished.connect(
             lambda: (
@@ -5499,13 +5780,35 @@ class StorageBreakdownView(QWidget):
         self._vm_data = vms
         self._populate_vms(vms)
 
-    def _on_analysis_done(self):
+    def _cancel_analysis(self):
+        worker = getattr(self, "_analysis_worker", None)
+        if worker is not None:
+            worker.request_stop()
+            self.cancel_btn.setEnabled(False)
+            self.progress_label.setText("Stopping...")
+
+    def _on_analysis_progress(self, stage: str, seen: int, where: str):
+        # The directory is elided from the left so the meaningful tail stays readable.
+        shown = where if len(where) <= 58 else "..." + where[-55:]
+        self.progress_label.setText(f"{stage}: {seen:,} files · {shown}")
+
+    def _reset_analysis_controls(self):
         self.analyze_btn.setEnabled(True)
         self.analyze_btn.setText("Analyze Storage")
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.setEnabled(True)
+
+    def _on_analysis_cancelled(self):
+        self._reset_analysis_controls()
+        self.progress_label.setText("Analysis cancelled. Partial results are shown.")
+
+    def _on_analysis_done(self):
+        self._reset_analysis_controls()
+        self.progress_label.setVisible(False)
 
     def _on_analysis_failed(self, msg: str):
-        self.analyze_btn.setEnabled(True)
-        self.analyze_btn.setText("Analyze Storage")
+        self._reset_analysis_controls()
+        self.progress_label.setText("Analysis failed.")
         QMessageBox.warning(self, "Analysis Error", f"Storage analysis failed:\n{msg}")
 
     def _populate_tree(self, root_node):
@@ -6502,8 +6805,1961 @@ class MemoryView(QWidget):
         self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
         self.pressure_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
         self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
-        for _, desc, effect, _ in self._action_cards.values():
-            desc.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
-            effect.setStyleSheet(f"font-size: 10px; color: {_c(theme, 'faint')};")
         for effect in self._action_rows.values():
             effect.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'faint')};")
+
+
+# ============================================================================
+# Windows Startup Manager View
+# ============================================================================
+
+
+class AddStartupDialog(QDialog):
+    """Modal dialog to add a new application to Windows Startup."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Startup Application")
+        self.resize(500, 240)
+        self._build()
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 18, 20, 18)
+        lay.setSpacing(12)
+
+        title = QLabel("Add New Startup Application")
+        title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        lay.addWidget(title)
+
+        desc = QLabel("Specify the application name, executable path, and target user scope.")
+        desc.setProperty("subtle", "true")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        # Name row
+        name_row = QHBoxLayout()
+        name_lbl = QLabel("App Name:")
+        name_lbl.setFixedWidth(80)
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("e.g. My Utility")
+        name_row.addWidget(name_lbl)
+        name_row.addWidget(self.name_input)
+        lay.addLayout(name_row)
+
+        # Path row
+        path_row = QHBoxLayout()
+        path_lbl = QLabel("Executable:")
+        path_lbl.setFixedWidth(80)
+        self.path_input = QLineEdit()
+        self.path_input.setPlaceholderText(r"e.g. C:\Program Files\App\app.exe")
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._browse_file)
+        path_row.addWidget(path_lbl)
+        path_row.addWidget(self.path_input)
+        path_row.addWidget(browse_btn)
+        lay.addLayout(path_row)
+
+        # Scope row
+        scope_row = QHBoxLayout()
+        scope_lbl = QLabel("Scope:")
+        scope_lbl.setFixedWidth(80)
+        self.scope_combo = QComboBox()
+        self.scope_combo.addItems(["Current User (User Registry)", "All Users (System Registry - Admin Required)"])
+        scope_row.addWidget(scope_lbl)
+        scope_row.addWidget(self.scope_combo)
+        lay.addLayout(scope_row)
+
+        lay.addStretch(1)
+
+        btn_box = QHBoxLayout()
+        btn_box.addStretch(1)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        add_btn = QPushButton("Add to Startup")
+        add_btn.setProperty("primary", "true")
+        add_btn.clicked.connect(self._validate_and_accept)
+        btn_box.addWidget(cancel_btn)
+        btn_box.addWidget(add_btn)
+        lay.addLayout(btn_box)
+
+    def _browse_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Executable or Shortcut",
+            "",
+            "Executable / Script (*.exe *.bat *.cmd *.vbs *.lnk);;All Files (*.*)",
+        )
+        if file_path:
+            self.path_input.setText(file_path)
+            if not self.name_input.text():
+                base = os.path.splitext(os.path.basename(file_path))[0]
+                self.name_input.setText(base.capitalize())
+
+    def _validate_and_accept(self):
+        if not self.name_input.text().strip():
+            QMessageBox.warning(self, "Invalid Input", "Please enter an application name.")
+            return
+        if not self.path_input.text().strip():
+            QMessageBox.warning(self, "Invalid Input", "Please specify an executable path.")
+            return
+        self.accept()
+
+    def get_data(self) -> tuple[str, str, str]:
+        scope = "SYSTEM" if "All Users" in self.scope_combo.currentText() else "USER"
+        return self.name_input.text().strip(), self.path_input.text().strip(), scope
+
+
+class StartupView(QWidget):
+    """View and manage applications configured to start automatically at login.
+
+    Wording comes from the capability registry, so the page describes registry Run
+    keys on Windows and XDG autostart entries on Linux without branching here.
+    """
+
+    def __init__(self, main, parent=None):
+        super().__init__(parent)
+        self._main = main
+        self._theme = "dark"
+        self._items: list[Any] = []
+        self._filtered_items: list[Any] = []
+        self._worker = None
+        self._action_worker = None
+        self._capability = get_capability(STARTUP)
+        self._build()
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 16)
+        root.setSpacing(12)
+        root.addWidget(page_header(self._capability.title, self._capability.subtitle))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(14)
+
+        # 1. Top Hero Card
+        self.hero_card = QFrame()
+        self.hero_card.setProperty("card", "true")
+        hero_lay = QVBoxLayout(self.hero_card)
+        hero_lay.setContentsMargins(18, 16, 18, 16)
+        hero_lay.setSpacing(10)
+
+        hero_top = QHBoxLayout()
+        self.hero_badge = badge("0 APPS", "accent")
+        self.enabled_badge = badge("0 ENABLED", "safe")
+        self.disabled_badge = badge("0 DISABLED", "muted")
+        self.elevated_badge = badge(
+            "ELEVATED (ADMIN)" if is_admin() else "STANDARD USER",
+            "safe" if is_admin() else "muted",
+        )
+        hero_top.addWidget(self.hero_badge)
+        hero_top.addWidget(self.enabled_badge)
+        hero_top.addWidget(self.disabled_badge)
+        hero_top.addWidget(self.elevated_badge)
+        hero_top.addStretch(1)
+
+        if not is_admin() and is_windows():
+            self.elevate_btn = QPushButton("Relaunch as Admin")
+            self.elevate_btn.setProperty("secondary", "true")
+            self.elevate_btn.setIcon(material_icon("security", _c(self._theme, "accent")))
+            self.elevate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.elevate_btn.clicked.connect(self._relaunch_admin)
+            hero_top.addWidget(self.elevate_btn)
+
+        self.add_btn = QPushButton("Add Startup App")
+        self.add_btn.setProperty("primary", "true")
+        self.add_btn.setIcon(material_icon("add", "#ffffff"))
+        self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_btn.clicked.connect(self._add_item)
+
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.clicked.connect(self.refresh)
+
+        hero_top.addWidget(self.add_btn)
+        hero_top.addWidget(self.refresh_btn)
+        hero_lay.addLayout(hero_top)
+
+        # Status & counts summary
+        self.hero_title = QLabel("Startup Applications")
+        self.hero_title.setStyleSheet(
+            f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
+        hero_lay.addWidget(self.hero_title)
+
+        self.status_label = QLabel("Ready")
+        self.status_label.setProperty("subtle", "true")
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
+        hero_lay.addWidget(self.status_label)
+
+        # Result banner
+        self.result_banner = QFrame()
+        self.result_banner.setProperty("card", "true")
+        self.result_banner.setVisible(False)
+        rb_lay = QHBoxLayout(self.result_banner)
+        rb_lay.setContentsMargins(12, 8, 12, 8)
+        self.result_icon = QLabel()
+        self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
+        self.result_label = QLabel("")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(self._theme, 'text')};")
+        self.result_label.setWordWrap(True)
+        rb_lay.addWidget(self.result_icon)
+        rb_lay.addWidget(self.result_label, 1)
+        hero_lay.addWidget(self.result_banner)
+
+        layout.addWidget(self.hero_card)
+
+        # 2. Metric Cards Row
+        metrics_row = QHBoxLayout()
+        metrics_row.setSpacing(12)
+        c1, self.total_card_val, self.total_card_sub = stat_card("TOTAL STARTUP", "0", "Configured entries", self._theme)
+        c2, self.enabled_card_val, self.enabled_card_sub = stat_card("ENABLED", "0", "Launch on boot", self._theme)
+        c3, self.disabled_card_val, self.disabled_card_sub = stat_card("DISABLED", "0", "Bypassed by system", self._theme)
+        c4, self.impact_card_val, self.impact_card_sub = stat_card("HIGH IMPACT", "0", "Resource heavy", self._theme)
+        for c in (c1, c2, c3, c4):
+            metrics_row.addWidget(c)
+        layout.addLayout(metrics_row)
+
+        # 3. Filter & Search Controls
+        filter_card = QFrame()
+        filter_card.setProperty("card", "true")
+        f_lay = QHBoxLayout(filter_card)
+        f_lay.setContentsMargins(14, 10, 14, 10)
+        f_lay.setSpacing(10)
+
+        search_icon = QLabel()
+        search_icon.setPixmap(material_icon("search", _c(self._theme, "muted")).pixmap(16, 16))
+        f_lay.addWidget(search_icon)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search startup apps by name, publisher, location, or command...")
+        self.search_input.textChanged.connect(self._filter_items)
+        f_lay.addWidget(self.search_input, 2)
+
+        self.scope_combo = QComboBox()
+        self.scope_combo.addItems(["All Scopes", "Current User (HKCU)", "All Users (HKLM)", "Startup Folders"])
+        self.scope_combo.currentIndexChanged.connect(self._filter_items)
+        f_lay.addWidget(self.scope_combo)
+
+        self.state_combo = QComboBox()
+        self.state_combo.addItems(["All States", "Enabled Only", "Disabled Only"])
+        self.state_combo.currentIndexChanged.connect(self._filter_items)
+        f_lay.addWidget(self.state_combo)
+
+        layout.addWidget(filter_card)
+
+        # 4. Startup Items Table
+        self._populating = False  # Guard against reentrant itemClicked during sort
+        self.table = CrapTable(0, 6)
+        self.table.setHorizontalHeaderLabels([
+            "State",
+            "Application",
+            "Publisher",
+            "Location",
+            "Impact",
+            "Command Line",
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._context_menu)
+        self.table.itemClicked.connect(self._on_table_item_clicked)
+        self.table.itemDoubleClicked.connect(self._on_table_double_clicked)
+        self.table.setSortingEnabled(True)
+        self.table.setMinimumHeight(350)
+        layout.addWidget(self.table)
+
+        scroll.setWidget(container)
+        root.addWidget(scroll)
+
+    def refresh(self):
+        self.status_label.setText("Scanning startup configuration...")
+        self.refresh_btn.setEnabled(False)
+        from crapcleaner.gui.workers import StartupWorker, stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+
+        worker = StartupWorker(parent=self)
+        self._worker = worker
+        worker.done.connect(self._on_startup_loaded)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_startup_loaded(self, items: list[Any]):
+        self._items = items
+        self.refresh_btn.setEnabled(True)
+        total = len(items)
+        enabled = sum(1 for i in items if i.enabled)
+        disabled = total - enabled
+        high_impact = sum(1 for i in items if i.impact == "High")
+
+        self.hero_badge.setText(f"{total} APPS")
+        self.enabled_badge.setText(f"{enabled} ENABLED")
+        self.disabled_badge.setText(f"{disabled} DISABLED")
+        self.total_card_val.setText(str(total))
+        self.enabled_card_val.setText(str(enabled))
+        self.disabled_card_val.setText(str(disabled))
+        self.impact_card_val.setText(str(high_impact))
+
+        self.status_label.setText(f"Loaded {total} startup items ({enabled} enabled, {disabled} disabled).")
+        self._filter_items()
+
+    def _on_failed(self, msg: str):
+        self.refresh_btn.setEnabled(True)
+        self.status_label.setText(f"Failed to load startup items: {msg}")
+
+    def _filter_items(self):
+        query = self.search_input.text().strip().lower()
+        scope_filter = self.scope_combo.currentText()
+        state_filter = self.state_combo.currentText()
+
+        filtered = []
+        for item in self._items:
+            # Query match
+            if query:
+                match = (
+                    query in item.name.lower()
+                    or query in item.publisher.lower()
+                    or query in item.location.lower()
+                    or query in item.command.lower()
+                )
+                if not match:
+                    continue
+
+            # Scope match
+            if "HKCU" in scope_filter and "HKCU" not in item.location_key:
+                continue
+            if "HKLM" in scope_filter and "HKLM" not in item.location_key:
+                continue
+            if "Startup Folders" in scope_filter and "STARTUP" not in item.location_key:
+                continue
+
+            # State match
+            if state_filter == "Enabled Only" and not item.enabled:
+                continue
+            if state_filter == "Disabled Only" and item.enabled:
+                continue
+
+            filtered.append(item)
+
+        self._filtered_items = filtered
+        self._populate_table(filtered)
+
+    def _populate_table(self, items: list[Any]):
+        def _impact_rank(impact: str) -> int:
+            return {"High": 3, "Medium": 2, "Low": 1}.get(impact, 0)
+
+        # Build a fast id→item map for safe post-sort lookup
+        self._item_map: dict[str, Any] = {it.id: it for it in items}
+
+        self._populating = True
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(items))
+
+        for row, item in enumerate(items):
+            # Column 0: State (sortable + checkable)
+            state_item = NumericItem("Enabled" if item.enabled else "Disabled", value=1 if item.enabled else 0)
+            state_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            state_item.setCheckState(Qt.CheckState.Checked if item.enabled else Qt.CheckState.Unchecked)
+            if item.enabled:
+                state_item.setForeground(QColor(_c(self._theme, "safe")))
+            else:
+                state_item.setForeground(QColor(_c(self._theme, "muted")))
+            # Store item id (a plain string) — safe across all Qt versions
+            state_item.setData(Qt.ItemDataRole.UserRole, item.id)
+            self.table.setItem(row, 0, state_item)
+
+            # Column 1: Application Name
+            name_item = QTableWidgetItem(item.name)
+            name_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            if not item.file_exists:
+                name_item.setToolTip(f"File not found on disk: {item.file_path}")
+            name_item.setData(Qt.ItemDataRole.UserRole, item.id)
+            self.table.setItem(row, 1, name_item)
+
+            # Column 2: Publisher
+            pub_item = QTableWidgetItem(item.publisher)
+            pub_item.setForeground(QColor(_c(self._theme, "muted")))
+            self.table.setItem(row, 2, pub_item)
+
+            # Column 3: Location
+            loc_item = QTableWidgetItem(item.location)
+            self.table.setItem(row, 3, loc_item)
+
+            # Column 4: Impact (numeric sort)
+            impact_item = NumericItem(item.impact, value=_impact_rank(item.impact))
+            if item.impact == "High":
+                impact_item.setForeground(QColor(_c(self._theme, "danger")))
+            elif item.impact == "Medium":
+                impact_item.setForeground(QColor(_c(self._theme, "warning")))
+            elif item.impact == "Low":
+                impact_item.setForeground(QColor(_c(self._theme, "safe")))
+            self.table.setItem(row, 4, impact_item)
+
+            # Column 5: Command Line
+            cmd_item = QTableWidgetItem(item.command)
+            cmd_item.setToolTip(item.command)
+            cmd_item.setForeground(QColor(_c(self._theme, "muted")))
+            self.table.setItem(row, 5, cmd_item)
+
+        self.table.setSortingEnabled(True)
+        self._populating = False
+
+    def _item_for_row(self, row: int) -> Any:
+        """Return the StartupItem for the given (possibly sorted) table row."""
+        for col in (0, 1):
+            cell = self.table.item(row, col)
+            if cell:
+                item_id = cell.data(Qt.ItemDataRole.UserRole)
+                if item_id and hasattr(self, "_item_map"):
+                    return self._item_map.get(item_id)
+        return None
+
+    def _on_table_item_clicked(self, table_item: QTableWidgetItem):
+        if self._populating:
+            return
+        if table_item.column() == 0:
+            item = self._item_for_row(table_item.row())
+            if item:
+                new_state = (table_item.checkState() == Qt.CheckState.Checked)
+                if new_state != item.enabled:
+                    self._toggle_item(item, new_state)
+
+    def _on_table_double_clicked(self, table_item: QTableWidgetItem):
+        if self._populating:
+            return
+        item = self._item_for_row(table_item.row())
+        if item:
+            self._open_file_location(item)
+
+    def _toggle_item(self, item: Any, new_state: bool):
+        from crapcleaner.gui.workers import StartupActionWorker, stop_worker
+
+        stop_worker(getattr(self, "_action_worker", None))
+
+        worker = StartupActionWorker("toggle", item_id=item.id, enabled=new_state, parent=self)
+        self._action_worker = worker
+        worker.done.connect(self._on_action_done)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _delete_item(self, item: Any):
+        ans = QMessageBox.question(
+            self,
+            "Delete Startup Entry",
+            f"Are you sure you want to permanently delete the startup entry for:\n\n"
+            f"  {item.name} ({item.location})\n\n"
+            "This action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+
+        from crapcleaner.gui.workers import StartupActionWorker, stop_worker
+
+        stop_worker(getattr(self, "_action_worker", None))
+
+        worker = StartupActionWorker("remove", item_id=item.id, parent=self)
+        self._action_worker = worker
+        worker.done.connect(self._on_action_done)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _add_item(self):
+        dlg = AddStartupDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            name, cmd, scope = dlg.get_data()
+            from crapcleaner.gui.workers import StartupActionWorker, stop_worker
+
+            stop_worker(getattr(self, "_action_worker", None))
+
+            worker = StartupActionWorker("add", name=name, command=cmd, scope=scope, parent=self)
+            self._action_worker = worker
+            worker.done.connect(self._on_action_done)
+            worker.failed.connect(self._on_failed)
+            worker.finished.connect(
+                lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+            )
+            worker.finished.connect(worker.deleteLater)
+            worker.start()
+
+    def _on_action_done(self, ok: bool, message: str):
+        self.result_label.setText(message)
+        self.result_icon.setPixmap(
+            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+        )
+        self.result_banner.setVisible(True)
+        if ok:
+            self.refresh()
+
+    def _open_file_location(self, item: Any):
+        if item.file_path and os.path.exists(item.file_path):
+            try:
+                reveal_in_file_manager(item.file_path)
+            except Exception:
+                pass
+        else:
+            QMessageBox.information(self, "Open Location", f"Target file not found:\n{item.file_path}")
+
+    def _copy_command(self, item: Any):
+        QApplication.clipboard().setText(item.command)
+        self.result_label.setText(f"Copied command line to clipboard: {item.command}")
+        self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
+        self.result_banner.setVisible(True)
+
+    def _context_menu(self, pos):
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        item = self._item_for_row(row)
+        if not item:
+            return
+
+        menu = QMenu(self)
+        toggle_act = menu.addAction("Disable" if item.enabled else "Enable")
+        toggle_act.triggered.connect(lambda: self._toggle_item(item, not item.enabled))
+
+        menu.addSeparator()
+        open_act = menu.addAction(f"Open File Location in {file_manager_name()}")
+        open_act.triggered.connect(lambda: self._open_file_location(item))
+
+        copy_act = menu.addAction("Copy Command Line")
+        copy_act.triggered.connect(lambda: self._copy_command(item))
+
+        menu.addSeparator()
+        del_act = menu.addAction("Delete Startup Entry")
+        del_act.triggered.connect(lambda: self._delete_item(item))
+
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _relaunch_admin(self):
+        if elevate():
+            QApplication.quit()
+
+    def closeEvent(self, event):
+        from crapcleaner.gui.workers import stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+        stop_worker(getattr(self, "_action_worker", None))
+        super().closeEvent(event)
+
+    def apply_theme(self, theme: str):
+        self._theme = theme
+        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};")
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
+        if self._filtered_items:
+            self._populate_table(self._filtered_items)
+
+
+# ============================================================================
+# System Update Manager View
+# ============================================================================
+
+
+class SystemUpdatesView(QWidget):
+    """View and manage pending operating-system updates and update history.
+
+    Backed by Windows Update on Windows and the distribution package manager on
+    Linux; all platform vocabulary comes from the capability registry.
+    """
+
+    def __init__(self, main, parent=None):
+        super().__init__(parent)
+        self._main = main
+        self._theme = "dark"
+        self._report = None
+        self._worker = None
+        self._install_worker = None
+        self._capability = get_capability(SYSTEM_UPDATES)
+        self._terms = self._capability.terms
+        self._update_noun = self._terms.get("update_noun", "update")
+        self._history_noun = self._terms.get("history_noun", "update")
+        self._os_name = self._terms.get("os_name", "system")
+        self._build()
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 16)
+        root.setSpacing(12)
+        root.addWidget(page_header(self._capability.title, self._capability.subtitle))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(14)
+
+        # 1. Hero Card
+        self.hero_card = QFrame()
+        self.hero_card.setProperty("card", "true")
+        hero_lay = QVBoxLayout(self.hero_card)
+        hero_lay.setContentsMargins(18, 16, 18, 16)
+        hero_lay.setSpacing(10)
+
+        hero_top = QHBoxLayout()
+        self.hero_badge = badge("UP TO DATE", "safe")
+        self.service_badge = badge("CHECKING BACKEND", "muted")
+        self.elevated_badge = badge(
+            "ELEVATED (ADMIN)" if is_admin() else "STANDARD USER",
+            "safe" if is_admin() else "muted",
+        )
+        hero_top.addWidget(self.hero_badge)
+        hero_top.addWidget(self.service_badge)
+        hero_top.addWidget(self.elevated_badge)
+        hero_top.addStretch(1)
+
+        if not is_admin() and is_windows():
+            self.elevate_btn = QPushButton("Relaunch as Admin")
+            self.elevate_btn.setProperty("secondary", "true")
+            self.elevate_btn.setIcon(material_icon("security", _c(self._theme, "accent")))
+            self.elevate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.elevate_btn.clicked.connect(self._relaunch_admin)
+            hero_top.addWidget(self.elevate_btn)
+
+        self.settings_btn = QPushButton(self._terms.get("settings_label", "Open Update Settings"))
+        self.settings_btn.setIcon(material_icon("settings", _c(self._theme, "text")))
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_btn.clicked.connect(self._open_settings)
+
+        self.install_btn = QPushButton("Install Updates")
+        self.install_btn.setProperty("primary", "true")
+        self.install_btn.setIcon(material_icon("system_update", "#ffffff"))
+        self.install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.install_btn.clicked.connect(self._install_updates)
+        self.install_btn.setEnabled(False)
+
+        self.check_btn = QPushButton("Check for Updates")
+        self.check_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
+        self.check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.check_btn.clicked.connect(self.refresh)
+
+        hero_top.addWidget(self.settings_btn)
+        hero_top.addWidget(self.install_btn)
+        hero_top.addWidget(self.check_btn)
+        hero_lay.addLayout(hero_top)
+
+        self.hero_title = QLabel(f"{self._capability.title} Manager")
+        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};")
+        hero_lay.addWidget(self.hero_title)
+
+        self.status_label = QLabel(
+            f"Click 'Check for Updates' to query {self._os_name} for pending {self._update_noun}s."
+        )
+        self.status_label.setProperty("subtle", "true")
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
+        hero_lay.addWidget(self.status_label)
+
+        # Result banner
+        self.result_banner = QFrame()
+        self.result_banner.setProperty("card", "true")
+        self.result_banner.setVisible(False)
+        rb_lay = QHBoxLayout(self.result_banner)
+        rb_lay.setContentsMargins(12, 8, 12, 8)
+        rb_lay.setSpacing(10)
+        self.result_icon = QLabel()
+        self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
+        self.result_label = QLabel("")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(self._theme, 'text')};")
+        self.result_label.setWordWrap(True)
+        self.banner_settings_btn = QPushButton("Open Settings")
+        self.banner_settings_btn.setIcon(material_icon("settings", _c(self._theme, "text")))
+        self.banner_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.banner_settings_btn.clicked.connect(self._open_settings)
+        rb_lay.addWidget(self.result_icon)
+        rb_lay.addWidget(self.result_label, 1)
+        rb_lay.addWidget(self.banner_settings_btn)
+        hero_lay.addWidget(self.result_banner)
+
+        layout.addWidget(self.hero_card)
+
+        # 2. Metric Cards Row
+        metrics_row = QHBoxLayout()
+        metrics_row.setSpacing(12)
+        c1, self.avail_card_val, self.avail_card_sub = stat_card("AVAILABLE UPDATES", "0", "Ready to install", self._theme)
+        c2, self.size_card_val, self.size_card_sub = stat_card("DOWNLOAD SIZE", "0 B", "Cumulative package size", self._theme)
+        c3, self.crit_card_val, self.crit_card_sub = stat_card("CRITICAL / SECURITY", "0", "High severity fixes", self._theme)
+        c4, self.hist_card_val, self.hist_card_sub = stat_card("INSTALLED HOTFIXES", "0", "Recent history", self._theme)
+        for c in (c1, c2, c3, c4):
+            metrics_row.addWidget(c)
+        layout.addLayout(metrics_row)
+
+        # 3. Available Updates Section
+        layout.addWidget(section_label(f"Available {self._capability.title}"))
+        self.avail_table = CrapTable(0, 5)
+        # Windows identifies updates by KB article; package managers use the package
+        # version, so the second column is labelled per platform.
+        self.avail_table.setHorizontalHeaderLabels([
+            "Title",
+            "KB Article" if self._capability.platform == "windows" else "Version",
+            "Severity",
+            "Size",
+            "Category",
+        ])
+        self.avail_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.avail_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.avail_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.avail_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.avail_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.avail_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.avail_table.setMinimumHeight(180)
+        layout.addWidget(self.avail_table)
+
+        # 4. Installed Update History Section
+        layout.addWidget(
+            section_label(self._terms.get("history_label", "Installed Update History"))
+        )
+
+        # Filter bar for history
+        hist_filter_card = QFrame()
+        hist_filter_card.setProperty("card", "true")
+        hf_lay = QHBoxLayout(hist_filter_card)
+        hf_lay.setContentsMargins(14, 8, 14, 8)
+        hf_lay.setSpacing(10)
+        h_icon = QLabel()
+        h_icon.setPixmap(material_icon("search", _c(self._theme, "muted")).pixmap(16, 16))
+        hf_lay.addWidget(h_icon)
+        self.hist_search = QLineEdit()
+        self.hist_search.setPlaceholderText(
+            f"Filter installed {self._history_noun}s by identifier or description..."
+        )
+        self.hist_search.textChanged.connect(self._filter_history)
+        hf_lay.addWidget(self.hist_search)
+        layout.addWidget(hist_filter_card)
+
+        self.hist_table = CrapTable(0, 4)
+        self.hist_table.setHorizontalHeaderLabels([
+            "HotFix ID" if self._capability.platform == "windows" else "Transaction",
+            "Description",
+            "Installed Date",
+            "Installed By" if self._capability.platform == "windows" else "Source",
+        ])
+        self.hist_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.hist_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.hist_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.hist_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.hist_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.hist_table.setMinimumHeight(220)
+        layout.addWidget(self.hist_table)
+
+        scroll.setWidget(container)
+        root.addWidget(scroll)
+
+    def refresh(self):
+        self.status_label.setText(
+            f"Checking for {self._update_noun}s and recent {self._history_noun} history..."
+        )
+        self.check_btn.setEnabled(False)
+        self.hero_badge.setText("CHECKING...")
+        self.hero_badge.setProperty("level", "warning")
+        self.result_banner.setVisible(False)
+        from crapcleaner.gui.workers import WindowsUpdateWorker, stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+
+        worker = WindowsUpdateWorker(parent=self)
+        self._worker = worker
+        worker.done.connect(self._on_updates_loaded)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_updates_loaded(self, report: Any):
+        self._report = report
+        self.check_btn.setEnabled(True)
+
+        # Backend badge - the Windows Update service, or the detected package manager.
+        svc_status = report.service_status.upper()
+        healthy = any(token in svc_status for token in ("RUNNING", "ACTIVE", "AVAILABLE"))
+        self.service_badge.setText(svc_status)
+        self.service_badge.setProperty("level", "safe" if healthy else "warning")
+
+        # Counts & metrics
+        avail = report.available_updates
+        hist = report.installed_history
+        total_size = sum(u.size_bytes for u in avail)
+        crit_count = sum(1 for u in avail if u.severity in ("Critical", "Important"))
+
+        if avail:
+            self.hero_badge.setText(f"{len(avail)} UPDATES AVAILABLE")
+            self.hero_badge.setProperty("level", "accent")
+            self.install_btn.setEnabled(True)
+            # Package managers do not report a download size up front.
+            size_note = f" ({format_size(total_size)} total)" if total_size else ""
+            self.status_label.setText(
+                f"{len(avail)} {self._update_noun}(s) ready to install{size_note}."
+            )
+        else:
+            self.hero_badge.setText("UP TO DATE")
+            self.hero_badge.setProperty("level", "safe")
+            self.install_btn.setEnabled(False)
+            self.status_label.setText(f"System is up to date (checked {report.last_checked}).")
+
+        if getattr(report, "reboot_required", False):
+            self.status_label.setText(
+                self.status_label.text() + " A reboot is pending to finish earlier updates."
+            )
+
+        self.avail_card_val.setText(str(len(avail)))
+        self.size_card_val.setText(format_size(total_size))
+        self.crit_card_val.setText(str(crit_count))
+        self.hist_card_val.setText(str(len(hist)))
+
+        self._populate_available(avail)
+        self._populate_history(hist)
+
+        if report.error:
+            self.result_label.setText(f"{self._capability.title} Note: {report.error}")
+            self.result_icon.setPixmap(material_icon("warning", _c(self._theme, "warning")).pixmap(18, 18))
+            self.result_banner.setVisible(True)
+        else:
+            self.result_banner.setVisible(False)
+
+    def _on_failed(self, msg: str):
+        # explain_windows_error passes non-Windows messages through untouched, so it is
+        # safe to run on every platform.
+        from crapcleaner.utils.windows_errors import explain_windows_error
+
+        self.check_btn.setEnabled(True)
+        explained = explain_windows_error(msg)
+        self.status_label.setText(f"Failed to check updates: {explained}")
+        self.result_label.setText(f"Update Check Note: {explained}")
+        self.result_icon.setPixmap(material_icon("warning", _c(self._theme, "danger")).pixmap(18, 18))
+        self.result_banner.setVisible(True)
+
+    def _populate_available(self, items: list[Any]):
+        self.avail_table.setRowCount(0)
+        self.avail_table.setRowCount(len(items))
+
+        for row, item in enumerate(items):
+            # Title
+            t_item = QTableWidgetItem(item.title)
+            t_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            if item.description:
+                t_item.setToolTip(item.description)
+            self.avail_table.setItem(row, 0, t_item)
+
+            # KB
+            kb_str = ", ".join(item.kb_numbers) if item.kb_numbers else "--"
+            kb_item = QTableWidgetItem(kb_str)
+            self.avail_table.setItem(row, 1, kb_item)
+
+            # Severity
+            sev_item = QTableWidgetItem(item.severity)
+            if item.severity in ("Critical", "Important"):
+                sev_item.setForeground(QColor(_c(self._theme, "danger")))
+            elif item.severity == "Moderate":
+                sev_item.setForeground(QColor(_c(self._theme, "warning")))
+            self.avail_table.setItem(row, 2, sev_item)
+
+            # Size
+            size_str = format_size(item.size_bytes) if item.size_bytes > 0 else "Dynamic"
+            s_item = QTableWidgetItem(size_str)
+            self.avail_table.setItem(row, 3, s_item)
+
+            # Category
+            cat_str = ", ".join(item.categories) if item.categories else "General"
+            cat_item = QTableWidgetItem(cat_str)
+            cat_item.setForeground(QColor(_c(self._theme, "muted")))
+            self.avail_table.setItem(row, 4, cat_item)
+
+    def _populate_history(self, items: list[Any]):
+        self.hist_table.setRowCount(0)
+        self.hist_table.setRowCount(len(items))
+
+        for row, item in enumerate(items):
+            kb_item = QTableWidgetItem(item.id)
+            kb_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            self.hist_table.setItem(row, 0, kb_item)
+
+            desc_item = QTableWidgetItem(item.categories[0] if item.categories else item.title)
+            self.hist_table.setItem(row, 1, desc_item)
+
+            date_item = QTableWidgetItem(item.installed_on or "--")
+            self.hist_table.setItem(row, 2, date_item)
+
+            by_item = QTableWidgetItem(item.description.replace("Installed by: ", ""))
+            by_item.setForeground(QColor(_c(self._theme, "muted")))
+            self.hist_table.setItem(row, 3, by_item)
+
+    def _filter_history(self):
+        if not self._report:
+            return
+        query = self.hist_search.text().strip().lower()
+        hist = self._report.installed_history
+        if not query:
+            self._populate_history(hist)
+            return
+
+        filtered = [
+            h for h in hist
+            if query in h.id.lower() or query in h.title.lower() or query in h.description.lower()
+        ]
+        self._populate_history(filtered)
+
+    def _install_updates(self):
+        # Windows needs the whole process elevated; on Linux the backend raises
+        # privileges per command through pkexec instead.
+        if not is_admin() and is_windows():
+            QMessageBox.warning(
+                self,
+                "Elevation Required",
+                "Administrator privileges are required to initiate Windows Update installation.\n\n"
+                "Please click 'Relaunch as Admin' and try again.",
+            )
+            return
+
+        ans = QMessageBox.question(
+            self,
+            f"Install {self._capability.title}",
+            f"Do you want to download and install all pending {self._os_name} "
+            f"{self._update_noun}s now?\n\nThis process may take several minutes.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+
+        self.install_btn.setEnabled(False)
+        self.status_label.setText(f"Downloading and installing {self._update_noun}s...")
+        from crapcleaner.gui.workers import WindowsUpdateInstallWorker, stop_worker
+
+        stop_worker(getattr(self, "_install_worker", None))
+
+        worker = WindowsUpdateInstallWorker(parent=self)
+        self._install_worker = worker
+        worker.done.connect(self._on_install_done)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_install_worker", None) if getattr(self, "_install_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_install_done(self, ok: bool, msg: str):
+        self.install_btn.setEnabled(True)
+        self.result_label.setText(msg)
+        self.result_icon.setPixmap(
+            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+        )
+        self.result_banner.setVisible(True)
+        self.refresh()
+
+    def _open_settings(self):
+        from crapcleaner.system.system_updates import open_update_settings
+
+        ok, msg = open_update_settings()
+        if not ok:
+            self.result_label.setText(msg)
+            self.result_icon.setPixmap(
+                material_icon("warning", _c(self._theme, "warning")).pixmap(18, 18)
+            )
+            self.result_banner.setVisible(True)
+
+    def _relaunch_admin(self):
+        if elevate():
+            QApplication.quit()
+
+    def closeEvent(self, event):
+        from crapcleaner.gui.workers import stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+        stop_worker(getattr(self, "_install_worker", None))
+        super().closeEvent(event)
+
+    def apply_theme(self, theme: str):
+        self._theme = theme
+        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};")
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
+        if self._report:
+            self._populate_available(self._report.available_updates)
+            self._populate_history(self._report.installed_history)
+
+
+# ============================================================================
+# Windows Services Manager View
+# ============================================================================
+
+
+class ServicesView(QWidget):
+    """View, control, and configure background services.
+
+    Drives Windows services or systemd units depending on the platform; the wording
+    and the available startup types both come from the capability registry and the
+    service dispatcher rather than being hard-coded here.
+    """
+
+    def __init__(self, main, parent=None):
+        super().__init__(parent)
+        self._main = main
+        self._theme = "dark"
+        self._services: list[Any] = []
+        self._filtered_services: list[Any] = []
+        self._worker = None
+        self._action_worker = None
+        self._capability = get_capability(SERVICES)
+        self._unit_noun = self._capability.terms.get("unit_noun", "service")
+        self._unit_plural = self._capability.terms.get("unit_noun_plural", "services")
+        self._os_name = self._capability.terms.get("os_name", "system")
+        self._startup_types = list(service_startup_types()) or ["Automatic", "Manual", "Disabled"]
+        self._build()
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 16)
+        root.setSpacing(12)
+        root.addWidget(page_header(self._capability.title, self._capability.subtitle))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(14)
+
+        # 1. Hero Card
+        self.hero_card = QFrame()
+        self.hero_card.setProperty("card", "true")
+        hero_lay = QVBoxLayout(self.hero_card)
+        hero_lay.setContentsMargins(18, 16, 18, 16)
+        hero_lay.setSpacing(10)
+
+        hero_top = QHBoxLayout()
+        self.hero_badge = badge("0 SERVICES", "accent")
+        self.running_badge = badge("0 RUNNING", "safe")
+        self.stopped_badge = badge("0 STOPPED", "muted")
+        self.elevated_badge = badge(
+            "ELEVATED (ADMIN)" if is_admin() else "STANDARD USER",
+            "safe" if is_admin() else "muted",
+        )
+        hero_top.addWidget(self.hero_badge)
+        hero_top.addWidget(self.running_badge)
+        hero_top.addWidget(self.stopped_badge)
+        hero_top.addWidget(self.elevated_badge)
+        hero_top.addStretch(1)
+
+        if not is_admin() and is_windows():
+            self.elevate_btn = QPushButton("Relaunch as Admin")
+            self.elevate_btn.setProperty("secondary", "true")
+            self.elevate_btn.setIcon(material_icon("security", _c(self._theme, "accent")))
+            self.elevate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.elevate_btn.clicked.connect(self._relaunch_admin)
+            hero_top.addWidget(self.elevate_btn)
+
+        self.services_msc_btn = QPushButton(
+            self._capability.terms.get("console_label", "Open Service Manager")
+        )
+        self.services_msc_btn.setIcon(material_icon("tune", _c(self._theme, "text")))
+        self.services_msc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.services_msc_btn.clicked.connect(self._open_services_msc)
+
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.clicked.connect(self.refresh)
+
+        hero_top.addWidget(self.services_msc_btn)
+        hero_top.addWidget(self.refresh_btn)
+        hero_lay.addLayout(hero_top)
+
+        self.hero_title = QLabel("Services Manager")
+        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};")
+        hero_lay.addWidget(self.hero_title)
+
+        self.status_label = QLabel("Ready")
+        self.status_label.setProperty("subtle", "true")
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
+        hero_lay.addWidget(self.status_label)
+
+        # Result banner
+        self.result_banner = QFrame()
+        self.result_banner.setProperty("card", "true")
+        self.result_banner.setVisible(False)
+        rb_lay = QHBoxLayout(self.result_banner)
+        rb_lay.setContentsMargins(12, 8, 12, 8)
+        self.result_icon = QLabel()
+        self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
+        self.result_label = QLabel("")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(self._theme, 'text')};")
+        self.result_label.setWordWrap(True)
+        rb_lay.addWidget(self.result_icon)
+        rb_lay.addWidget(self.result_label, 1)
+        hero_lay.addWidget(self.result_banner)
+
+        layout.addWidget(self.hero_card)
+
+        # 2. Metric Cards Row
+        metrics_row = QHBoxLayout()
+        metrics_row.setSpacing(12)
+        c1, self.total_card_val, self.total_card_sub = stat_card("TOTAL SERVICES", "0", "Installed services", self._theme)
+        c2, self.running_card_val, self.running_card_sub = stat_card("RUNNING", "0", "Active processes", self._theme)
+        c3, self.stopped_card_val, self.stopped_card_sub = stat_card("STOPPED", "0", "Inactive", self._theme)
+        c4, self.disabled_card_val, self.disabled_card_sub = stat_card("DISABLED", "0", "Cannot start", self._theme)
+        for c in (c1, c2, c3, c4):
+            metrics_row.addWidget(c)
+        layout.addLayout(metrics_row)
+
+        # 3. Filter & Search Controls
+        filter_card = QFrame()
+        filter_card.setProperty("card", "true")
+        f_lay = QHBoxLayout(filter_card)
+        f_lay.setContentsMargins(14, 10, 14, 10)
+        f_lay.setSpacing(10)
+
+        search_icon = QLabel()
+        search_icon.setPixmap(material_icon("search", _c(self._theme, "muted")).pixmap(16, 16))
+        f_lay.addWidget(search_icon)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(
+            f"Search {self._unit_plural} by display name, {self._unit_noun} name, or description..."
+        )
+        self.search_input.textChanged.connect(self._filter_services)
+        f_lay.addWidget(self.search_input, 2)
+
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["All Status", "Running Only", "Stopped Only"])
+        self.status_combo.currentIndexChanged.connect(self._filter_services)
+        f_lay.addWidget(self.status_combo)
+
+        self.startup_combo = QComboBox()
+        # Startup types differ per platform - systemd has no delayed-start mode.
+        self.startup_combo.addItems(["All Startup Types"] + self._startup_types)
+        self.startup_combo.currentIndexChanged.connect(self._filter_services)
+        f_lay.addWidget(self.startup_combo)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(
+            [f"All {self._unit_plural.title()}", "Third-Party Only", f"System {self._unit_plural.title()}"]
+        )
+        self.type_combo.currentIndexChanged.connect(self._filter_services)
+        f_lay.addWidget(self.type_combo)
+
+        layout.addWidget(filter_card)
+
+        # 4. Services Table
+        self.table = CrapTable(0, 6)
+        self.table.setHorizontalHeaderLabels([
+            "Display Name",
+            "Service Name",
+            "Status",
+            "Startup Type",
+            "Log On As",
+            "Description",
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._context_menu)
+        self.table.setSortingEnabled(True)
+        self.table.setMinimumHeight(380)
+        layout.addWidget(self.table)
+
+        scroll.setWidget(container)
+        root.addWidget(scroll)
+
+    def refresh(self):
+        self.status_label.setText(f"Reading {self._os_name} {self._unit_plural}...")
+        self.refresh_btn.setEnabled(False)
+        from crapcleaner.gui.workers import ServicesWorker, stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+
+        worker = ServicesWorker(parent=self)
+        self._worker = worker
+        worker.done.connect(self._on_services_loaded)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_services_loaded(self, items: list[Any]):
+        self._services = items
+        self.refresh_btn.setEnabled(True)
+
+        total = len(items)
+        running = sum(1 for s in items if s.status == "Running")
+        stopped = sum(1 for s in items if s.status == "Stopped")
+        disabled = sum(1 for s in items if "Disabled" in s.startup_type)
+
+        self.hero_badge.setText(f"{total} {self._unit_plural.upper()}")
+        self.running_badge.setText(f"{running} RUNNING")
+        self.stopped_badge.setText(f"{stopped} STOPPED")
+
+        self.total_card_val.setText(str(total))
+        self.running_card_val.setText(str(running))
+        self.stopped_card_val.setText(str(stopped))
+        self.disabled_card_val.setText(str(disabled))
+
+        self.status_label.setText(
+            f"Loaded {total} {self._unit_plural} ({running} running, {stopped} stopped, {disabled} disabled)."
+        )
+        self._filter_services()
+
+    def _on_failed(self, msg: str):
+        self.refresh_btn.setEnabled(True)
+        self.status_label.setText(f"Failed to load {self._unit_plural}: {msg}")
+
+    def _filter_services(self):
+        query = self.search_input.text().strip().lower()
+        status_filter = self.status_combo.currentText()
+        startup_filter = self.startup_combo.currentText()
+        type_filter = self.type_combo.currentText()
+
+        filtered = []
+        for s in self._services:
+            if query:
+                match = (
+                    query in s.display_name.lower()
+                    or query in s.name.lower()
+                    or query in s.description.lower()
+                    or query in s.account.lower()
+                )
+                if not match:
+                    continue
+
+            if status_filter == "Running Only" and s.status != "Running":
+                continue
+            if status_filter == "Stopped Only" and s.status != "Stopped":
+                continue
+
+            # The combo is populated from the platform's own startup types, so an
+            # exact-prefix match covers every one of them without listing names here.
+            if startup_filter != "All Startup Types" and startup_filter not in s.startup_type:
+                continue
+
+            if type_filter == "Third-Party Only" and s.is_system:
+                continue
+            if type_filter.startswith("System ") and not s.is_system:
+                continue
+
+            filtered.append(s)
+
+        self._filtered_services = filtered
+        self._populate_table(filtered)
+
+    def _populate_table(self, items: list[Any]):
+        # Build name→service map for safe post-sort lookup
+        self._svc_map: dict[str, Any] = {s.name: s for s in items}
+
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(items))
+
+        for row, s in enumerate(items):
+            # Display Name
+            d_item = QTableWidgetItem(s.display_name)
+            d_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            if s.description:
+                d_item.setToolTip(s.description)
+            d_item.setData(Qt.ItemDataRole.UserRole, s.name)
+            self.table.setItem(row, 0, d_item)
+
+            # Service Name
+            n_item = QTableWidgetItem(s.name)
+            n_item.setForeground(QColor(_c(self._theme, "muted")))
+            n_item.setData(Qt.ItemDataRole.UserRole, s.name)
+            self.table.setItem(row, 1, n_item)
+
+            # Status
+            st_item = QTableWidgetItem(s.status)
+            if s.status == "Running":
+                st_item.setForeground(QColor(_c(self._theme, "safe")))
+            elif s.status == "Stopped":
+                st_item.setForeground(QColor(_c(self._theme, "muted")))
+            elif s.status == "Paused":
+                st_item.setForeground(QColor(_c(self._theme, "warning")))
+            self.table.setItem(row, 2, st_item)
+
+            # Startup Type
+            su_item = QTableWidgetItem(s.startup_type)
+            if "Disabled" in s.startup_type:
+                su_item.setForeground(QColor(_c(self._theme, "danger")))
+            elif "Automatic" in s.startup_type:
+                su_item.setForeground(QColor(_c(self._theme, "safe")))
+            self.table.setItem(row, 3, su_item)
+
+            # Account
+            acc_item = QTableWidgetItem(s.account)
+            acc_item.setForeground(QColor(_c(self._theme, "faint")))
+            self.table.setItem(row, 4, acc_item)
+
+            # Description
+            desc_item = QTableWidgetItem(s.description)
+            desc_item.setForeground(QColor(_c(self._theme, "muted")))
+            self.table.setItem(row, 5, desc_item)
+
+        self.table.setSortingEnabled(True)
+
+    def _svc_for_row(self, row: int) -> Any:
+        """Return the ServiceItem for the given (possibly sorted) table row."""
+        for col in (1, 0):
+            cell = self.table.item(row, col)
+            if cell:
+                svc_name = cell.data(Qt.ItemDataRole.UserRole)
+                if svc_name and hasattr(self, "_svc_map"):
+                    return self._svc_map.get(svc_name)
+        return None
+
+    def _start_service(self, name: str):
+        self._run_service_action("start", name)
+
+    def _stop_service(self, name: str):
+        from crapcleaner.system.services import is_critical_service
+
+        if is_critical_service(name):
+            QMessageBox.critical(
+                self,
+                f"Critical System {self._unit_noun.title()}",
+                f"'{name}' is a critical {self._os_name} operating system component.\n\n"
+                f"Stopping this {self._unit_noun} may destabilize or crash your computer.",
+            )
+            return
+
+        ans = QMessageBox.question(
+            self,
+            f"Stop {self._unit_noun.title()}",
+            f"Are you sure you want to stop {self._unit_noun} '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+
+        self._run_service_action("stop", name)
+
+    def _restart_service(self, name: str):
+        self._run_service_action("restart", name)
+
+    def _set_startup_type(self, name: str, startup_type: str):
+        from crapcleaner.system.services import is_critical_service
+
+        if is_critical_service(name) and startup_type == "Disabled":
+            QMessageBox.critical(
+                self,
+                f"Critical System {self._unit_noun.title()}",
+                f"'{name}' is required by {self._os_name} and cannot be disabled.",
+            )
+            return
+
+        if startup_type == "Disabled":
+            ans = QMessageBox.question(
+                self,
+                f"Disable {self._unit_noun.title()}",
+                f"Are you sure you want to disable {self._unit_noun} '{name}'?\n\n"
+                f"Disabled {self._unit_plural} cannot start until their startup type is changed.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+
+        self._run_service_action("startup_type", name, startup_type=startup_type)
+
+    def _run_service_action(self, action: str, service_name: str, startup_type: str = ""):
+        # On Linux the backend elevates per action through pkexec, so the whole
+        # application does not need to be running as root to get this far.
+        if not is_admin() and is_windows():
+            QMessageBox.warning(
+                self,
+                "Administrator Elevation Required",
+                f"Administrator privileges are required to modify service '{service_name}'.\n\n"
+                "Please click 'Relaunch as Admin' and try again.",
+            )
+            return
+
+        from crapcleaner.gui.workers import ServiceActionWorker, stop_worker
+
+        stop_worker(getattr(self, "_action_worker", None))
+
+        worker = ServiceActionWorker(action, service_name, startup_type=startup_type, parent=self)
+        self._action_worker = worker
+        worker.done.connect(self._on_action_done)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_action_done(self, ok: bool, msg: str):
+        self.result_label.setText(msg)
+        self.result_icon.setPixmap(
+            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+        )
+        self.result_banner.setVisible(True)
+        if ok:
+            self.refresh()
+
+    def _open_services_msc(self):
+        from crapcleaner.system.services import open_services_console
+
+        ok, msg = open_services_console()
+        if not ok:
+            self.result_label.setText(msg)
+            self.result_icon.setPixmap(
+                material_icon("warning", _c(self._theme, "warning")).pixmap(18, 18)
+            )
+            self.result_banner.setVisible(True)
+
+    def _relaunch_admin(self):
+        if elevate():
+            QApplication.quit()
+
+    def _context_menu(self, pos):
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        svc = self._svc_for_row(row)
+        if not svc:
+            return
+
+        noun = self._unit_noun.title()
+        menu = QMenu(self)
+        if svc.status != "Running":
+            start_act = menu.addAction(f"Start {noun}")
+            start_act.triggered.connect(lambda: self._start_service(svc.name))
+        else:
+            stop_act = menu.addAction(f"Stop {noun}")
+            stop_act.triggered.connect(lambda: self._stop_service(svc.name))
+            restart_act = menu.addAction(f"Restart {noun}")
+            restart_act.triggered.connect(lambda: self._restart_service(svc.name))
+
+        menu.addSeparator()
+        st_menu = menu.addMenu("Set Startup Type")
+        for startup_type in self._startup_types:
+            action = st_menu.addAction(startup_type)
+            action.triggered.connect(
+                lambda _=False, st=startup_type: self._set_startup_type(svc.name, st)
+            )
+
+        menu.addSeparator()
+        copy_act = menu.addAction(f"Copy {noun} Name")
+        copy_act.triggered.connect(lambda: QApplication.clipboard().setText(svc.name))
+
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def closeEvent(self, event):
+        from crapcleaner.gui.workers import stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+        stop_worker(getattr(self, "_action_worker", None))
+        super().closeEvent(event)
+
+    def apply_theme(self, theme: str):
+        self._theme = theme
+        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};")
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
+        if self._filtered_services:
+            self._populate_table(self._filtered_services)
+
+
+#: Historic name for the update page, kept for existing imports.
+WindowsUpdateView = SystemUpdatesView
+
+
+# =============================================================================
+# App Updates View
+# =============================================================================
+
+
+class AppUpdatesView(QWidget):
+    """Scan for app updates via installed package managers (winget, choco, apt, flatpak, snap, pacman, dnf)."""
+
+    def __init__(self, main, parent=None):
+        super().__init__(parent)
+        self._main = main
+        self._theme = "dark"
+        self._results: list = []
+        self._all_updates: list = []
+        self._filtered: list = []
+        self._worker = None
+        self._update_worker = None
+        self._populating = False
+        self._pending_managers: list = []
+        self._pending_packages: list = []
+        self._update_map: dict = {}
+        self._build()
+
+    # ------------------------------------------------------------------
+    # Build
+    # ------------------------------------------------------------------
+
+    def _build(self):
+        from crapcleaner.system.package_managers import detect_managers
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 16)
+        root.setSpacing(12)
+        root.addWidget(
+            page_header(
+                "App Updates",
+                "Scan for available application updates via installed package managers.",
+            )
+        )
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(14)
+
+        # --- Hero card ---
+        hero_card = QFrame()
+        hero_card.setProperty("card", "true")
+        hero_lay = QVBoxLayout(hero_card)
+        hero_lay.setContentsMargins(18, 16, 18, 16)
+        hero_lay.setSpacing(10)
+
+        hero_top = QHBoxLayout()
+        self.hero_badge = badge("NOT YET SCANNED", "muted")
+        self.managers_badge = badge("DETECTING", "muted")
+        self.last_check_badge = badge("NEVER CHECKED", "muted")
+        hero_top.addWidget(self.hero_badge)
+        hero_top.addWidget(self.managers_badge)
+        hero_top.addWidget(self.last_check_badge)
+        hero_top.addStretch(1)
+
+        self.update_selected_btn = QPushButton("Update Selected")
+        self.update_selected_btn.setIcon(material_icon("download", _c(self._theme, "text")))
+        self.update_selected_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_selected_btn.clicked.connect(self._update_selected)
+        self.update_selected_btn.setEnabled(False)
+
+        self.update_all_btn = QPushButton("Update All")
+        self.update_all_btn.setProperty("primary", "true")
+        self.update_all_btn.setIcon(material_icon("system_update", "#ffffff"))
+        self.update_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_all_btn.clicked.connect(self._update_all)
+        self.update_all_btn.setEnabled(False)
+
+        self.refresh_btn = QPushButton("Check for Updates")
+        self.refresh_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.clicked.connect(self.refresh)
+
+        hero_top.addWidget(self.update_selected_btn)
+        hero_top.addWidget(self.update_all_btn)
+        hero_top.addWidget(self.refresh_btn)
+        hero_lay.addLayout(hero_top)
+
+        self.status_label = QLabel("Click 'Check for Updates' to scan installed package managers.")
+        self.status_label.setWordWrap(True)
+        hero_lay.addWidget(self.status_label)
+
+        detected = detect_managers()
+        if detected:
+            mgr_row = QHBoxLayout()
+            for mgr in detected:
+                mgr_row.addWidget(badge(mgr.upper(), "accent"))
+            mgr_row.addStretch(1)
+            hero_lay.addLayout(mgr_row)
+            plural = "S" if len(detected) != 1 else ""
+            self.managers_badge.setText(f"{len(detected)} MANAGER{plural}")
+        else:
+            self.managers_badge.setText("NO MANAGERS FOUND")
+
+        layout.addWidget(hero_card)
+
+        # --- Result banner ---
+        self.result_banner = QFrame()
+        self.result_banner.setProperty("infoCard", "true")
+        result_lay = QHBoxLayout(self.result_banner)
+        result_lay.setContentsMargins(14, 10, 14, 10)
+        self.result_icon = QLabel()
+        self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
+        self.result_label = QLabel()
+        self.result_label.setWordWrap(True)
+        result_lay.addWidget(self.result_icon)
+        result_lay.addWidget(self.result_label, 1)
+        dismiss_btn = QPushButton()
+        dismiss_btn.setIcon(material_icon("close", _c(self._theme, "muted")))
+        dismiss_btn.setFlat(True)
+        dismiss_btn.setFixedSize(22, 22)
+        dismiss_btn.clicked.connect(lambda: self.result_banner.setVisible(False))
+        result_lay.addWidget(dismiss_btn)
+        self.result_banner.setVisible(False)
+        layout.addWidget(self.result_banner)
+
+        # --- Filter bar ---
+        filter_card = QFrame()
+        filter_card.setProperty("card", "true")
+        f_lay = QHBoxLayout(filter_card)
+        f_lay.setContentsMargins(12, 8, 12, 8)
+        f_lay.setSpacing(8)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search packages...")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self._filter)
+        f_lay.addWidget(self.search_input, 1)
+
+        self.mgr_combo = QComboBox()
+        self.mgr_combo.addItem("All Managers")
+        self.mgr_combo.currentIndexChanged.connect(self._filter)
+        f_lay.addWidget(self.mgr_combo)
+
+        layout.addWidget(filter_card)
+
+        # --- Updates table ---
+        # Source is folded into the Manager column: for winget/choco/snap the two
+        # always match, and a dedicated column just repeats itself down the view.
+        self.table = CrapTable(0, 4)
+        self.table.setHorizontalHeaderLabels(
+            ["Package", "Current Version", "Available Version", "Manager"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._context_menu)
+        self.table.itemDoubleClicked.connect(self._on_double_click)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        self.table.setMinimumHeight(320)
+        # Stretch factor, not addStretch(): the table should absorb the spare
+        # height instead of being pinned to its minimum with dead space below.
+        layout.addWidget(self.table, 1)
+
+        scroll.setWidget(container)
+        root.addWidget(scroll)
+
+    # ------------------------------------------------------------------
+    # Refresh / data loading
+    # ------------------------------------------------------------------
+
+    def refresh(self):
+        self.status_label.setText("Scanning package managers for available updates...")
+        self.refresh_btn.setEnabled(False)
+        self.update_all_btn.setEnabled(False)
+        self.update_selected_btn.setEnabled(False)
+        self.hero_badge.setText("SCANNING...")
+        self.result_banner.setVisible(False)
+
+        from crapcleaner.gui.workers import PackageManagerWorker, stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+
+        worker = PackageManagerWorker(force_refresh=True, parent=self)
+        self._worker = worker
+        worker.done.connect(self._on_results)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_results(self, results: list):
+        import datetime
+
+        self._results = results
+        self._all_updates = [u for r in results for u in r.updates]
+        self.refresh_btn.setEnabled(True)
+
+        total = len(self._all_updates)
+        managers_with_updates = [r.manager for r in results if r.updates]
+        errors = [r for r in results if r.error]
+
+        self.hero_badge.setText(f"{total} UPDATES" if total else "UP TO DATE")
+        ts = datetime.datetime.now().strftime("%H:%M")
+        self.last_check_badge.setText(f"CHECKED AT {ts}")
+        self.update_all_btn.setEnabled(total > 0)
+
+        # Repopulate manager combo
+        self.mgr_combo.blockSignals(True)
+        self.mgr_combo.clear()
+        self.mgr_combo.addItem("All Managers")
+        seen: list = []
+        for u in self._all_updates:
+            if u.manager not in seen:
+                seen.append(u.manager)
+                self.mgr_combo.addItem(u.manager)
+        self.mgr_combo.blockSignals(False)
+
+        if total:
+            mgrs = len(managers_with_updates)
+            err_suffix = f" ({len(errors)} manager error{'s' if len(errors) != 1 else ''})" if errors else ""
+            self.status_label.setText(
+                f"{total} update{'s' if total != 1 else ''} available across "
+                f"{mgrs} manager{'s' if mgrs != 1 else ''}.{err_suffix}"
+            )
+        elif errors:
+            err_msgs = "; ".join(r.error for r in errors if r.error)
+            self.status_label.setText(f"All managers scanned. Some errors: {err_msgs}")
+        else:
+            self.status_label.setText("All packages are up to date.")
+
+        self._filter()
+
+    def _on_failed(self, msg: str):
+        self._pending_packages = []
+        self._pending_managers = []
+        self.refresh_btn.setEnabled(True)
+        self.update_all_btn.setEnabled(False)
+        self.update_selected_btn.setEnabled(False)
+        self.status_label.setText(f"Failed to scan: {msg}")
+        self.hero_badge.setText("ERROR")
+
+    def _filter(self):
+        query = self.search_input.text().strip().lower()
+        mgr_filter = self.mgr_combo.currentText()
+        filtered = []
+        for u in self._all_updates:
+            if query and query not in u.name.lower() and query not in u.id.lower():
+                continue
+            if mgr_filter != "All Managers" and u.manager != mgr_filter:
+                continue
+            filtered.append(u)
+        self._filtered = filtered
+        self._populate_table(filtered)
+
+    # ------------------------------------------------------------------
+    # Table
+    # ------------------------------------------------------------------
+
+    def _populate_table(self, updates: list):
+        self._update_map = {(u.manager, u.id): u for u in updates}
+
+        self._populating = True
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(updates))
+
+        for row, u in enumerate(updates):
+            # Package name
+            name_item = QTableWidgetItem(u.name)
+            name_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            name_item.setToolTip(f"Package ID: {u.id}")
+            name_item.setData(Qt.ItemDataRole.UserRole, (u.manager, u.id))
+            self.table.setItem(row, 0, name_item)
+
+            # Current version
+            cur_item = QTableWidgetItem(u.current_version or "\u2014")
+            cur_item.setForeground(QColor(_c(self._theme, "muted")))
+            self.table.setItem(row, 1, cur_item)
+
+            # Available version (highlighted)
+            av_item = QTableWidgetItem(u.available_version)
+            av_item.setForeground(QColor(_c(self._theme, "safe")))
+            av_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            self.table.setItem(row, 2, av_item)
+
+            # Manager (with the source appended only when it adds information)
+            label = u.manager
+            if u.source and u.source.lower() != u.manager.lower():
+                label = f"{u.manager} \u00b7 {u.source}"
+            mgr_item = QTableWidgetItem(label)
+            mgr_item.setForeground(QColor(_c(self._theme, "accent")))
+            self.table.setItem(row, 3, mgr_item)
+
+        self.table.setSortingEnabled(True)
+        self._populating = False
+        self._on_selection_changed()
+
+    def _update_for_row(self, row: int):
+        cell = self.table.item(row, 0)
+        if cell:
+            key = cell.data(Qt.ItemDataRole.UserRole)
+            if key:
+                return self._update_map.get(key)
+        return None
+
+    def _selected_updates(self) -> list:
+        rows = sorted({index.row() for index in self.table.selectedIndexes()})
+        return [u for u in (self._update_for_row(row) for row in rows) if u]
+
+    def _on_selection_changed(self):
+        if self._populating:
+            return
+        count = len(self._selected_updates())
+        busy = self._update_worker is not None
+        self.update_selected_btn.setEnabled(count > 0 and not busy)
+        self.update_selected_btn.setText(f"Update Selected ({count})" if count else "Update Selected")
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+
+    def _on_double_click(self, table_item):
+        if self._populating:
+            return
+        u = self._update_for_row(table_item.row())
+        if u:
+            self._update_package(u)
+
+    def _update_package(self, u):
+        ans = QMessageBox.question(
+            self,
+            "Update Package",
+            f"Update  {u.name}  \u2192  {u.available_version}  via  {u.manager}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        self._run_update(manager=u.manager, pkg_id=u.id, update_all=False)
+
+    def _update_selected(self):
+        selected = self._selected_updates()
+        if not selected:
+            return
+        preview = "\n".join(f"  • {u.name}  →  {u.available_version}" for u in selected[:10])
+        if len(selected) > 10:
+            preview += f"\n  … and {len(selected) - 10} more"
+        ans = QMessageBox.question(
+            self,
+            "Update Selected Packages",
+            f"Update {len(selected)} package{'s' if len(selected) != 1 else ''}?\n\n{preview}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        self._pending_packages = list(selected[1:])
+        first = selected[0]
+        self._run_update(manager=first.manager, pkg_id=first.id, update_all=False)
+
+    def _update_all(self):
+        managers = list(dict.fromkeys(u.manager for u in self._all_updates))
+        if not managers:
+            return
+        ans = QMessageBox.question(
+            self,
+            "Update All Packages",
+            f"Update all available packages via: {', '.join(managers)}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        self._pending_managers = managers[1:]
+        self._run_update(manager=managers[0], update_all=True)
+
+    def _run_update(self, manager: str, pkg_id: str = "", update_all: bool = False):
+        from crapcleaner.gui.workers import PackageUpdateWorker, stop_worker
+
+        stop_worker(getattr(self, "_update_worker", None))
+
+        desc = "all packages" if update_all else pkg_id
+        remaining = len(self._pending_packages)
+        queue_suffix = f" ({remaining} more queued)" if remaining else ""
+        self.status_label.setText(f"Updating {desc} via {manager}...{queue_suffix}")
+        self.update_all_btn.setEnabled(False)
+        self.update_selected_btn.setEnabled(False)
+        self.refresh_btn.setEnabled(False)
+
+        worker = PackageUpdateWorker(manager=manager, pkg_id=pkg_id, update_all=update_all, parent=self)
+        self._update_worker = worker
+        worker.done.connect(self._on_update_done)
+        worker.failed.connect(self._on_failed)
+        worker.finished.connect(
+            lambda: setattr(self, "_update_worker", None)
+            if getattr(self, "_update_worker", None) is worker
+            else None
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_update_done(self, ok: bool, msg: str):
+        self.result_icon.setPixmap(
+            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+        )
+        self.result_label.setText(msg)
+        self.result_banner.setVisible(True)
+
+        # Drain the "Update Selected" queue. A failed package does not stop the
+        # rest - one broken installer should not strand the other selections.
+        if self._pending_packages:
+            nxt = self._pending_packages.pop(0)
+            self._run_update(manager=nxt.manager, pkg_id=nxt.id, update_all=False)
+            return
+
+        # Chain remaining managers when doing "Update All"
+        pending = getattr(self, "_pending_managers", [])
+        if ok and pending:
+            self._pending_managers = pending[1:]
+            self._run_update(manager=pending[0], update_all=True)
+            return
+
+        self._pending_managers = []
+        self.refresh()
+
+    def _context_menu(self, pos):
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        u = self._update_for_row(row)
+        if not u:
+            return
+
+        menu = QMenu(self)
+        upd_act = menu.addAction(f"Update {u.name}")
+        upd_act.triggered.connect(lambda: self._update_package(u))
+        menu.addSeparator()
+        copy_id = menu.addAction("Copy Package ID")
+        copy_id.triggered.connect(lambda: QApplication.clipboard().setText(u.id))
+        copy_ver = menu.addAction("Copy Available Version")
+        copy_ver.triggered.connect(lambda: QApplication.clipboard().setText(u.available_version))
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    # ------------------------------------------------------------------
+    # Housekeeping
+    # ------------------------------------------------------------------
+
+    def closeEvent(self, event):
+        from crapcleaner.gui.workers import stop_worker
+
+        stop_worker(getattr(self, "_worker", None))
+        stop_worker(getattr(self, "_update_worker", None))
+        super().closeEvent(event)
+
+    def apply_theme(self, theme: str):
+        self._theme = theme
+        self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')}")
+        self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')}")
+        if self._filtered:
+            self._populate_table(self._filtered)

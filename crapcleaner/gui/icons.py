@@ -81,6 +81,16 @@ _MATERIAL_NAMES = {
     "visibility": "visibility",
     "history": "history",
     "filter": "filter_alt",
+    "rocket": "rocket_launch",
+    "rocket_launch": "rocket_launch",
+    "system_update": "system_update",
+    "update": "system_update",
+    "services": "miscellaneous_services",
+    "miscellaneous_services": "miscellaneous_services",
+    "play": "play_arrow",
+    "play_arrow": "play_arrow",
+    "stop": "stop",
+    "stop_circle": "stop_circle",
 }
 
 _logger = logging.getLogger(__name__)

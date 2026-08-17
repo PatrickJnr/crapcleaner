@@ -14,6 +14,7 @@ A fast, transparent cleanup and disk analysis utility built for power users, dev
 ## Table of Contents
 - [Overview](#overview)
 - [Core Principles & Safety](#core-principles--safety)
+- [Platform Support](#platform-support)
 - [Screenshots](#screenshots)
 - [Features](#features)
 - [Installation](#installation)
@@ -37,8 +38,52 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 1. **Only Technical Defensible Cleanups**: Every cleanup target has a documented reason for existing and why deleting it is safe.
 2. **Absolute Prohibition on Registry Cleaning**: In strict adherence to system stability principles, CrapCleaner **does not** clean, optimize, defrag, or repair the Windows Registry.
 3. **Protected Paths Centralized Safety Layer**: Hard-coded safety rules guarantee that OS system files, user document roots, `.git` repositories, SSH keys, browser credentials, and game saves are never deleted.
-4. **Reversible by Default**: Deletions are sent to the Windows Recycle Bin or Linux FreeDesktop Trash by default.
-5. **Zero Telemetry**: No tracking, analytics, ads, or network telemetry. 100% local execution.
+4. **Links Are Never Followed**: scanning, preview, and cleanup all detach symlinks and Windows directory junctions instead of descending through them, so a link inside a cleanup target can never cause files outside that target to be reported as junk or deleted. Deleting a tree removes the link and leaves whatever it pointed at untouched.
+5. **Reversible by Default**: Deletions are sent to the Windows Recycle Bin or Linux FreeDesktop Trash by default.
+6. **Zero Telemetry**: No tracking, analytics, ads, or network telemetry. 100% local execution.
+
+---
+
+## Platform Support
+
+CrapCleaner is one application that adapts to the operating system it is running on, rather than a Windows application with Linux support bolted on. Features that only one platform can provide are hidden on the other, and shared features use each platform's native tooling and vocabulary.
+
+### Platform-aware architecture
+
+A **capability registry** (`crapcleaner/system/capabilities.py`) is the single source of truth for what the running system supports and what each feature is called there. The GUI, the CLI, and the dispatchers all read from it, so no navigation code branches on the operating system.
+
+Each system-management feature is a **platform-neutral dispatcher** over per-platform **backends**:
+
+| Layer | Module | Responsibility |
+|---|---|---|
+| Registry | `system/capabilities.py` | Availability, labels, and per-platform vocabulary |
+| Dispatcher | `system/startup.py`, `system/services.py`, `system/system_updates.py` | Shared models, caching, safety rules, routing |
+| Backend | `system/backends/*_windows.py` | Registry, PowerShell/CIM, `sc.exe`, COM update session |
+| Backend | `system/backends/*_linux.py` | XDG autostart, `systemctl`, `apt`/`dnf`/`pacman`/`zypper` |
+
+Adding another operating system means adding backend modules plus one registry entry per capability. No caller changes.
+
+Platform-specific dependencies stay inside their backend: `winreg`, PowerShell, and `sc.exe` appear only in `*_windows.py`; `systemctl`, `pkexec`, and package-manager commands appear only in `*_linux.py`. This is enforced by tests in `tests/test_platform_views.py`.
+
+### Feature availability
+
+| Feature | Windows | Linux |
+|---|---|---|
+| Cleanup categories, Storage Breakdown, Large Files, Duplicates, AI Data, Docker | Yes | Yes |
+| PC Specs, Storage Health, Memory Cleaner | Yes | Yes |
+| Startup Apps | Registry `Run`/`RunOnce` keys, Startup folders, `StartupApproved` flags | XDG autostart entries (`~/.config/autostart`, `/etc/xdg/autostart`) |
+| Services | Windows services via CIM/PowerShell with an `sc.exe` fallback | systemd system and user units via `systemctl` |
+| System Updates | Windows Update (`Microsoft.Update` COM), hotfix history | Distribution updates via `apt`, `dnf`/`yum`, `pacman`, or `zypper`, with reboot-required detection |
+| App Updates | `winget`, `chocolatey` | `apt`, `flatpak`, `snap`, `pacman`, `dnf`/`yum` |
+| Recycle Bin / Trash | Windows Recycle Bin | FreeDesktop Trash (`gio`, `trash-put`, or a built-in fallback) |
+
+A feature whose tooling is missing is hidden rather than shown broken: on a Linux system without systemd, the *Services* page does not appear at all, and a navigation section whose entries are all unavailable is omitted entirely. Run `crapcleaner --capabilities` to see what the current system reports.
+
+### Privilege escalation
+
+Windows elevates the whole process through UAC. Linux elevates individual commands through `pkexec`, so the application does not need to run as root; when neither `pkexec` nor a non-interactive `sudo` is available, the action is refused with an explanation instead of hanging on a hidden password prompt.
+
+Because system-wide XDG autostart entries live in root-owned `/etc/xdg/autostart` and belong to distribution packages, disabling or removing one writes a user-level override that hides it, which is the mechanism the XDG specification defines for exactly this case.
 
 ---
 
@@ -65,6 +110,8 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 
 ### 1. Storage Dashboard, Live System Vitals & Quick-Access
 - **Live System Telemetry Dashboard**: real-time network throughput (download/upload rates, session transfer totals, and active connection adapter), RAM load with dynamic high-memory pressure alerts and one-click Memory Cleaner access, real-time multi-core CPU utilization, GPU temperature monitoring & VRAM consumption (NVIDIA NVML & Linux DRM), and live system uptime with fluid exponential moving average (EMA) smoothing and cubic eased animations.
+- **Live Vitals Sparklines**: a rolling 60-sample history strip under the Memory, Processor, Graphics, and Network cards, fed from the Dashboard's existing vitals tick so no card runs a timer of its own.
+- **Reclaimable Breakdown**: a proportional bar and the top categories by size, coloured by safety level. Before a first scan it lists the category groups a scan would check, so the panel is informative on a fresh install rather than blank.
 - **Scan Insights & Space Recommendations**: interactive cleanup summary showing instant visual proportions of Safe vs Reviewable space, top storage-consuming categories, and actionable cleanup tips before execution.
 - **Storage Analyzer Quick-Access Bookmarks**: one-click favorites bar in the Storage Breakdown view (Home, Downloads, Documents, AppData / .config, Temp, Videos) for instant directory navigation and inspection.
 - Real-time disk capacity and reclaimable space calculation across all mounted drives.
@@ -113,38 +160,61 @@ CrapCleaner is a local disk cleaner and storage analyzer for desktop systems. It
 - Overhauled view featuring a prominent top Hero usage gauge, dynamic memory pressure badges, and 2-column hardware vitals (Physical RAM 4-metric grid, Swap & GPU VRAM).
 - Live RAM report: total, in use, available, utilization percentage, cached/standby memory, committed memory against the commit limit, coarse memory pressure, and swap / pagefile usage. Counters a platform does not expose are shown as *unknown*, never as zero.
 - Graphics memory report per adapter: capacity, and live VRAM usage where the driver exposes it (NVIDIA via `nvidia-smi` and NVML, AMD on Linux via `amdgpu` sysfs). Adapters without a reliable counter are shown as *unknown*, never as zero.
-- Multi-tier, explained reclamation actions:
-  - **Quick Flush Memory** - fast one-click memory optimizer combining multi-pass process working set trimming, application heap release, and (if elevated) standby cache purge.
-  - **Flush process working sets** - trims unused physical memory pages across active processes (`EmptyWorkingSet` and `SetProcessWorkingSetSize`), reclaiming 1–3+ GB of available physical RAM without closing any applications and without requiring administrator privileges.
-  - **Release CrapCleaner's own memory** - trims only this application's working set (Windows) or heap (Linux `malloc_trim`).
-  - **Purge the Windows standby list** - executes a 5-stage kernel sweep purging modified page lists (`MemoryFlushModifiedList`), system working sets (`MemoryEmptyWorkingSets`), standby priority levels 0–7 (`MemoryPurgeStandbyList`), low-priority standby (`MemoryPurgeLowPriorityStandbyList`), and Windows system file cache (`SetSystemFileCacheSize`) (administrator required, with 1-click elevation button).
-  - **Drop the Linux filesystem cache** - `sync` + `drop_caches`, filesystem cache only (root required).
-  - **Inspect graphics memory** - read-only VRAM report covering adapter capacity and, where the driver exposes a reliable counter, live usage.
+- Multi-tier, explained reclamation actions. Only the actions the running kernel can perform are listed, and each one names the exact call that system will make:
+  - **Flush all available memory** *(both)* - one-click sweep combining multi-pass process working set trimming, application heap release, and (if elevated) the standby cache purge on Windows or the filesystem cache drop on Linux.
+  - **Flush process working sets** *(both)* - trims unused physical memory pages across active processes (`EmptyWorkingSet` on Windows, heap trim and page release on Linux), reclaiming 1–3+ GB of available physical RAM without closing any applications and without requiring administrator privileges.
+  - **Release CrapCleaner's own memory** *(both)* - trims only this application's working set (`SetProcessWorkingSetSize` on Windows, `malloc_trim` on Linux).
+  - **Purge the standby list** *(Windows only)* - a 5-stage kernel sweep purging modified page lists (`MemoryFlushModifiedList`), system working sets (`MemoryEmptyWorkingSets`), standby priority levels 0–7 (`MemoryPurgeStandbyList`), low-priority standby (`MemoryPurgeLowPriorityStandbyList`), and the system file cache (`SetSystemFileCacheSize`). Administrator required, with a 1-click elevation button.
+  - **Drop the filesystem cache** *(Linux only)* - `sync` then `drop_caches`, filesystem cache only. Root required.
+  - **Inspect graphics memory** *(both)* - read-only VRAM report covering adapter capacity and, where the driver exposes a reliable counter, live usage.
 - Windows and Linux already manage memory automatically; this is optional maintenance, not an optimization. No process is ever terminated, no process priority is changed, no other application's memory is touched, and no GPU is reset. CrapCleaner does not claim that freeing RAM or VRAM improves FPS or system speed.
 - **VRAM limitation, stated plainly**: graphics drivers expose no public API that lets a normal desktop application flush another application's VRAM. CrapCleaner therefore ships a VRAM *diagnostic* - capacity and, where available, live usage - and does not fake a flush. Closing the application that owns the memory is the only safe way to release it. Per-process VRAM attribution is not reported, because the driver interfaces that expose it omit graphics contexts and surface unrelated helper processes, which made the list misleading.
 - **Windows privileges**: purging the standby list needs `SeProfileSingleProcessPrivilege`, which an elevated CrapCleaner normally holds. If Windows refuses it, the exact reason is reported (privilege missing from the token, token access failure, or lookup failure) rather than a generic "run as administrator".
 - CrapCleaner contains **no registry cleaning, registry optimization, or registry defragmentation** - neither here nor anywhere else in the application.
 
-### 12. Visual Theme Gallery & Themes (43 Palettes)
+### 12. Startup Applications Manager
+- Inspects everything configured to run at login and reports its location, enabled state, inferred publisher, resolved executable, whether that executable still exists, and an estimated boot impact.
+- **Windows**: Current User and All Users `Run`/`RunOnce` registry keys (including the 32-bit view), the user and All Users Startup folders, and the `StartupApproved` flags that Task Manager writes, so toggling an entry here matches what the built-in Startup tab shows.
+- **Linux**: XDG autostart entries from `~/.config/autostart` and `/etc/xdg/autostart`. A user entry shadows the packaged entry of the same name, as the specification requires.
+- Enable, disable, remove, and add entries. On Linux, disabling or removing a packaged entry in root-owned `/etc/xdg/autostart` writes a user-level override that hides it rather than deleting a file the package manager owns.
+
+### 13. Services Manager
+- **Windows**: every Windows service with its status, startup type, description, log-on account, and process id, queried through CIM/PowerShell with an `sc.exe` fallback. Start, stop, restart, and set Automatic, Automatic (Delayed Start), Manual, or Disabled.
+- **Linux**: systemd system and user units with their active state and unit-file state, driven through `systemctl`. Start, stop, restart, and set Automatic, Manual, or Disabled - where Disabled masks the unit, which is what actually prevents it from being started.
+- Critical components are protected from being stopped or disabled: `RPCSS`, `DcomLaunch`, `PlugPlay` and friends on Windows; `dbus`, `systemd-logind`, `polkit`, `user@`, and `getty@` on Linux.
+- Search across name, display name, description, and account, with status, startup type, and system/third-party filters. Startup types offered always match the platform, so no delayed-start mode is shown for systemd.
+
+### 14. System Updates
+- **Windows**: pending updates via the `Microsoft.Update` COM API, with titles, KB IDs, MSRC severity, download state, package size, and support URLs, plus the full installed hotfix history. Installation is initiated with administrator elevation enforced, falling back to the Windows Update Orchestrator when the COM session is refused.
+- **Linux**: distribution, kernel, and security updates from `apt`, `dnf`/`yum`, `pacman`, or `zypper`, with security errata marked, recent package history read from the package manager's own log, and reboot-required detection.
+- Raw `0x8024xxxx` Windows Update failure codes are translated into a plain-language title and remediation hint instead of being shown as a bare hexadecimal code.
+
+### 15. App Updates
+- Detects the package managers installed on the current system and reports every available application upgrade in one place.
+- **Windows**: `winget` and `chocolatey`. **Linux**: `apt`/`apt-get`, `flatpak`, `snap`, `pacman`, and `dnf`/`yum`.
+- Live search, per-manager filtering, and upgrades run one package at a time, across a multi-row selection, or across an entire manager. A queued selection continues past any package that fails.
+- Installers are allowed 30 minutes for a single package and 2 hours for a whole-manager upgrade, because a half-installed package is worse than a slow one.
+
+### 16. Visual Theme Gallery & Themes (43 Palettes)
 - **43 built-in curated themes** across 6 distinct categories: *Modern Dark* (Dark, Adwaita Dark, OLED Black, Midnight Blue, Slate, Graphite, High Contrast), *Light & Pastel* (Light, Adwaita Light, Arctic Light, Bubblegum Pop, Parchment), *Retro & Vintage* (Windows 95, Commodore 64, Game Boy, Amber CRT, Matrix Terminal, Vault 1950s, Analog VHS, Pulp '70s), *Cyber & Synth* (Cyberpunk Neon, Synthwave Outrun, Vaporwave '90s, Solar Eclipse), *Code Palettes* (Dracula, Monokai Pro, Tokyo Night, Nord, Gruvbox, One Dark Pro, Catppuccin Mocha, Solarized Dark), and *Warm & Nature* (Forest, Matcha Tea, Sunset Orange, Desert Dune, Espresso Roast, Coffee, Sakura Blossom, Lavender Dream, Crimson Velvet, Ocean Deep, Facility Orange).
 - **Interactive Theme Gallery**: Real-time 5-color swatch bars, active hero card, search filtering, dynamic category count chips, "Surprise Me" randomizer, and default reset.
 - **OLED Black** uses true black (`#000000`) backgrounds with near-black panels so OLED panels can switch pixels off, while keeping text, borders, and disabled states readable.
 - Themes apply instantly and cross-fade smoothly; a *Reduce motion* preference disables the transition.
 - Pure Google Material Icons integrated with dynamic theme color adaptation (zero unicode emojis).
 
-### 13. Linux Storage Handling
+### 17. Linux Storage Handling
 - Mount points are shown with descriptive names (*System Root (/)*, *Home*, *Mounted Volume*, *External Drive*) alongside their real paths.
 - The drive list covers real user storage (`/`, `/home`, `/mnt`, `/media`, `/srv`, `/var/home`) and hides pseudo, container, and boot mounts; aliases of the same device collapse into one entry.
 - Storage scans skip `/proc`, `/sys`, `/dev`, `/run`, and container storage roots.
 - Deletions fall back to a FreeDesktop-compliant `~/.local/share/Trash` implementation when `gio` and `trash-put` are unavailable, so choosing the Recycle Bin never silently means permanent deletion.
 
-### 14. Preferences & Configuration
+### 18. Preferences & Configuration
 - Segmented sub-tabbed settings view for *Appearance & Themes*, *Safety & Protection*, *Exclusions & Roots*, *Scan Performance*, *Category Rules*, and *Backup & Sync*.
 - Preferences, theme, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
 - The config file is versioned, so future releases can migrate older files; unknown, malformed, or wrongly typed entries fall back to defaults instead of preventing startup.
 - Full JSON export, import, and factory reset support for settings migration.
 
-### 15. Help, Safety Philosophy & Technical Documentation
+### 19. Help, Safety Philosophy & Technical Documentation
 - **Dedicated Modal Dialog**: comprehensive 9-part interactive documentation guide (`HelpSafetyDialog`) covering core design principles, technical justification for omitting registry cleaners, performance and placebo disclaimers, protected paths safety architecture (`.git`, SSH keys, credentials, user document folders), and regeneration behavior of temporary files.
 - Features real-time FAQ search, category filter chips, and a one-click **Copy System Diagnostics** button for bug reporting.
 - Accessible globally via `F1`, the sidebar "Safety First" footer card, and the About view.
@@ -216,6 +286,26 @@ crapcleaner --installers
 # Report RAM, swap/pagefile, and graphics memory (add --json for machine-readable output)
 crapcleaner --memory
 ```
+
+```bash
+# Report which platform features this operating system supports
+crapcleaner --capabilities
+
+# List startup entries (registry Run keys on Windows, XDG autostart on Linux)
+crapcleaner --startup
+
+# List services (Windows services, or systemd units on Linux)
+crapcleaner --services
+
+# Check for operating-system updates (Windows Update, or the distro package manager)
+crapcleaner --system-updates
+
+# --windows-updates remains accepted as an alias for --system-updates
+```
+
+Every command above accepts `--json`. When a feature is unavailable on the running
+system, the command prints the reason and exits non-zero rather than failing partway
+through a platform command.
 
 ```bash
 # List the memory actions this system supports
@@ -315,7 +405,7 @@ ruff format --check crapcleaner tests scripts
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+1` ... `Ctrl+9`, `Ctrl+0` | Jump to a sidebar view in order (Dashboard, Cleanup, Storage, Large Files, Duplicates, AI Data, Docker, PC Specs, Memory Cleaner, History, Settings, About) |
+| `Ctrl+1` ... `Ctrl+9`, `Ctrl+0` | Jump to one of the first ten sidebar views, in rail order: Dashboard, Cleanup, Storage Breakdown, Large Files, Duplicates, AI Data, Docker, PC Specs, Memory Cleaner, Startup Apps. Later views are reached from the rail; they are deliberately left unbound rather than wrapping round and making `Ctrl+1` ambiguous |
 | `F1` | Open the Help, Safety Philosophy & Technical Documentation modal dialog |
 | `Ctrl+R` | Start a scan |
 | `F5` | Refresh the active view |
@@ -338,8 +428,16 @@ crapcleaner/
   categories/       Cleanup category providers (windows, browsers, gaming, ...)
   core/             Scan and cleanup engine, safety rules, scheduler
   analysis/         Storage breakdown, duplicates, large files, recycle bin, crash dumps
-  system/           Hardware specs, disk health, memory reporting and reclamation
+  system/           Hardware specs, disk health, memory, startup, services, updates
+    capabilities.py   Platform capability registry: availability and per-OS wording
+    startup.py        Startup manager dispatcher (shared model and heuristics)
+    services.py       Service manager dispatcher (shared model, cache, safety rules)
+    system_updates.py OS update dispatcher (shared report model)
+    package_managers.py  Cross-platform application update scanning
+    backends/         Per-OS implementations, one module per platform and capability
   gui/              PySide6 interface (views, theme, icons, workers)
+    effects.py        Shared visual toolkit: animated values, sparklines,
+                      segmented bars, hover depth and accent glow
   models/           Dataclasses for categories, scan results, and reports
   utils/            Platform helpers, safe file operations, formatting, updater
   assets/           Bundled fonts and images
@@ -354,6 +452,8 @@ tests/              Test suite
 ```
 
 Category providers expose a `get_categories()` function and are wired together in `crapcleaner/registry.py`.
+
+Platform-specific code belongs in `crapcleaner/system/backends/`. To support a feature on another operating system, add a backend module exposing that capability's functions and one entry per capability in `crapcleaner/system/capabilities.py`; the dispatchers, the navigation rail, and the CLI pick it up without further changes.
 
 ---
 

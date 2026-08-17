@@ -49,6 +49,19 @@ class MemoryActionResult:
         return data
 
 
+def _platform_text(windows: str, linux: str, fallback: str = "") -> str:
+    """Pick the wording for the running platform.
+
+    Descriptions name the exact system call being made, so showing every platform's
+    mechanism at once would tell the user about calls this machine will never issue.
+    """
+    if is_windows():
+        return windows
+    if is_linux():
+        return linux
+    return fallback or linux
+
+
 def _process_working_sets_action() -> MemoryAction:
     return MemoryAction(
         id="process_working_sets",
@@ -59,9 +72,9 @@ def _process_working_sets_action() -> MemoryAction:
             "and return physical memory to the available pool. No applications or processes "
             "are closed, terminated, or disrupted."
         ),
-        effect=(
-            "Windows: EmptyWorkingSet across all accessible processes. "
-            "Linux: heap trim and page release."
+        effect=_platform_text(
+            "EmptyWorkingSet across all accessible processes.",
+            "Heap trim and page release.",
         ),
         requires_admin=False,
     )
@@ -72,11 +85,18 @@ def _flush_all_action() -> MemoryAction:
         id="flush_all",
         name="Flush all available memory",
         kind=RAM,
-        description=(
-            "Performs a comprehensive memory sweep: trims working sets across active processes, "
-            "releases CrapCleaner's own heap, and (if elevated) purges the system standby cache."
+        description=_platform_text(
+            "Performs a comprehensive memory sweep: trims working sets across active "
+            "processes, releases CrapCleaner's own heap, and (if elevated) purges the "
+            "system standby cache.",
+            "Performs a comprehensive memory sweep: trims working sets across active "
+            "processes, releases CrapCleaner's own heap, and (if run as root) drops the "
+            "filesystem cache.",
         ),
-        effect="Working set flush + application heap trim + standby purge (if elevated).",
+        effect=_platform_text(
+            "Working set flush + application heap trim + standby purge (if elevated).",
+            "Working set flush + application heap trim + filesystem cache drop (if root).",
+        ),
         requires_admin=False,
     )
 
@@ -90,9 +110,9 @@ def _working_set_action() -> MemoryAction:
             "Asks the operating system to trim this application's own working set and "
             "return unused heap pages. It never touches other processes."
         ),
-        effect=(
-            "Windows: SetProcessWorkingSetSize on our own process. "
-            "Linux: malloc_trim on our own heap."
+        effect=_platform_text(
+            "SetProcessWorkingSetSize on our own process.",
+            "malloc_trim on our own heap.",
         ),
     )
 
@@ -101,7 +121,7 @@ def _standby_action() -> MemoryAction:
     supported = is_windows()
     return MemoryAction(
         id="standby_list",
-        name="Purge the Windows standby list",
+        name="Purge the standby list",
         kind=RAM,
         description=(
             "Discards cached file data the system is holding in the standby list. "
@@ -120,7 +140,7 @@ def _fs_cache_action() -> MemoryAction:
     supported = is_linux()
     return MemoryAction(
         id="fs_cache",
-        name="Drop the Linux filesystem cache",
+        name="Drop the filesystem cache",
         kind=RAM,
         description=(
             "Writes pending data to disk and drops clean page cache, dentries and inodes. "
@@ -149,7 +169,8 @@ def _vram_action() -> MemoryAction:
     )
 
 
-def available_actions() -> list[MemoryAction]:
+def _all_actions() -> list[MemoryAction]:
+    """Every action this application knows about, supported here or not."""
     return [
         _flush_all_action(),
         _process_working_sets_action(),
@@ -160,8 +181,26 @@ def available_actions() -> list[MemoryAction]:
     ]
 
 
+def available_actions(include_unsupported: bool = False) -> list[MemoryAction]:
+    """Actions the running platform can actually perform.
+
+    Actions belonging to another operating system are omitted rather than shown
+    disabled - there is nothing the user can do about a kernel interface this system
+    does not have. Pass ``include_unsupported`` for diagnostics that need the full set.
+    """
+    actions = _all_actions()
+    if include_unsupported:
+        return actions
+    return [action for action in actions if action.supported]
+
+
 def get_action(action_id: str) -> MemoryAction | None:
-    for action in available_actions():
+    """Look up an action by id, including ones this platform cannot run.
+
+    Resolving unsupported ids keeps `run_action` able to explain *why* an action is
+    unavailable instead of reporting an unknown action id.
+    """
+    for action in _all_actions():
         if action.id == action_id:
             return action
     return None

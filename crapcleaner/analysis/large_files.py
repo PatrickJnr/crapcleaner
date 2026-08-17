@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from crapcleaner.utils.files import walk_safe
 
 SKIP_DIR_NAMES = {
     "$Recycle.Bin",
@@ -106,7 +107,7 @@ def scan_large_files(
     results: list[LargeFile] = []
     visited = 0
 
-    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+    for dirpath, dirnames, filenames in walk_safe(root, topdown=True):
         if stop_event is not None and stop_event.is_set():
             break
         dirnames[:] = [

@@ -5,13 +5,14 @@ import os
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
 from crapcleaner.utils.platform import get_appdata, get_local_appdata
+from crapcleaner.utils.files import walk_safe
 
 
 def find_vs_ipch_dirs(root: str) -> list[str]:
     found: list[str] = []
     if not root or not os.path.isdir(root):
         return found
-    for dirpath, dirnames, _filenames in os.walk(root):
+    for dirpath, dirnames, _filenames in walk_safe(root):
         try:
             dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
         except OSError:

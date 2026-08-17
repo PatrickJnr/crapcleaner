@@ -16,6 +16,23 @@ def _stat_entries(root: str) -> list[os.DirEntry]:
         return []
 
 
+def is_reparse_point(st) -> bool:
+    """Whether a stat result describes a link the traversal must not follow.
+
+    POSIX symlinks are reported through `S_ISLNK`. Windows directory junctions are not:
+    `S_ISLNK`, `os.path.islink`, and `is_dir(follow_symlinks=False)` all report a
+    junction as an ordinary directory, so the only reliable signal is the reparse tag.
+
+    Following one is worse than slow. A junction loop recurses until the file budget
+    runs out, the same files get counted through several paths, and a junction pointing
+    outside the scan root (a `%TEMP%` entry aimed at Documents, say) would present the
+    user's own documents as reclaimable junk.
+    """
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return bool(getattr(st, "st_reparse_tag", 0))
+
+
 def _compile_patterns(patterns: tuple[str, ...]):
     """Precompile suffix + fnmatch-regex per pattern for fast matching."""
     compiled = []
@@ -56,7 +73,16 @@ def compute_dir_size(
     seen_dirs: set[str] = set()
     matchers = _compile_patterns(patterns)
 
-    def walk(directory: str) -> None:
+    from crapcleaner.core.protected_paths import (
+        DirectoryGuard,
+        invalidate_settings_exclusions,
+    )
+
+    # One config read per scanned target, so exclusions edited in Preferences apply to
+    # the next scan without costing a read per file.
+    invalidate_settings_exclusions()
+
+    def walk(directory: str, guard) -> None:
         nonlocal total, count, skipped
         canonical = os.path.abspath(directory).lower()
         if canonical in seen_dirs:
@@ -67,6 +93,7 @@ def compute_dir_size(
         for entry in entries:
             if stop_event is not None and stop_event.is_set():
                 raise _Cancelled
+            visited[0] += 1
             if visited[0] > max_files:
                 return
             try:
@@ -77,31 +104,36 @@ def compute_dir_size(
                 continue
 
             mode = st.st_mode
-            if stat.S_ISLNK(mode):
+            if is_reparse_point(st):
                 continue
             if stat.S_ISDIR(mode):
                 if recurse:
-                    walk(entry.path)
+                    # Derived lexically from the parent - no resolve() syscall.
+                    walk(entry.path, guard.child(entry.name))
+                    if visited[0] > max_files:
+                        return
                 continue
             if not stat.S_ISREG(mode):
                 continue
 
             if patterns and not _matches(entry.name, matchers):
                 continue
-            from crapcleaner.core.protected_paths import validate_cleanup_path
 
-            is_safe, _ = validate_cleanup_path(entry.path)
-            if not is_safe:
+            if not guard.allows_file(entry.name):
                 skipped += 1
                 continue
             total += st.st_size
             count += 1
-            visited[0] += 1
             if count % 500 == 0 and progress_cb is not None:
                 progress_cb(count, total, directory)
 
+    # The root is resolved once; every directory beneath it derives its guard lexically.
+    root_guard = DirectoryGuard(root)
+    if not root_guard.directory_allowed:
+        return 0, 0, 0
+
     try:
-        walk(root)
+        walk(root, root_guard)
     except _Cancelled:
         raise
     return total, count, skipped

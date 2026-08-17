@@ -37,6 +37,161 @@ _SHERB_NOPROGRESSUI = 0x00000002
 _SHERB_NOSOUND = 0x00000004
 
 
+#: FILE_ATTRIBUTE_REPARSE_POINT. Windows directory junctions carry this flag but are
+#: reported as ordinary directories by S_ISLNK, os.path.islink, and
+#: DirEntry.is_dir(follow_symlinks=False), so it is the only reliable signal.
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def is_link_like(entry_or_stat) -> bool:
+    """Whether an entry is a symlink, junction, or other reparse point.
+
+    Accepts an `os.DirEntry` or a stat result. Traversal must never descend through
+    one: a junction loop recurses until the file budget is spent, and a junction
+    pointing outside the tree being walked would let a scan report - or a cleanup
+    delete - files that are nowhere near the intended target.
+    """
+    try:
+        is_entry = hasattr(entry_or_stat, "is_symlink")
+        if is_entry:
+            if entry_or_stat.is_symlink():
+                return True
+            st = entry_or_stat.stat(follow_symlinks=False)
+        else:
+            st = entry_or_stat
+            if stat.S_ISLNK(st.st_mode):
+                return True
+    except OSError:
+        return False
+
+    if getattr(st, "st_reparse_tag", 0):
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def walk_safe(top: str, topdown: bool = True):
+    """`os.walk` that never follows symlinks or Windows junctions.
+
+    `os.walk` follows junctions even with `followlinks=False`, because that flag only
+    covers symlinks. Reparse points are yielded among the file names rather than
+    descended into, so a caller deleting a tree removes the link itself and leaves its
+    target alone.
+    """
+    try:
+        entries = list(os.scandir(top))
+    except OSError:
+        return
+
+    dirs: list[str] = []
+    files: list[str] = []
+    for entry in entries:
+        try:
+            if is_link_like(entry):
+                files.append(entry.name)
+            elif entry.is_dir(follow_symlinks=False):
+                dirs.append(entry.name)
+            else:
+                files.append(entry.name)
+        except OSError:
+            continue
+
+    if topdown:
+        yield top, dirs, files
+    for name in dirs:
+        yield from walk_safe(os.path.join(top, name), topdown)
+    if not topdown:
+        yield top, dirs, files
+
+
+def walk_safe_entries(top: str):
+    """Like :func:`walk_safe`, but yields `(dirpath, file_entries)` with the entries.
+
+    A directory listing already carries each file's size, so a caller that needs sizes
+    can read them from the `os.DirEntry` instead of issuing a fresh `os.stat` per file.
+    That one avoidable syscall per file is the difference between a file-type breakdown
+    taking a hundred seconds and taking ten.
+
+    Symlinks and junctions are yielded as entries rather than descended into, exactly
+    as in :func:`walk_safe`.
+    """
+    try:
+        entries = list(os.scandir(top))
+    except OSError:
+        return
+
+    dirs: list[os.DirEntry] = []
+    files: list[os.DirEntry] = []
+    for entry in entries:
+        try:
+            if is_link_like(entry):
+                files.append(entry)
+            elif entry.is_dir(follow_symlinks=False):
+                dirs.append(entry)
+            else:
+                files.append(entry)
+        except OSError:
+            continue
+
+    yield top, files
+    for entry in dirs:
+        yield from walk_safe_entries(entry.path)
+
+
+def file_manager_name() -> str:
+    """What to call the platform's file manager in menu labels."""
+    return "File Explorer" if os.name == "nt" else "File Manager"
+
+
+def reveal_in_file_manager(path: str, select: bool = True) -> bool:
+    """Show `path` in the platform's file manager.
+
+    Arguments are always passed as a list, never as a command string. Interpolating a
+    path into one lets a name containing a quote change the command being run.
+    """
+    if not path:
+        return False
+    target = os.path.abspath(path)
+    if not os.path.exists(target):
+        return False
+
+    try:
+        if os.name == "nt":
+            if select and not os.path.isdir(target):
+                # explorer wants this exact single-argument form for /select.
+                subprocess.Popen(["explorer", f"/select,{target}"])
+            else:
+                subprocess.Popen(["explorer", target])
+            return True
+
+        folder = target if os.path.isdir(target) else os.path.dirname(target)
+        # The freedesktop interface highlights the file itself; xdg-open can only open
+        # the containing folder, so it is the fallback rather than the first choice.
+        if select and not os.path.isdir(target) and which("dbus-send"):
+            result = subprocess.run(
+                [
+                    "dbus-send",
+                    "--session",
+                    "--dest=org.freedesktop.FileManager1",
+                    "--type=method_call",
+                    "/org/freedesktop/FileManager1",
+                    "org.freedesktop.FileManager1.ShowItems",
+                    f"array:string:file://{target}",
+                    "string:",
+                ],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return True
+
+        if which("xdg-open"):
+            subprocess.Popen(["xdg-open", folder])
+            return True
+        return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def normalize_long_path(path: str) -> str:
     """Ensure path handles Windows 260-character MAX_PATH limit safely."""
     if not path:
@@ -97,15 +252,36 @@ def _on_rmtree_error(func, path, _exc_info):
 
 
 def remove_tree(path: str) -> bool:
-    """Permanently remove a directory tree, handling readonly files gracefully."""
+    """Permanently remove a directory tree, handling readonly files gracefully.
+
+    Links inside the tree are detached rather than followed. `shutil.rmtree` only
+    learned to recognise junctions in Python 3.12 (`os.DirEntry.is_junction`), and this
+    project supports 3.10 and 3.11, where it would descend into one and delete the
+    files it points at. Detaching them first makes the behaviour identical on every
+    supported version. The attribute pass uses the same safe walk so it cannot clear
+    the read-only flag on files outside the tree either.
+    """
     norm = normalize_long_path(path)
     try:
         _clear_readonly(norm)
-        for root, dirs, files in os.walk(norm, topdown=False):
+        junctions: list[str] = []
+        for root, dirs, files in walk_safe(norm, topdown=False):
             for name in files:
-                _clear_readonly(os.path.join(root, name))
+                full = os.path.join(root, name)
+                _clear_readonly(full)
+                # walk_safe reports links among the file names; a directory link has to
+                # be removed with rmdir, which unlinks it without touching its target.
+                if os.path.isdir(full):
+                    junctions.append(full)
             for name in dirs:
                 _clear_readonly(os.path.join(root, name))
+
+        for junction in junctions:
+            try:
+                os.rmdir(junction)
+            except OSError:
+                pass
+
         shutil.rmtree(norm, onerror=_on_rmtree_error)
         return True
     except OSError:

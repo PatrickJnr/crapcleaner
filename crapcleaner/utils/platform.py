@@ -229,26 +229,46 @@ def list_drives() -> list[str]:
 
 
 def is_admin() -> bool:
-    if not sys.platform.startswith("win"):
-        return True
+    """Whether the process holds administrative rights on the current platform."""
+    if is_windows():
+        try:
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            return False
     try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
+        return os.geteuid() == 0
+    except AttributeError:  # pragma: no cover - platforms without POSIX ids
         return False
+
+
+def can_elevate() -> bool:
+    """Whether a privilege escalation path exists that will not block on a console."""
+    if is_admin():
+        return True
+    if is_windows():
+        return True  # UAC is always available
+    return bool(shutil.which("pkexec"))
 
 
 def elevate() -> bool:
     if is_admin():
         return True
-    if not sys.platform.startswith("win"):
-        return False
-    try:
-        ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, _elevation_args(), None, 1
-        )
-        return True
-    except Exception:
-        return False
+    if is_windows():
+        try:
+            ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable, _elevation_args(), None, 1
+            )
+            return True
+        except Exception:
+            return False
+    # polkit shows a graphical authentication dialog; sudo would need a terminal.
+    if shutil.which("pkexec"):
+        try:
+            subprocess.Popen(["pkexec", sys.executable] + sys.argv)
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def _elevation_args() -> str:
@@ -262,12 +282,18 @@ def _elevation_args() -> str:
 def relaunch_as_admin(argv: list[str] | None = None) -> bool:
     if is_admin():
         return True
-    if not sys.platform.startswith("win"):
-        return False
     argv = argv or sys.argv
-    params = " ".join(f'"{a}"' for a in argv[1:])
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", argv[0], params, None, 1)
-    return True
+    if is_windows():
+        params = " ".join(f'"{a}"' for a in argv[1:])
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", argv[0], params, None, 1)
+        return True
+    if shutil.which("pkexec"):
+        try:
+            subprocess.Popen(["pkexec"] + list(argv))
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def is_windows() -> bool:

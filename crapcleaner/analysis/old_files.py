@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from crapcleaner.utils.files import walk_safe
 
 
 @dataclass
@@ -38,7 +39,7 @@ def find_old_files(
     results: list[OldFileInfo] = []
 
     try:
-        for root, dirs, files in os.walk(root_path):
+        for root, dirs, files in walk_safe(root_path):
             if stop_event is not None and stop_event.is_set():
                 break
 

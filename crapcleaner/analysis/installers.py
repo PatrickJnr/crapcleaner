@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from crapcleaner.utils.platform import get_user_profile
+from crapcleaner.utils.files import walk_safe
 
 _INSTALLER_EXTENSIONS = frozenset(
     {
@@ -96,7 +97,7 @@ def scan_installers(
     for root in search_roots:
         if not root or not os.path.isdir(root):
             continue
-        for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+        for dirpath, dirnames, filenames in walk_safe(root, topdown=True):
             if stop_event is not None and stop_event.is_set():
                 break
             dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]

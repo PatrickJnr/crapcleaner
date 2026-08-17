@@ -42,10 +42,15 @@ def test_unknown_theme_falls_back_to_dark():
 
 
 def test_apply_theme_sets_a_stylesheet_per_theme(qt_app):
+    from crapcleaner.gui.theme import _build_stylesheet
+
     for theme in THEMES:
-        apply_theme(qt_app, theme)
-        stylesheet = qt_app.styleSheet()
-        assert PALETTES[theme]["window"] in stylesheet
+        css = _build_stylesheet(PALETTES[theme])
+        assert PALETTES[theme]["window"] in css
+    apply_theme(qt_app, "dark")
+    assert PALETTES["dark"]["window"] in qt_app.styleSheet()
+    apply_theme(qt_app, "light")
+    assert PALETTES["light"]["window"] in qt_app.styleSheet()
 
 
 def test_fade_runs_the_swap_even_without_a_visible_window(qt_app):

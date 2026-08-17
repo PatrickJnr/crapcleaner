@@ -79,6 +79,15 @@ def save_settings(settings: dict[str, Any]) -> None:
             json.dump(merged, fh, indent=2, sort_keys=True)
         os.replace(temp, path)
 
+    # The safety layer caches the user's exclusion rules, so an edit here has to be
+    # published or it would not take effect until the process restarted.
+    try:
+        from crapcleaner.core.protected_paths import refresh_protection_cache
+
+        refresh_protection_cache()
+    except Exception:  # pragma: no cover - a cache drop must never fail a save
+        pass
+
 
 def update_settings(**updates) -> dict[str, Any]:
     settings = load_settings()

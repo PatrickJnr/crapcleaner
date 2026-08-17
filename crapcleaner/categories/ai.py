@@ -10,6 +10,7 @@ from datetime import datetime
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
 from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_windows
+from crapcleaner.utils.files import walk_safe
 
 MODEL_EXTENSIONS = (
     ".gguf",
@@ -69,7 +70,7 @@ def _classify(path: str, _app: str, size: int) -> str:
 def get_ai_data(min_size: int = INSPECT_MIN_SIZE) -> list[AiDataItem]:
     items: list[AiDataItem] = []
     for app, root in _ai_roots():
-        for dirpath, dirnames, filenames in os.walk(root):
+        for dirpath, dirnames, filenames in walk_safe(root):
             dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
             for name in filenames:
                 full = os.path.join(dirpath, name)

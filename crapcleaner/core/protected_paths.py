@@ -6,6 +6,7 @@ credentials, keys, or application save state. Also enforces user-defined exclusi
 """
 
 import os
+import threading
 from pathlib import Path
 
 from crapcleaner.utils.platform import (
@@ -73,8 +74,86 @@ def _norm(path: str) -> str:
         return path.lower().replace("/", "\\").rstrip("\\/")
 
 
+# The protected root list and the user's exclusion rules are the same for every path
+# in a scan, but building them costs a resolve() syscall per entry. Rebuilding them
+# per file made validate_cleanup_path dominate scan time, so both are cached and
+# invalidated explicitly by refresh_protection_cache().
+_cache_lock = threading.Lock()
+_roots_cache: list[tuple[str, str]] | None = None
+_exclusions_cache: tuple[tuple[str, ...], tuple[tuple[str, str], ...]] | None = None
+#: Exclusions read from settings, cached separately so the default path never has to
+#: touch config.json to discover its own cache key.
+_settings_exclusions_cache: tuple[tuple[str, str], ...] | None = None
+
+
+def refresh_protection_cache() -> None:
+    """Drop the cached protected roots and exclusion rules.
+
+    Called when settings change and at the start of a scan, so a newly mounted drive
+    or an edited exclusion list is picked up.
+    """
+    global _roots_cache, _exclusions_cache, _settings_exclusions_cache
+    with _cache_lock:
+        _roots_cache = None
+        _exclusions_cache = None
+        _settings_exclusions_cache = None
+
+
+def invalidate_settings_exclusions() -> None:
+    """Force the next check to re-read the user's exclusion list from settings.
+
+    Called once at the start of each directory scan, so edits made in Preferences take
+    effect on the next scan without paying a config read per candidate file.
+    """
+    global _settings_exclusions_cache
+    with _cache_lock:
+        _settings_exclusions_cache = None
+
+
+def _normalize_rules(exclusions) -> tuple[tuple[str, str], ...]:
+    return tuple((norm, raw) for raw in exclusions if raw for norm in (_norm(raw),) if norm)
+
+
+def _normalized_exclusions(exclusions: list[str] | None) -> tuple[tuple[str, str], ...]:
+    """Normalise exclusion rules once, returning (normalised, original) pairs."""
+    global _exclusions_cache, _settings_exclusions_cache
+
+    if exclusions is None:
+        with _cache_lock:
+            cached = _settings_exclusions_cache
+        if cached is not None:
+            return cached
+        try:
+            from crapcleaner.config import load_settings
+
+            from_settings = load_settings().get("excluded_paths", [])
+        except Exception:
+            from_settings = []
+        normalized = _normalize_rules(from_settings)
+        with _cache_lock:
+            _settings_exclusions_cache = normalized
+        return normalized
+
+    key = tuple(exclusions)
+    with _cache_lock:
+        cached = _exclusions_cache
+    if cached is not None and cached[0] == key:
+        return cached[1]
+
+    normalized = _normalize_rules(exclusions)
+    with _cache_lock:
+        _exclusions_cache = (key, normalized)
+    return normalized
+
+
 def get_protected_system_roots() -> list[tuple[str, str]]:
     """Return explicit system root directories and their protection reasons."""
+    global _roots_cache
+    with _cache_lock:
+        cached = _roots_cache
+    if cached is not None:
+        return list(cached)
+
     roots: list[tuple[str, str]] = []
 
     # Drive roots
@@ -150,7 +229,10 @@ def get_protected_system_roots() -> list[tuple[str, str]]:
             roots.append((_norm(os.path.join(user, "Music")), "User Music directory"))
             roots.append((_norm(os.path.join(user, "Videos")), "User Videos directory"))
 
-    return [(p, reason) for p, reason in roots if p]
+    resolved = [(p, reason) for p, reason in roots if p]
+    with _cache_lock:
+        _roots_cache = resolved
+    return list(resolved)
 
 
 def is_path_protected(path: str) -> bool:
@@ -158,37 +240,30 @@ def is_path_protected(path: str) -> bool:
     return explain_protection(path) is not None
 
 
-def is_path_excluded(path: str, exclusions: list[str] | None = None) -> tuple[bool, str]:
-    """Check if the given path matches any user-configured exclusion rules."""
-    if not path:
-        return False, ""
-    norm_target = _norm(path)
+def _is_excluded_norm(
+    norm_target: str, exclusions: list[str] | None = None
+) -> tuple[bool, str]:
+    """Exclusion check against an already-normalised target path."""
     if not norm_target:
         return False, ""
 
-    if exclusions is None:
-        try:
-            from crapcleaner.config import load_settings
-
-            exclusions = load_settings().get("excluded_paths", [])
-        except Exception:
-            exclusions = []
-
-    for excl in exclusions:
-        if not excl:
-            continue
-        norm_excl = _norm(excl)
-        if not norm_excl:
-            continue
-        # Exact match or subpath of excluded folder
+    for norm_excl, raw in _normalized_exclusions(exclusions):
+        # Exact match, or the target sits underneath an excluded folder.
         if (
             norm_target == norm_excl
             or norm_target.startswith(norm_excl + "\\")
             or norm_target.startswith(norm_excl + "/")
         ):
-            return True, f"User-defined exclusion rule: {excl}"
+            return True, f"User-defined exclusion rule: {raw}"
 
     return False, ""
+
+
+def is_path_excluded(path: str, exclusions: list[str] | None = None) -> tuple[bool, str]:
+    """Check if the given path matches any user-configured exclusion rules."""
+    if not path:
+        return False, ""
+    return _is_excluded_norm(_norm(path), exclusions)
 
 
 def explain_protection(path: str) -> str | None:
@@ -199,7 +274,11 @@ def explain_protection(path: str) -> str | None:
     norm_target = _norm(path)
     if not norm_target:
         return "Invalid path"
+    return _explain_protection_norm(norm_target)
 
+
+def _explain_protection_norm(norm_target: str) -> str | None:
+    """Protection rules applied to an already-normalised path."""
     # 1. Direct match with protected system/user roots
     for root_path, reason in get_protected_system_roots():
         if norm_target == root_path:
@@ -236,15 +315,149 @@ def explain_protection(path: str) -> str | None:
     return None
 
 
+_BROWSER_PROFILE_PARTS = frozenset({"google", "chrome", "edge", "brave", "firefox"})
+_BROWSER_CREDENTIAL_FILES = frozenset(
+    {"login data", "cookies", "key4.db", "logins.json", "places.sqlite", "bookmarks"}
+)
+
+
+class DirectoryGuard:
+    """Protection checks for the files of one directory, resolved once.
+
+    Resolving every candidate path individually costs a `_getfinalpathname` syscall per
+    file, which dominated scan time. Every rule except the filename ones depends only on
+    the directory, so the directory is normalised once and each file is then checked
+    lexically against that result.
+
+    This is only sound where the caller guarantees the entries are not symbolic links,
+    which the traversal in :mod:`crapcleaner.core.size` does by skipping them. Anything
+    that deletes must still call :func:`validate_cleanup_path`, which resolves the exact
+    path it is about to act on.
+    """
+
+    __slots__ = ("_ok", "_reason", "_norm_dir", "_parts", "_is_browser_profile", "_exclusions")
+
+    def __init__(self, directory: str, exclusions: list[str] | None = None):
+        self._norm_dir = _norm(directory)
+        self._exclusions = _normalized_exclusions(exclusions)
+        self._parts: tuple[str, ...] = ()
+        self._is_browser_profile = False
+        self._ok = True
+        self._reason = ""
+
+        if not self._norm_dir:
+            self._ok, self._reason = False, "Invalid path"
+            return
+
+        self._evaluate(tuple(part.lower() for part in Path(self._norm_dir).parts))
+
+    def child(self, name: str) -> "DirectoryGuard":
+        """Guard for a subdirectory, derived without touching the filesystem.
+
+        Resolving each directory costs a `_getfinalpathname` syscall, which on a deep
+        tree runs an order of magnitude slower than on a shallow one and dominated scan
+        time. The parent is already resolved and the traversal only descends through
+        entries that are not symbolic links, so the child's real path is the parent's
+        path with the name appended - no syscall required.
+        """
+        lowered = name.lower()
+        derived = DirectoryGuard.__new__(DirectoryGuard)
+        derived._exclusions = self._exclusions
+        derived._norm_dir = f"{self._norm_dir}{os.sep}{lowered}"
+        derived._ok = True
+        derived._reason = ""
+        derived._parts = ()
+        derived._is_browser_profile = False
+
+        if not self._ok:
+            # A blocked directory blocks everything beneath it.
+            derived._ok, derived._reason = False, self._reason
+            derived._parts = self._parts + (lowered,)
+            return derived
+
+        derived._evaluate(self._parts + (lowered,))
+        return derived
+
+    def _evaluate(self, parts: tuple[str, ...]) -> None:
+        self._parts = parts
+        self._is_browser_profile = bool(_BROWSER_PROFILE_PARTS.intersection(parts))
+
+        # Deliberately NOT the exact-root-match rule. That rule exists to stop the root
+        # itself being deleted; a file inside %LOCALAPPDATA% is not the root, and real
+        # cleanup categories scan directly inside protected roots. Applying it here
+        # would silently return zero results for those categories.
+        for d_name in _PROTECTED_DIR_NAMES:
+            if d_name in parts:
+                self._ok = False
+                self._reason = f"Contains protected directory component: {d_name}"
+                return
+        if ".ssh" in parts or ".gnupg" in parts:
+            self._ok, self._reason = False, "SSH or GPG encryption key storage"
+            return
+
+        for norm_excl, raw in self._exclusions:
+            if (
+                self._norm_dir == norm_excl
+                or self._norm_dir.startswith(norm_excl + "\\")
+                or self._norm_dir.startswith(norm_excl + "/")
+            ):
+                self._ok = False
+                self._reason = f"Excluded: User-defined exclusion rule: {raw}"
+                return
+
+    @property
+    def directory_allowed(self) -> bool:
+        """Whether the directory itself may be traversed at all."""
+        return self._ok
+
+    @property
+    def reason(self) -> str:
+        return self._reason
+
+    def allows_file(self, name: str) -> bool:
+        """Whether a file directly inside this directory is safe to consider."""
+        if not self._ok:
+            return False
+
+        lowered = name.lower()
+        if lowered in _PROTECTED_FILENAMES or lowered in _PROTECTED_DIR_NAMES:
+            return False
+        if self._is_browser_profile and lowered in _BROWSER_CREDENTIAL_FILES:
+            return False
+
+        if self._exclusions:
+            # The directory is already resolved, so joining is safe without a syscall.
+            target = f"{self._norm_dir}{os.sep}{lowered}"
+            for norm_excl, _raw in self._exclusions:
+                if (
+                    target == norm_excl
+                    or target.startswith(norm_excl + "\\")
+                    or target.startswith(norm_excl + "/")
+                ):
+                    return False
+        return True
+
+
 def validate_cleanup_path(path: str, exclusions: list[str] | None = None) -> tuple[bool, str]:
-    """Validate whether a path is safe for cleanup. Returns (is_safe, message)."""
+    """Validate whether a path is safe for cleanup. Returns (is_safe, message).
+
+    Called once per candidate file during a scan, so the path is normalised a single
+    time and shared by both checks rather than resolved twice.
+    """
+    if not path:
+        return False, "Protected path blocked: Path is empty"
+
+    norm_target = _norm(path)
+    if not norm_target:
+        return False, "Protected path blocked: Invalid path"
+
     # 1. Check system protection rules
-    reason = explain_protection(path)
+    reason = _explain_protection_norm(norm_target)
     if reason:
         return False, f"Protected path blocked: {reason}"
 
     # 2. Check user exclusion rules
-    is_excl, excl_reason = is_path_excluded(path, exclusions=exclusions)
+    is_excl, excl_reason = _is_excluded_norm(norm_target, exclusions)
     if is_excl:
         return False, f"Excluded path skipped: {excl_reason}"
 

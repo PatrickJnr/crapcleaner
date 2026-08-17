@@ -13,6 +13,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from crapcleaner.utils.files import walk_safe
 
 _PREFIX_SIZE = 8192  # 8 KB prefix
 _HASH_CHUNK_SIZE = 1024 * 1024  # 1 MB chunk
@@ -85,7 +86,7 @@ def find_duplicates(
     for folder in folders:
         if not folder or not os.path.isdir(folder):
             continue
-        for dirpath, dirnames, filenames in os.walk(folder, topdown=True):
+        for dirpath, dirnames, filenames in walk_safe(folder, topdown=True):
             if stop_event is not None and stop_event.is_set():
                 return []
             dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]

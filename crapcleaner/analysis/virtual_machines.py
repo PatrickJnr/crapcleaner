@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_windows
+from crapcleaner.utils.files import walk_safe
 
 
 @dataclass
@@ -46,7 +47,7 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
     for root, desc in wsl_candidates:
         if not os.path.isdir(root):
             continue
-        for dirpath, _dirnames, filenames in os.walk(root):
+        for dirpath, _dirnames, filenames in walk_safe(root):
             for name in filenames:
                 if name.lower().endswith(".vhdx"):
                     full = os.path.join(dirpath, name)
@@ -77,7 +78,7 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
     for root in vbox_dirs:
         if not os.path.isdir(root):
             continue
-        for dirpath, _dirnames, filenames in os.walk(root):
+        for dirpath, _dirnames, filenames in walk_safe(root):
             for name in filenames:
                 if name.lower().endswith((".vdi", ".vbox", ".vbox-prev")):
                     full = os.path.join(dirpath, name)
@@ -106,7 +107,7 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
     for root in vmware_dirs:
         if not os.path.isdir(root):
             continue
-        for dirpath, _dirnames, filenames in os.walk(root):
+        for dirpath, _dirnames, filenames in walk_safe(root):
             for name in filenames:
                 if name.lower().endswith(".vmdk"):
                     full = os.path.join(dirpath, name)
@@ -135,7 +136,7 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
         for root in hyperv_dirs:
             if not os.path.isdir(root):
                 continue
-            for dirpath, _dirnames, filenames in os.walk(root):
+            for dirpath, _dirnames, filenames in walk_safe(root):
                 for name in filenames:
                     if name.lower().endswith((".vhdx", ".vhd")):
                         full = os.path.join(dirpath, name)

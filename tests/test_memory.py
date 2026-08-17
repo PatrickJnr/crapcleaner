@@ -110,8 +110,8 @@ def test_report_dataclass_defaults():
     assert report.vram_consumers == []
 
 
-def test_actions_are_platform_gated():
-    actions = {a.id: a for a in available_actions()}
+def test_all_actions_are_platform_gated():
+    actions = {a.id: a for a in available_actions(include_unsupported=True)}
     assert set(actions) == {
         "flush_all",
         "process_working_sets",
@@ -128,6 +128,51 @@ def test_actions_are_platform_gated():
     assert actions["working_set"].requires_admin is False
     assert actions["process_working_sets"].requires_admin is False
     assert actions["flush_all"].requires_admin is False
+
+
+def test_available_actions_hides_other_platforms_actions():
+    """A kernel interface this system does not have is not worth showing at all."""
+    offered = {a.id for a in available_actions()}
+    assert all(a.supported for a in available_actions())
+
+    if cleaner_mod.is_windows():
+        assert "standby_list" in offered
+        assert "fs_cache" not in offered
+    elif cleaner_mod.is_linux():
+        assert "fs_cache" in offered
+        assert "standby_list" not in offered
+
+    # Actions every platform can perform are always offered.
+    assert {"flush_all", "process_working_sets", "working_set", "vram_report"} <= offered
+
+
+def test_unsupported_action_ids_still_explain_themselves():
+    """Hiding an action must not degrade its error into 'unknown action'."""
+    from crapcleaner.system.memory_actions import get_action
+
+    other_platform_id = "fs_cache" if cleaner_mod.is_windows() else "standby_list"
+    action = get_action(other_platform_id)
+    assert action is not None
+    assert action.supported is False
+
+    result = run_action(other_platform_id)
+    assert result.success is False
+    assert result.message == action.unsupported_reason
+
+
+def test_action_effect_text_names_only_this_platforms_mechanism():
+    effects = " ".join(a.effect for a in available_actions())
+    descriptions = " ".join(a.description for a in available_actions())
+    text = f"{effects} {descriptions}"
+
+    if cleaner_mod.is_windows():
+        assert "EmptyWorkingSet" in text
+        assert "malloc_trim" not in text
+        assert "drop_caches" not in text
+    elif cleaner_mod.is_linux():
+        assert "malloc_trim" in text
+        assert "EmptyWorkingSet" not in text
+        assert "SetProcessWorkingSetSize" not in text
 
 
 def test_process_working_sets_action(monkeypatch):

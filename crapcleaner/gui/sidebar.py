@@ -13,7 +13,14 @@ from PySide6.QtWidgets import (
 from crapcleaner.gui.icons import icon
 from crapcleaner.gui.theme import color as theme_color
 from crapcleaner.gui.theme import make_window_icon
+from crapcleaner.system.capabilities import get_capability
 from crapcleaner.utils.platform import is_admin
+
+
+def nav_label(key: str, fallback: str) -> str:
+    """The label this platform uses for a page, falling back to the generic one."""
+    capability = get_capability(key)
+    return capability.nav_label if capability.supported else fallback
 
 NAV_SECTIONS = [
     (
@@ -38,6 +45,12 @@ NAV_SECTIONS = [
         [
             ("specs", "PC Specs", "specs"),
             ("memory", "Memory Cleaner", "memory"),
+            # The label for these four comes from the capability registry, so each
+            # platform names them in its own vocabulary. The text here is a fallback.
+            ("startup", "Startup Apps", "rocket"),
+            ("services", "Services", "tune"),
+            ("app_updates", "App Updates", "system_update"),
+            ("updates", "System Updates", "system_update"),
             ("history", "History", "history"),
         ],
     ),
@@ -79,12 +92,14 @@ class Sidebar(QFrame):
     navigation_requested = Signal(str)
     help_requested = Signal()
 
-    def __init__(self, version: str, parent=None):
+    def __init__(self, version: str, page_keys: list | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("SideBar")
         self.setFixedWidth(230)
         self._theme = "dark"
         self._buttons: dict[str, NavButton] = {}
+        # page_keys controls which nav items are visible (None = show all)
+        self._page_keys = set(page_keys) if page_keys is not None else None
         self._build(version)
 
     def _build(self, version: str):
@@ -132,13 +147,19 @@ class Sidebar(QFrame):
         layout.addWidget(brand_card)
         layout.addSpacing(4)
 
-        # Navigation sections
+        # Navigation sections — only show items whose key is in _page_keys
         for section_title, items in NAV_SECTIONS:
+            visible_items = [
+                (k, lbl, ico) for k, lbl, ico in items
+                if self._page_keys is None or k in self._page_keys
+            ]
+            if not visible_items:
+                continue  # skip section if all items hidden on this platform
             sec_lbl = QLabel(section_title)
             sec_lbl.setProperty("navSection", "true")
             layout.addWidget(sec_lbl)
-            for key, label, icon_name in items:
-                button = NavButton(key, label, icon_name)
+            for key, label, icon_name in visible_items:
+                button = NavButton(key, nav_label(key, label), icon_name)
                 button.setIcon(icon(icon_name, theme_color(self._theme, "muted")))
                 button.clicked.connect(lambda _=False, k=key: self.navigation_requested.emit(k))
                 layout.addWidget(button)

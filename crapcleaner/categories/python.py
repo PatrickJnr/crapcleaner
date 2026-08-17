@@ -6,6 +6,7 @@ from functools import lru_cache
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
 from crapcleaner.utils.platform import get_local_appdata, list_drives
+from crapcleaner.utils.files import walk_safe
 
 SKIP_DIRS = {
     "AppData",
@@ -40,7 +41,7 @@ def _is_skipped_dir(name: str) -> bool:
 def _walk_one(root: str, max_dirs: int):
     """Single os.walk over one root; yields (dirpath, dirnames, filenames)."""
     try:
-        walker = os.walk(root, topdown=True)
+        walker = walk_safe(root, topdown=True)
         visited = 0
         for dirpath, dirnames, filenames in walker:
             if visited > max_dirs:

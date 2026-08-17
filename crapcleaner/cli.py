@@ -205,6 +205,37 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete permanently instead of moving files to the Recycle Bin.",
     )
+    parser.add_argument(
+        "--startup",
+        action="store_true",
+        help=(
+            "List configured startup applications, locations, and enabled status "
+            "(registry Run keys on Windows, XDG autostart entries on Linux)."
+        ),
+    )
+    parser.add_argument(
+        "--services",
+        action="store_true",
+        help=(
+            "List background services, status, and startup types "
+            "(Windows services, or systemd units on Linux)."
+        ),
+    )
+    parser.add_argument(
+        "--system-updates",
+        "--windows-updates",
+        dest="system_updates",
+        action="store_true",
+        help=(
+            "Check for pending operating-system updates and recent update history "
+            "(Windows Update, or the distribution package manager on Linux)."
+        ),
+    )
+    parser.add_argument(
+        "--capabilities",
+        action="store_true",
+        help="Report which platform features are available on this operating system.",
+    )
     return parser
 
 
@@ -379,18 +410,13 @@ def _run_memory(args, settings: dict) -> int:
         return 0
 
     if action_id == "list":
-        actions = [a.to_dict() for a in available_actions()]
+        actions = available_actions()
         if args.json:
-            print(json.dumps(actions, indent=2))
+            print(json.dumps([a.to_dict() for a in actions], indent=2))
         else:
-            for action in available_actions():
-                state = (
-                    "available"
-                    if action.supported
-                    else f"unavailable ({action.unsupported_reason})"
-                )
+            for action in actions:
                 admin = " [requires administrator]" if action.requires_admin else ""
-                print(f"{action.id}: {action.name} - {state}{admin}")
+                print(f"{action.id}: {action.name}{admin}")
                 print(f"    {action.effect}")
         return 0
 
@@ -440,6 +466,10 @@ def run(argv: list[str] | None = None) -> int:
             args.specs,
             args.memory,
             args.memory_clean,
+            args.startup,
+            args.services,
+            args.system_updates,
+            args.capabilities,
         )
     ):
         from crapcleaner.gui.app import run_gui
@@ -701,9 +731,9 @@ def run(argv: list[str] | None = None) -> int:
 
         admin = is_admin()
         categories = get_all_categories()
-        quick_categories = [c for c in categories if c.finder is None]
+        quick_categories = [c for c in categories if c.finder is None and not c.requires_admin and c.selected_by_default][:5]
         engine = ScanEngine(quick_categories)
-        report = engine.run(max_files=2000)
+        report = engine.run(max_files=200)
 
         result = {
             "timestamp": datetime.now().isoformat(),
@@ -897,7 +927,151 @@ def run(argv: list[str] | None = None) -> int:
             append(HistoryEntry.from_report(cleanup_report))
         return 0
 
+    if args.capabilities:
+        return _run_capabilities(args)
+
+    if args.startup:
+        return _run_startup(args)
+
+    if args.services:
+        return _run_services(args)
+
+    if args.system_updates:
+        return _run_system_updates(args)
+
     parser.print_help()
+    return 0
+
+
+def _unsupported(capability_key: str, as_json: bool) -> int:
+    """Report a capability the running platform does not provide, and exit non-zero."""
+    from crapcleaner.system.capabilities import get_capability
+
+    capability = get_capability(capability_key)
+    if as_json:
+        print(json.dumps({"supported": False, "reason": capability.unsupported_reason}, indent=2))
+    else:
+        print(capability.unsupported_reason)
+    return 1
+
+
+def _run_capabilities(args) -> int:
+    """Report what this operating system can and cannot do."""
+    import platform as _platform
+
+    from crapcleaner.system.capabilities import capability_summary
+
+    summary = capability_summary()
+    if args.json:
+        print(json.dumps({"platform": sys.platform, "capabilities": summary}, indent=2))
+        return 0
+
+    print("=" * 80)
+    print("CrapCleaner Platform Capabilities")
+    print("=" * 80)
+    print(f"Operating System: {_platform.system()} {_platform.release()} ({sys.platform})")
+    print("-" * 80)
+    print(f"{'Feature':<20} {'Available':<12} Detail")
+    print("-" * 80)
+    for key, info in summary.items():
+        state = "yes" if info["supported"] else "no"
+        detail = info["title"] if info["supported"] else info["reason"]
+        print(f"{key:<20} {state:<12} {detail}")
+    print("=" * 80)
+    return 0
+
+
+def _run_startup(args) -> int:
+    from crapcleaner.system.capabilities import STARTUP, get_capability
+    from crapcleaner.system.startup import get_startup_items, is_available
+
+    if not is_available():
+        return _unsupported(STARTUP, args.json)
+
+    items = get_startup_items(force_refresh=True)
+    if args.json:
+        print(json.dumps([i.to_dict() for i in items], indent=2))
+        return 0
+
+    print("=" * 80)
+    print(f"CrapCleaner {get_capability(STARTUP).title}")
+    print("=" * 80)
+    print(f"{'State':<10} {'Application':<25} {'Location':<25} {'Impact':<10} Command")
+    print("-" * 80)
+    for item in items:
+        state_str = "ENABLED" if item.enabled else "DISABLED"
+        print(f"{state_str:<10} {item.name[:24]:<25} {item.location[:24]:<25} {item.impact:<10} {item.command}")
+    print("-" * 80)
+    enabled_cnt = sum(1 for i in items if i.enabled)
+    print(f"Total: {len(items)} startup items ({enabled_cnt} enabled, {len(items) - enabled_cnt} disabled).")
+    return 0
+
+
+def _run_services(args) -> int:
+    from crapcleaner.system.capabilities import SERVICES, get_capability
+    from crapcleaner.system.services import get_services_report, is_available
+
+    if not is_available():
+        return _unsupported(SERVICES, args.json)
+
+    capability = get_capability(SERVICES)
+    services = get_services_report(force_refresh=True)
+    if args.json:
+        print(json.dumps([s.to_dict() for s in services], indent=2))
+        return 0
+
+    noun = capability.terms.get("unit_noun_plural", "services")
+    print("=" * 80)
+    print(f"CrapCleaner {capability.title}")
+    print("=" * 80)
+    print(f"{'Status':<10} {'Startup':<16} {'Name':<22} Display Name")
+    print("-" * 80)
+    for s in services:
+        print(f"{s.status:<10} {s.startup_type[:15]:<16} {s.name[:21]:<22} {s.display_name}")
+    print("-" * 80)
+    running_cnt = sum(1 for s in services if s.status == "Running")
+    print(f"Total: {len(services)} {noun} ({running_cnt} running, {len(services) - running_cnt} stopped/other).")
+    return 0
+
+
+def _run_system_updates(args) -> int:
+    from crapcleaner.system.capabilities import SYSTEM_UPDATES, get_capability
+    from crapcleaner.system.system_updates import check_system_updates, is_available
+
+    if not is_available():
+        return _unsupported(SYSTEM_UPDATES, args.json)
+
+    capability = get_capability(SYSTEM_UPDATES)
+    report = check_system_updates(include_history=True)
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+        return 0
+
+    history_label = capability.terms.get("history_label", "Recent Update History")
+    print("=" * 80)
+    print(f"CrapCleaner {capability.title} Report")
+    print("=" * 80)
+    print(f"Update Backend: {report.backend or capability.title}")
+    print(f"Backend Status: {report.service_status}")
+    print(f"Last Checked:   {report.last_checked}")
+    if report.reboot_required:
+        print("Reboot:         Required to finish applying installed updates.")
+    if report.error:
+        print(f"Note/Warning:   {report.error}")
+    print("-" * 80)
+    print("Available Updates:")
+    if report.available_updates:
+        for u in report.available_updates:
+            kb_str = f" ({', '.join(u.kb_numbers)})" if u.kb_numbers else ""
+            size_str = f" - {format_size(u.size_bytes)}" if u.size_bytes else ""
+            print(f"  - [{u.severity}] {u.title}{kb_str}{size_str}")
+    else:
+        print("  No pending updates found. System is up to date.")
+    print("-" * 80)
+    print(f"{history_label} ({len(report.installed_history)} items):")
+    for h in report.installed_history[:10]:
+        print(f"  - {h.id} ({h.title}): Installed on {h.installed_on or '--'}")
+    print("=" * 80)
     return 0
 
 
