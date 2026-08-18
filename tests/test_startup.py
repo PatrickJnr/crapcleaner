@@ -126,11 +126,21 @@ def force_platform(name: str):
 
 @pytest.fixture
 def linux_autostart(monkeypatch, tmp_path):
-    """A Linux platform whose user autostart directory is redirected into tmp_path."""
+    """A Linux platform with both autostart directories redirected into tmp_path.
+
+    The system directory has to be redirected too. On a real Linux machine
+    /etc/xdg/autostart exists and ships entries such as xdg-user-dirs-update, which
+    would otherwise be listed alongside the fixture's own file and make any count
+    assertion depend on what the host distribution happens to install.
+    """
     config_home = tmp_path / ".config"
     autostart_dir = config_home / "autostart"
     autostart_dir.mkdir(parents=True)
+    system_dir = tmp_path / "etc-xdg-autostart"
+    system_dir.mkdir()
+
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.setattr(startup_linux, "SYSTEM_AUTOSTART_DIR", str(system_dir))
     with force_platform("linux"):
         yield autostart_dir
 
@@ -169,13 +179,12 @@ def test_linux_autostart_workflow(linux_autostart):
     assert not (autostart_dir / "second_app.desktop").exists()
 
 
-def test_linux_system_entry_is_hidden_not_deleted(linux_autostart, tmp_path, monkeypatch):
+def test_linux_system_entry_is_hidden_not_deleted(linux_autostart, tmp_path):
     """/etc is root-owned, so disabling a packaged entry writes a user override."""
+    # The fixture already created and redirected the system directory.
     system_dir = tmp_path / "etc-xdg-autostart"
-    system_dir.mkdir()
     packaged = system_dir / "org.gnome.Tracker.desktop"
     packaged.write_text("[Desktop Entry]\nType=Application\nName=Tracker\nExec=tracker-miner\n")
-    monkeypatch.setattr(startup_linux, "SYSTEM_AUTOSTART_DIR", str(system_dir))
 
     items = get_startup_items()
     assert len(items) == 1
@@ -193,16 +202,14 @@ def test_linux_system_entry_is_hidden_not_deleted(linux_autostart, tmp_path, mon
     assert get_startup_items()[0].enabled is False
 
 
-def test_linux_user_entry_shadows_system_entry(linux_autostart, tmp_path, monkeypatch):
+def test_linux_user_entry_shadows_system_entry(linux_autostart, tmp_path):
     system_dir = tmp_path / "etc-xdg-autostart"
-    system_dir.mkdir()
     (system_dir / "shared.desktop").write_text(
         "[Desktop Entry]\nName=Packaged Version\nExec=/usr/bin/shared\n"
     )
     (linux_autostart / "shared.desktop").write_text(
         "[Desktop Entry]\nName=User Version\nExec=/usr/bin/shared\n"
     )
-    monkeypatch.setattr(startup_linux, "SYSTEM_AUTOSTART_DIR", str(system_dir))
 
     items = get_startup_items()
     assert len(items) == 1

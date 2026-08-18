@@ -104,12 +104,19 @@ def test_file_types_cancellation(tree):
 # ---------------------------------------------------------------------------
 
 
-def test_file_types_uses_listing_sizes_without_restatting(tmp_path, monkeypatch):
-    """Sizes come from the directory listing; a stat per file is what made this slow."""
+def test_file_types_reads_sizes_correctly(tmp_path):
     (tmp_path / "a.png").write_bytes(b"x" * 500)
     (tmp_path / "b.mp4").write_bytes(b"x" * 900)
     (tmp_path / "c.unknownext").write_bytes(b"x" * 100)
 
+    by_cat = {s.category: s for s in analyze_file_types(str(tmp_path))}
+    assert by_cat["Images"].total_size == 500
+    assert by_cat["Videos"].total_size == 900
+    assert by_cat["Other"].total_size == 100
+
+
+def _count_path_stats(root: str, monkeypatch) -> int:
+    """Count os.stat calls made while analysing `root`."""
     calls = {"n": 0}
     real_stat = os.stat
 
@@ -118,13 +125,36 @@ def test_file_types_uses_listing_sizes_without_restatting(tmp_path, monkeypatch)
         return real_stat(*args, **kwargs)
 
     monkeypatch.setattr("crapcleaner.analysis.file_types.os.stat", counting_stat, raising=False)
-    summaries = analyze_file_types(str(tmp_path))
+    analyze_file_types(root)
+    monkeypatch.undo()
+    return calls["n"]
 
-    by_cat = {s.category: s for s in summaries}
-    assert by_cat["Images"].total_size == 500
-    assert by_cat["Videos"].total_size == 900
-    assert by_cat["Other"].total_size == 100
-    assert calls["n"] == 0, "analyze_file_types should not stat files by path"
+
+def test_file_types_does_not_stat_once_per_file(tmp_path, monkeypatch):
+    """Sizes come from the directory entry, not a fresh path lookup per file.
+
+    Asserting an absolute call count would be testing the platform rather than this
+    code: `os.path.isdir` takes a fast path on Windows and calls `os.stat` on Linux.
+    What matters is that the cost does not grow with the number of files, which is what
+    made this analysis ten times slower than the directory measurement beside it.
+    """
+    small = tmp_path / "small"
+    small.mkdir()
+    for i in range(3):
+        (small / f"f{i}.png").write_bytes(b"x" * 10)
+
+    large = tmp_path / "large"
+    large.mkdir()
+    for i in range(300):
+        (large / f"f{i}.png").write_bytes(b"x" * 10)
+
+    small_calls = _count_path_stats(str(small), monkeypatch)
+    large_calls = _count_path_stats(str(large), monkeypatch)
+
+    assert large_calls == small_calls, (
+        f"stat calls scale with file count ({small_calls} for 3 files, "
+        f"{large_calls} for 300) - sizes are not coming from the listing"
+    )
 
 
 def test_file_types_percentages_total_one_hundred(tmp_path):

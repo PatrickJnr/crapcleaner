@@ -178,7 +178,9 @@ def test_services_view_population_and_filtering(qt_app):
     view._on_services_loaded(svcs)
 
     assert view.table.rowCount() == 2
-    assert view.hero_badge.text() == "2 SERVICES"
+    # The noun follows the platform: "services" on Windows, "units" under systemd.
+    # Asserting one platform's wording is what this used to get wrong.
+    assert view.hero_badge.text() == f"2 {view._unit_plural.upper()}"
     assert view.running_badge.text() == "1 RUNNING"
     assert view.stopped_badge.text() == "1 STOPPED"
 
