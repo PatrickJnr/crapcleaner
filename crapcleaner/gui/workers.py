@@ -593,4 +593,3 @@ class PackageUpdateWorker(QThread):
             self.done.emit(ok, msg)
         except Exception as exc:  # pragma: no cover - defensive
             self.failed.emit(str(exc))
-

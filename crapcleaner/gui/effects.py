@@ -15,8 +15,8 @@ from collections import deque
 from PySide6.QtCore import (
     Property,
     QEasingCurve,
-    QPropertyAnimation,
     QPointF,
+    QPropertyAnimation,
     QRectF,
     Qt,
 )
@@ -127,7 +127,13 @@ class Sparkline(QWidget):
     dashboard on a single tick instead of one per card.
     """
 
-    def __init__(self, theme: str = "dark", token: str = "accent", capacity: int = SPARKLINE_CAPACITY, parent=None):
+    def __init__(
+        self,
+        theme: str = "dark",
+        token: str = "accent",
+        capacity: int = SPARKLINE_CAPACITY,
+        parent=None,
+    ):
         super().__init__(parent)
         self._theme = theme
         self._token = token

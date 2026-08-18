@@ -10,7 +10,6 @@ from crapcleaner.system.package_managers import (
     get_all_updates,
 )
 
-
 # ---------------------------------------------------------------------------
 # Winget parser
 # ---------------------------------------------------------------------------
@@ -64,10 +63,7 @@ def test_parse_winget_single_space_between_columns():
 # Chocolatey parser
 # ---------------------------------------------------------------------------
 
-_CHOCO_SAMPLE = (
-    "chocolatey|1.3.0|1.4.0|false\n"
-    "git|2.42.0|2.43.0|false\n"
-)
+_CHOCO_SAMPLE = "chocolatey|1.3.0|1.4.0|false\ngit|2.42.0|2.43.0|false\n"
 
 
 def test_parse_choco_typical():

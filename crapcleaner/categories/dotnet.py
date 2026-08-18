@@ -4,8 +4,8 @@ import glob
 import os
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import get_appdata, get_local_appdata
 from crapcleaner.utils.files import walk_safe
+from crapcleaner.utils.platform import get_appdata, get_local_appdata
 
 
 def find_vs_ipch_dirs(root: str) -> list[str]:

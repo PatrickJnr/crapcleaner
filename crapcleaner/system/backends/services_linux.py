@@ -127,7 +127,13 @@ def _list_scope(scope: str) -> list["ServiceItem"]:
         _UNIT_SCOPES[name] = scope
 
         if active_state == "active":
-            status = "Running" if sub_state == "running" else "Pending" if "start" in sub_state else "Running"
+            status = (
+                "Running"
+                if sub_state == "running"
+                else "Pending"
+                if "start" in sub_state
+                else "Running"
+            )
         elif active_state == "activating" or active_state == "deactivating":
             status = "Pending"
         elif active_state == "failed":
@@ -250,7 +256,7 @@ def set_startup_type(name: str, startup_type: str) -> tuple[bool, str]:
     res = _privileged([verb, unit], scope=scope)
     if res.get("returncode") == 0:
         return True, f"Startup for unit '{name}' set to {target_type}."
-    return False, _explain(res, f"set startup for", name)
+    return False, _explain(res, "set startup for", name)
 
 
 def open_console() -> tuple[bool, str]:

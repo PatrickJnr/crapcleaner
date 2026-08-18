@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_windows
 from crapcleaner.utils.files import walk_safe
+from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_windows
 
 MODEL_EXTENSIONS = (
     ".gguf",

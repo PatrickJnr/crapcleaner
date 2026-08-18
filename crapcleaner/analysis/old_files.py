@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
 from crapcleaner.utils.files import walk_safe
 
 

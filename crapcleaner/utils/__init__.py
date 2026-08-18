@@ -30,7 +30,6 @@ from crapcleaner.utils.platform import (
     run_command,
     which,
 )
-
 from crapcleaner.utils.windows_errors import (
     WINDOWS_ERROR_MAP,
     explain_windows_error,

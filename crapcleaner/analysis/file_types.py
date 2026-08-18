@@ -9,6 +9,7 @@ import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
 from crapcleaner.utils.files import walk_safe_entries
 
 FILE_CATEGORY_MAP: dict[str, str] = {

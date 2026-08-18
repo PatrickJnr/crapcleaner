@@ -731,7 +731,11 @@ def run(argv: list[str] | None = None) -> int:
 
         admin = is_admin()
         categories = get_all_categories()
-        quick_categories = [c for c in categories if c.finder is None and not c.requires_admin and c.selected_by_default][:5]
+        quick_categories = [
+            c
+            for c in categories
+            if c.finder is None and not c.requires_admin and c.selected_by_default
+        ][:5]
         engine = ScanEngine(quick_categories)
         report = engine.run(max_files=200)
 
@@ -1000,10 +1004,14 @@ def _run_startup(args) -> int:
     print("-" * 80)
     for item in items:
         state_str = "ENABLED" if item.enabled else "DISABLED"
-        print(f"{state_str:<10} {item.name[:24]:<25} {item.location[:24]:<25} {item.impact:<10} {item.command}")
+        print(
+            f"{state_str:<10} {item.name[:24]:<25} {item.location[:24]:<25} {item.impact:<10} {item.command}"
+        )
     print("-" * 80)
     enabled_cnt = sum(1 for i in items if i.enabled)
-    print(f"Total: {len(items)} startup items ({enabled_cnt} enabled, {len(items) - enabled_cnt} disabled).")
+    print(
+        f"Total: {len(items)} startup items ({enabled_cnt} enabled, {len(items) - enabled_cnt} disabled)."
+    )
     return 0
 
 
@@ -1030,7 +1038,9 @@ def _run_services(args) -> int:
         print(f"{s.status:<10} {s.startup_type[:15]:<16} {s.name[:21]:<22} {s.display_name}")
     print("-" * 80)
     running_cnt = sum(1 for s in services if s.status == "Running")
-    print(f"Total: {len(services)} {noun} ({running_cnt} running, {len(services) - running_cnt} stopped/other).")
+    print(
+        f"Total: {len(services)} {noun} ({running_cnt} running, {len(services) - running_cnt} stopped/other)."
+    )
     return 0
 
 

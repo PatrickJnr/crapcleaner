@@ -14,8 +14,9 @@ the dispatchers in :mod:`crapcleaner.system.services`,
 """
 
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from crapcleaner.utils.platform import is_linux, is_windows
 
@@ -188,7 +189,10 @@ _UNSUPPORTED_TEXT = {
 # Wording used when the platform is supported in principle but its tooling is absent.
 _MISSING_TOOL_TEXT = {
     (SERVICES, "linux"): "systemd was not detected (systemctl is not on PATH).",
-    (SYSTEM_UPDATES, "linux"): "No supported system package manager was found (apt, dnf, pacman, or zypper).",
+    (
+        SYSTEM_UPDATES,
+        "linux",
+    ): "No supported system package manager was found (apt, dnf, pacman, or zypper).",
 }
 
 
@@ -205,12 +209,16 @@ def get_capability(key: str) -> Capability:
             subtitle="",
             supported=False,
             platform=platform,
-            unsupported_reason=_UNSUPPORTED_TEXT.get(key, "This feature is not available on this operating system."),
+            unsupported_reason=_UNSUPPORTED_TEXT.get(
+                key, "This feature is not available on this operating system."
+            ),
         )
 
     probe: Callable[[], bool] = definition["available"]
     available = bool(probe())
-    reason = "" if available else _MISSING_TOOL_TEXT.get((key, platform), _UNSUPPORTED_TEXT.get(key, ""))
+    reason = (
+        "" if available else _MISSING_TOOL_TEXT.get((key, platform), _UNSUPPORTED_TEXT.get(key, ""))
+    )
 
     return Capability(
         key=key,

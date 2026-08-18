@@ -151,7 +151,10 @@ def test_check_updates_windows_error_handling():
         with patch.object(
             updates_windows,
             "run_command",
-            return_value={"stdout": "ERROR:Windows Update COM server is not registered.", "returncode": 1},
+            return_value={
+                "stdout": "ERROR:Windows Update COM server is not registered.",
+                "returncode": 1,
+            },
         ):
             report = check_windows_updates(include_history=False)
 
@@ -186,7 +189,9 @@ def test_install_updates_windows_success():
     with force_platform("windows"):
         with patch.object(updates_windows, "is_admin", return_value=True):
             with patch.object(
-                updates_windows, "run_command", return_value={"stdout": "RESULT:2:False", "returncode": 0}
+                updates_windows,
+                "run_command",
+                return_value={"stdout": "RESULT:2:False", "returncode": 0},
             ):
                 ok, msg = install_system_updates()
     assert ok is True
@@ -199,7 +204,10 @@ def test_ensure_update_service_running_windows():
             with patch.object(
                 updates_windows,
                 "run_command",
-                return_value={"stdout": "The Windows Update service was started successfully.", "returncode": 0},
+                return_value={
+                    "stdout": "The Windows Update service was started successfully.",
+                    "returncode": 0,
+                },
             ):
                 ok, msg = ensure_windows_update_service_running()
     assert ok is True
@@ -226,7 +234,11 @@ _APT_DRY_RUN = (
 
 def test_check_updates_linux_apt():
     with force_platform("linux"):
-        with patch.object(updates_linux.shutil, "which", side_effect=lambda t: "/usr/bin/apt-get" if t == "apt-get" else None):
+        with patch.object(
+            updates_linux.shutil,
+            "which",
+            side_effect=lambda t: "/usr/bin/apt-get" if t == "apt-get" else None,
+        ):
             with patch.object(
                 updates_linux, "run_command", return_value={"stdout": _APT_DRY_RUN, "returncode": 0}
             ):
@@ -247,8 +259,14 @@ def test_check_updates_linux_apt():
 
 def test_check_updates_linux_reboot_marker():
     with force_platform("linux"):
-        with patch.object(updates_linux.shutil, "which", side_effect=lambda t: "/usr/bin/apt-get" if t == "apt-get" else None):
-            with patch.object(updates_linux, "run_command", return_value={"stdout": "", "returncode": 0}):
+        with patch.object(
+            updates_linux.shutil,
+            "which",
+            side_effect=lambda t: "/usr/bin/apt-get" if t == "apt-get" else None,
+        ):
+            with patch.object(
+                updates_linux, "run_command", return_value={"stdout": "", "returncode": 0}
+            ):
                 with patch.object(updates_linux.os.path, "isfile", return_value=False):
                     with patch.object(updates_linux.os.path, "exists", return_value=True):
                         report = check_system_updates(include_history=False)
@@ -265,7 +283,10 @@ def test_check_updates_linux_pacman():
             with patch.object(
                 updates_linux,
                 "run_command",
-                return_value={"stdout": "linux 6.9.1 -> 6.9.2\nvim 9.1.1 -> 9.1.2\n", "returncode": 0},
+                return_value={
+                    "stdout": "linux 6.9.1 -> 6.9.2\nvim 9.1.1 -> 9.1.2\n",
+                    "returncode": 0,
+                },
             ):
                 with patch.object(updates_linux.os.path, "isfile", return_value=False):
                     with patch.object(updates_linux.os.path, "exists", return_value=False):

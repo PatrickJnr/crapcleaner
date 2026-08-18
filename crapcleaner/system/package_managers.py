@@ -113,6 +113,7 @@ def detect_managers() -> list:
 
 def _run(args, timeout=60.0, env_extra=None):
     import os
+
     env = os.environ.copy()
     if env_extra:
         env.update(env_extra)
@@ -170,13 +171,24 @@ def _parse_winget_upgrades(text):
         source = cols[4] if len(cols) > 4 else ""
         if not pkg_id or not available:
             continue
-        updates.append(PackageUpdate(id=pkg_id, name=name or pkg_id, current_version=current, available_version=available, manager="winget", source=source))
+        updates.append(
+            PackageUpdate(
+                id=pkg_id,
+                name=name or pkg_id,
+                current_version=current,
+                available_version=available,
+                manager="winget",
+                source=source,
+            )
+        )
     return updates
 
 
 def _get_winget_updates():
     result = ManagerResult(manager="winget")
-    rc, stdout, stderr = _run(["winget", "upgrade", "--accept-source-agreements", "--disable-interactivity"], timeout=60.0)
+    rc, stdout, stderr = _run(
+        ["winget", "upgrade", "--accept-source-agreements", "--disable-interactivity"], timeout=60.0
+    )
     if rc == -1 and "not found" in stderr:
         result.available = False
         result.error = "winget not found"
@@ -202,7 +214,16 @@ def _parse_choco_outdated(text):
         pkg_id, current, available = parts[0].strip(), parts[1].strip(), parts[2].strip()
         if not pkg_id or not available:
             continue
-        updates.append(PackageUpdate(id=pkg_id, name=pkg_id, current_version=current, available_version=available, manager="choco", source="chocolatey.org"))
+        updates.append(
+            PackageUpdate(
+                id=pkg_id,
+                name=pkg_id,
+                current_version=current,
+                available_version=available,
+                manager="choco",
+                source="chocolatey.org",
+            )
+        )
     return updates
 
 
@@ -225,7 +246,11 @@ def _get_choco_updates():
 def _get_apt_updates(manager="apt"):
     result = ManagerResult(manager=manager)
     _run(["sudo", "-n", manager, "-q", "update"], timeout=30.0)
-    rc, stdout, stderr = _run([manager, "list", "--upgradable", "--quiet"], timeout=30.0, env_extra={"DEBIAN_FRONTEND": "noninteractive"})
+    rc, stdout, stderr = _run(
+        [manager, "list", "--upgradable", "--quiet"],
+        timeout=30.0,
+        env_extra={"DEBIAN_FRONTEND": "noninteractive"},
+    )
     if rc == -1 and "not found" in stderr:
         result.available = False
         result.error = f"{manager} not found"
@@ -236,9 +261,23 @@ def _get_apt_updates(manager="apt"):
             continue
         m = re.match(r"^(\S+)/(\S+)\s+(\S+)\s+\S+.*upgradable from:\s+(\S+)", line)
         if m:
-            name_arch, source, available, current = m.group(1), m.group(2), m.group(3), m.group(4).rstrip(")")
+            name_arch, source, available, current = (
+                m.group(1),
+                m.group(2),
+                m.group(3),
+                m.group(4).rstrip(")"),
+            )
             pkg_id = name_arch.split(":")[0]
-            result.updates.append(PackageUpdate(id=pkg_id, name=pkg_id, current_version=current, available_version=available, manager=manager, source=source))
+            result.updates.append(
+                PackageUpdate(
+                    id=pkg_id,
+                    name=pkg_id,
+                    current_version=current,
+                    available_version=available,
+                    manager=manager,
+                    source=source,
+                )
+            )
     return result
 
 
@@ -249,7 +288,10 @@ def _get_apt_updates(manager="apt"):
 
 def _get_flatpak_updates():
     result = ManagerResult(manager="flatpak")
-    rc, stdout, stderr = _run(["flatpak", "remote-ls", "--updates", "--columns=application,name,version,branch"], timeout=30.0)
+    rc, stdout, stderr = _run(
+        ["flatpak", "remote-ls", "--updates", "--columns=application,name,version,branch"],
+        timeout=30.0,
+    )
     if rc == -1 and "not found" in stderr:
         result.available = False
         result.error = "flatpak not found"
@@ -266,7 +308,16 @@ def _get_flatpak_updates():
         branch = cols[3].strip() if len(cols) > 3 else ""
         if not app_id:
             continue
-        result.updates.append(PackageUpdate(id=app_id, name=name or app_id, current_version="", available_version=available or branch or "update available", manager="flatpak", source="flathub"))
+        result.updates.append(
+            PackageUpdate(
+                id=app_id,
+                name=name or app_id,
+                current_version="",
+                available_version=available or branch or "update available",
+                manager="flatpak",
+                source="flathub",
+            )
+        )
     return result
 
 
@@ -296,7 +347,16 @@ def _get_snap_updates():
         if len(cols) < 2:
             continue
         name, available = cols[0].strip(), cols[1].strip()
-        result.updates.append(PackageUpdate(id=name, name=name, current_version="", available_version=available, manager="snap", source="snapcraft.io"))
+        result.updates.append(
+            PackageUpdate(
+                id=name,
+                name=name,
+                current_version="",
+                available_version=available,
+                manager="snap",
+                source="snapcraft.io",
+            )
+        )
     return result
 
 
@@ -318,7 +378,16 @@ def _get_pacman_updates():
     for line in stdout.splitlines():
         m = re.match(r"^(\S+)\s+(\S+)\s+->\s+(\S+)", line.strip())
         if m:
-            result.updates.append(PackageUpdate(id=m.group(1), name=m.group(1), current_version=m.group(2), available_version=m.group(3), manager="pacman", source="pacman"))
+            result.updates.append(
+                PackageUpdate(
+                    id=m.group(1),
+                    name=m.group(1),
+                    current_version=m.group(2),
+                    available_version=m.group(3),
+                    manager="pacman",
+                    source="pacman",
+                )
+            )
     return result
 
 
@@ -343,7 +412,16 @@ def _get_dnf_updates(manager="dnf"):
             continue
         name_arch, available, source = parts[0], parts[1], parts[2] if len(parts) > 2 else ""
         pkg_id = name_arch.rsplit(".", 1)[0]
-        result.updates.append(PackageUpdate(id=pkg_id, name=pkg_id, current_version="", available_version=available, manager=manager, source=source))
+        result.updates.append(
+            PackageUpdate(
+                id=pkg_id,
+                name=pkg_id,
+                current_version="",
+                available_version=available,
+                manager=manager,
+                source=source,
+            )
+        )
     return result
 
 
@@ -391,23 +469,46 @@ def install_update(manager, pkg_id):
     _clear_cache()
     try:
         if manager == "winget":
-            rc, stdout, stderr = _run(["winget", "upgrade", "--id", pkg_id, "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"], timeout=_INSTALL_TIMEOUT)
+            rc, stdout, stderr = _run(
+                [
+                    "winget",
+                    "upgrade",
+                    "--id",
+                    pkg_id,
+                    "--exact",
+                    "--silent",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                    "--disable-interactivity",
+                ],
+                timeout=_INSTALL_TIMEOUT,
+            )
         elif manager == "choco":
-            rc, stdout, stderr = _run(["choco", "upgrade", pkg_id, "-y", "--no-progress"], timeout=_INSTALL_TIMEOUT)
+            rc, stdout, stderr = _run(
+                ["choco", "upgrade", pkg_id, "-y", "--no-progress"], timeout=_INSTALL_TIMEOUT
+            )
         elif manager in ("apt", "apt-get"):
-            rc, stdout, stderr = _run(["sudo", "-n", manager, "install", "--only-upgrade", "-y", pkg_id], timeout=_INSTALL_TIMEOUT, env_extra={"DEBIAN_FRONTEND": "noninteractive"})
+            rc, stdout, stderr = _run(
+                ["sudo", "-n", manager, "install", "--only-upgrade", "-y", pkg_id],
+                timeout=_INSTALL_TIMEOUT,
+                env_extra={"DEBIAN_FRONTEND": "noninteractive"},
+            )
         elif manager == "flatpak":
             rc, stdout, stderr = _run(["flatpak", "update", "-y", pkg_id], timeout=_INSTALL_TIMEOUT)
         elif manager == "snap":
             rc, stdout, stderr = _run(["snap", "refresh", pkg_id], timeout=_INSTALL_TIMEOUT)
         elif manager == "pacman":
-            rc, stdout, stderr = _run(["pacman", "-S", "--noconfirm", pkg_id], timeout=_INSTALL_TIMEOUT)
+            rc, stdout, stderr = _run(
+                ["pacman", "-S", "--noconfirm", pkg_id], timeout=_INSTALL_TIMEOUT
+            )
         elif manager in ("dnf", "yum"):
             rc, stdout, stderr = _run([manager, "upgrade", "-y", pkg_id], timeout=_INSTALL_TIMEOUT)
         else:
             return False, f"Unsupported package manager: {manager}"
         ok = rc == 0
-        return ok, stdout.strip() or ("Updated successfully." if ok else stderr.strip() or "Update failed.")
+        return ok, stdout.strip() or (
+            "Updated successfully." if ok else stderr.strip() or "Update failed."
+        )
     except Exception as exc:
         return False, str(exc)
 
@@ -416,22 +517,42 @@ def install_all_updates(manager):
     _clear_cache()
     try:
         if manager == "winget":
-            rc, stdout, stderr = _run(["winget", "upgrade", "--all", "--silent", "--accept-package-agreements", "--accept-source-agreements"], timeout=_INSTALL_ALL_TIMEOUT)
+            rc, stdout, stderr = _run(
+                [
+                    "winget",
+                    "upgrade",
+                    "--all",
+                    "--silent",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                ],
+                timeout=_INSTALL_ALL_TIMEOUT,
+            )
         elif manager == "choco":
-            rc, stdout, stderr = _run(["choco", "upgrade", "all", "-y", "--no-progress"], timeout=_INSTALL_ALL_TIMEOUT)
+            rc, stdout, stderr = _run(
+                ["choco", "upgrade", "all", "-y", "--no-progress"], timeout=_INSTALL_ALL_TIMEOUT
+            )
         elif manager in ("apt", "apt-get"):
-            rc, stdout, stderr = _run(["sudo", "-n", manager, "upgrade", "-y"], timeout=_INSTALL_ALL_TIMEOUT, env_extra={"DEBIAN_FRONTEND": "noninteractive"})
+            rc, stdout, stderr = _run(
+                ["sudo", "-n", manager, "upgrade", "-y"],
+                timeout=_INSTALL_ALL_TIMEOUT,
+                env_extra={"DEBIAN_FRONTEND": "noninteractive"},
+            )
         elif manager == "flatpak":
             rc, stdout, stderr = _run(["flatpak", "update", "-y"], timeout=_INSTALL_ALL_TIMEOUT)
         elif manager == "snap":
             rc, stdout, stderr = _run(["snap", "refresh"], timeout=_INSTALL_ALL_TIMEOUT)
         elif manager == "pacman":
-            rc, stdout, stderr = _run(["pacman", "-Syu", "--noconfirm"], timeout=_INSTALL_ALL_TIMEOUT)
+            rc, stdout, stderr = _run(
+                ["pacman", "-Syu", "--noconfirm"], timeout=_INSTALL_ALL_TIMEOUT
+            )
         elif manager in ("dnf", "yum"):
             rc, stdout, stderr = _run([manager, "upgrade", "-y"], timeout=_INSTALL_ALL_TIMEOUT)
         else:
             return False, f"Unsupported package manager: {manager}"
         ok = rc == 0
-        return ok, stdout.strip() or ("All packages updated." if ok else stderr.strip() or "Update failed.")
+        return ok, stdout.strip() or (
+            "All packages updated." if ok else stderr.strip() or "Update failed."
+        )
     except Exception as exc:
         return False, str(exc)

@@ -11,8 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from crapcleaner.utils.platform import get_user_profile
 from crapcleaner.utils.files import walk_safe
+from crapcleaner.utils.platform import get_user_profile
 
 _INSTALLER_EXTENSIONS = frozenset(
     {

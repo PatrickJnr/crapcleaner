@@ -108,7 +108,9 @@ def list_services() -> list["ServiceItem"]:
                 name=name,
                 display_name=str(item.get("DisplayName") or name),
                 status=_parse_state(str(raw_state)),
-                startup_type=_parse_start_mode(str(raw_start), bool(item.get("DelayedAutoStart", False))),
+                startup_type=_parse_start_mode(
+                    str(raw_start), bool(item.get("DelayedAutoStart", False))
+                ),
                 description=str(item.get("Description") or ""),
                 account=account,
                 pid=int(pid_val) if pid_val and int(pid_val) > 0 else None,
@@ -143,7 +145,10 @@ def start(name: str) -> tuple[bool, str]:
         return True, f"Service '{name}' started successfully."
 
     fallback = run_command(["sc.exe", "start", name], timeout=10.0)
-    if fallback.get("returncode") == 0 or "already running" in str(fallback.get("stdout", "")).lower():
+    if (
+        fallback.get("returncode") == 0
+        or "already running" in str(fallback.get("stdout", "")).lower()
+    ):
         return True, f"Service '{name}' started successfully."
 
     err = str(res.get("stderr") or fallback.get("stderr") or "Access Denied").strip()
@@ -156,7 +161,12 @@ def stop(name: str) -> tuple[bool, str]:
         return denied
 
     res = run_command(
-        ["powershell", "-NoProfile", "-Command", f"Stop-Service -Name '{name}' -Force -ErrorAction Stop"],
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"Stop-Service -Name '{name}' -Force -ErrorAction Stop",
+        ],
         timeout=20.0,
     )
     if res.get("returncode") == 0:
@@ -176,7 +186,12 @@ def restart(name: str) -> tuple[bool, str]:
         return denied
 
     res = run_command(
-        ["powershell", "-NoProfile", "-Command", f"Restart-Service -Name '{name}' -Force -ErrorAction Stop"],
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"Restart-Service -Name '{name}' -Force -ErrorAction Stop",
+        ],
         timeout=30.0,
     )
     if res.get("returncode") == 0:

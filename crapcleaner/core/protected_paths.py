@@ -240,9 +240,7 @@ def is_path_protected(path: str) -> bool:
     return explain_protection(path) is not None
 
 
-def _is_excluded_norm(
-    norm_target: str, exclusions: list[str] | None = None
-) -> tuple[bool, str]:
+def _is_excluded_norm(norm_target: str, exclusions: list[str] | None = None) -> tuple[bool, str]:
     """Exclusion check against an already-normalised target path."""
     if not norm_target:
         return False, ""

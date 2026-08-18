@@ -237,9 +237,7 @@ def check(include_history: bool = True, timeout: float = 30.0) -> "SystemUpdateR
                 id=name,
                 title=f"{name} {available}" if available else name,
                 kb_numbers=[],
-                description=(
-                    f"{current} → {available}" if current else f"Update to {available}"
-                ),
+                description=(f"{current} → {available}" if current else f"Update to {available}"),
                 size_bytes=0,
                 categories=[c for c in (source,) if c],
                 severity=severity,

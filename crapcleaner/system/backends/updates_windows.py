@@ -17,6 +17,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 _PS = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
 
+#: Shown when Get-HotFix does not record who installed an update.
+_DEFAULT_INSTALLER_ACCOUNT = "NT AUTHORITY\\SYSTEM"
+
 _PS_QUERY_UPDATES = (
     "$ErrorActionPreference = 'Stop'; "
     "try { "
@@ -135,7 +138,9 @@ def _collect_available(report: "SystemUpdateReport", timeout: float) -> None:
                 kb_numbers=_normalise_kb_numbers(kb_str),
                 description=str(item.get("Description") or ""),
                 size_bytes=int(item.get("Size") or 0),
-                categories=[c.strip() for c in str(item.get("Categories") or "").split(",") if c.strip()],
+                categories=[
+                    c.strip() for c in str(item.get("Categories") or "").split(",") if c.strip()
+                ],
                 severity=str(item.get("Severity") or "Unspecified"),
                 is_downloaded=bool(item.get("IsDownloaded", False)),
                 is_mandatory=bool(item.get("IsMandatory", False)),
@@ -166,16 +171,22 @@ def _collect_history(report: "SystemUpdateReport") -> None:
 
         installed_on_val = item.get("InstalledOn")
         if isinstance(installed_on_val, dict):
-            installed_on = str(installed_on_val.get("DateTime") or installed_on_val.get("value") or "")
+            installed_on = str(
+                installed_on_val.get("DateTime") or installed_on_val.get("value") or ""
+            )
         else:
             installed_on = str(installed_on_val) if installed_on_val else ""
+
+        # Computed outside the f-string: a backslash inside an f-string expression is a
+        # syntax error before Python 3.12, and this project supports 3.10.
+        installed_by = item.get("InstalledBy") or _DEFAULT_INSTALLER_ACCOUNT
 
         report.installed_history.append(
             SystemUpdateItem(
                 id=hotfix_id,
                 title=f"{hotfix_id} ({desc})",
                 kb_numbers=[hotfix_id],
-                description=f"Installed by: {item.get('InstalledBy') or 'NT AUTHORITY\\SYSTEM'}",
+                description=f"Installed by: {installed_by}",
                 size_bytes=0,
                 categories=[desc],
                 severity="Installed",
@@ -200,7 +211,10 @@ def check(include_history: bool = True, timeout: float = 30.0) -> "SystemUpdateR
 
 def install(update_ids: list[str] | None = None) -> tuple[bool, str]:
     if not is_admin():
-        return False, "Administrator privileges are required to initiate Windows Update installation."
+        return (
+            False,
+            "Administrator privileges are required to initiate Windows Update installation.",
+        )
 
     result = run_command(_PS + [_PS_INSTALL], timeout=180.0)
     stdout = str(result.get("stdout", "")).strip()

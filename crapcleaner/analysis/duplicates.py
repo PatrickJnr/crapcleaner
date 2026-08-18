@@ -13,6 +13,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+
 from crapcleaner.utils.files import walk_safe
 
 _PREFIX_SIZE = 8192  # 8 KB prefix

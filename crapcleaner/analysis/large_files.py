@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+
 from crapcleaner.utils.files import walk_safe
 
 SKIP_DIR_NAMES = {

@@ -5,8 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import get_local_appdata, list_drives
 from crapcleaner.utils.files import walk_safe
+from crapcleaner.utils.platform import get_local_appdata, list_drives
 
 SKIP_DIRS = {
     "AppData",

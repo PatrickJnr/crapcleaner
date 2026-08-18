@@ -9,8 +9,8 @@ import re
 from dataclasses import dataclass, field
 
 from crapcleaner.models.category import CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import run_command, which
 from crapcleaner.utils.files import walk_safe
+from crapcleaner.utils.platform import run_command, which
 
 
 @dataclass

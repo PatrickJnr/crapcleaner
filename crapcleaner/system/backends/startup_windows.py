@@ -82,11 +82,51 @@ def _registry_items() -> list["StartupItem"]:
     approved_hklm = _read_startup_approved_dict(winreg.HKEY_LOCAL_MACHINE, _REG_APPROVED_RUN)
 
     targets = [
-        (winreg.HKEY_CURRENT_USER, _REG_RUN, "HKCU_RUN", "Registry (Current User Run)", "USER", approved_hkcu, 0),
-        (winreg.HKEY_LOCAL_MACHINE, _REG_RUN, "HKLM_RUN", "Registry (All Users Run)", "SYSTEM", approved_hklm, winreg.KEY_WOW64_64KEY),
-        (winreg.HKEY_LOCAL_MACHINE, _REG_RUN, "HKLM_RUN_32", "Registry (All Users Run 32-bit)", "SYSTEM", approved_hklm, winreg.KEY_WOW64_32KEY),
-        (winreg.HKEY_CURRENT_USER, _REG_RUNONCE, "HKCU_RUNONCE", "Registry (Current User RunOnce)", "USER", approved_hkcu, 0),
-        (winreg.HKEY_LOCAL_MACHINE, _REG_RUNONCE, "HKLM_RUNONCE", "Registry (All Users RunOnce)", "SYSTEM", approved_hklm, 0),
+        (
+            winreg.HKEY_CURRENT_USER,
+            _REG_RUN,
+            "HKCU_RUN",
+            "Registry (Current User Run)",
+            "USER",
+            approved_hkcu,
+            0,
+        ),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            _REG_RUN,
+            "HKLM_RUN",
+            "Registry (All Users Run)",
+            "SYSTEM",
+            approved_hklm,
+            winreg.KEY_WOW64_64KEY,
+        ),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            _REG_RUN,
+            "HKLM_RUN_32",
+            "Registry (All Users Run 32-bit)",
+            "SYSTEM",
+            approved_hklm,
+            winreg.KEY_WOW64_32KEY,
+        ),
+        (
+            winreg.HKEY_CURRENT_USER,
+            _REG_RUNONCE,
+            "HKCU_RUNONCE",
+            "Registry (Current User RunOnce)",
+            "USER",
+            approved_hkcu,
+            0,
+        ),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            _REG_RUNONCE,
+            "HKLM_RUNONCE",
+            "Registry (All Users RunOnce)",
+            "SYSTEM",
+            approved_hklm,
+            0,
+        ),
     ]
 
     seen_ids: set[str] = set()
@@ -150,7 +190,13 @@ def _folder_items() -> list["StartupItem"]:
 
     folders = [
         (_startup_folder(False), "USER_STARTUP", "Startup Folder (User)", "USER", approved_user),
-        (_startup_folder(True), "COMMON_STARTUP", "Startup Folder (All Users)", "SYSTEM", approved_common),
+        (
+            _startup_folder(True),
+            "COMMON_STARTUP",
+            "Startup Folder (All Users)",
+            "SYSTEM",
+            approved_common,
+        ),
     ]
 
     for folder_path, loc_key, loc_name, scope, approved_map in folders:
@@ -166,7 +212,9 @@ def _folder_items() -> list["StartupItem"]:
 
                 is_disabled_ext = fname.lower().endswith(".disabled")
                 display_name = fname[:-9] if is_disabled_ext else fname
-                clean_name = display_name[:-4] if display_name.lower().endswith(".lnk") else display_name
+                clean_name = (
+                    display_name[:-4] if display_name.lower().endswith(".lnk") else display_name
+                )
 
                 enabled = (
                     not is_disabled_ext
@@ -206,10 +254,15 @@ def set_enabled(kind: str, loc_key: str, entry_name: str, enabled: bool) -> tupl
     if kind == "reg":
         is_hklm = "HKLM" in loc_key
         if is_hklm and not is_admin():
-            return False, "Administrator elevation is required to modify system-wide startup entries."
+            return (
+                False,
+                "Administrator elevation is required to modify system-wide startup entries.",
+            )
         root = winreg.HKEY_LOCAL_MACHINE if is_hklm else winreg.HKEY_CURRENT_USER
         try:
-            with winreg.CreateKeyEx(root, _REG_APPROVED_RUN, 0, winreg.KEY_SET_VALUE | winreg.KEY_READ) as app_key:
+            with winreg.CreateKeyEx(
+                root, _REG_APPROVED_RUN, 0, winreg.KEY_SET_VALUE | winreg.KEY_READ
+            ) as app_key:
                 winreg.SetValueEx(
                     app_key,
                     entry_name,
@@ -217,14 +270,20 @@ def set_enabled(kind: str, loc_key: str, entry_name: str, enabled: bool) -> tupl
                     winreg.REG_BINARY,
                     _APPROVED_ENABLED if enabled else _APPROVED_DISABLED,
                 )
-            return True, f"Startup entry '{entry_name}' {'enabled' if enabled else 'disabled'} successfully."
+            return (
+                True,
+                f"Startup entry '{entry_name}' {'enabled' if enabled else 'disabled'} successfully.",
+            )
         except OSError as exc:
             return False, f"Failed to modify registry: {exc}"
 
     if kind == "folder":
         is_common = "COMMON" in loc_key
         if is_common and not is_admin():
-            return False, "Administrator elevation is required to modify system-wide startup folders."
+            return (
+                False,
+                "Administrator elevation is required to modify system-wide startup folders.",
+            )
 
         folder_path = _startup_folder(is_common)
         current_file = os.path.join(folder_path, entry_name)
@@ -247,7 +306,9 @@ def set_enabled(kind: str, loc_key: str, entry_name: str, enabled: bool) -> tupl
 
         root = winreg.HKEY_LOCAL_MACHINE if is_common else winreg.HKEY_CURRENT_USER
         try:
-            with winreg.CreateKeyEx(root, _REG_APPROVED_STARTUP, 0, winreg.KEY_SET_VALUE) as app_key:
+            with winreg.CreateKeyEx(
+                root, _REG_APPROVED_STARTUP, 0, winreg.KEY_SET_VALUE
+            ) as app_key:
                 winreg.SetValueEx(
                     app_key,
                     entry_name,
@@ -255,7 +316,10 @@ def set_enabled(kind: str, loc_key: str, entry_name: str, enabled: bool) -> tupl
                     winreg.REG_BINARY,
                     _APPROVED_ENABLED if enabled else _APPROVED_DISABLED,
                 )
-            return True, f"Startup entry '{entry_name}' {'enabled' if enabled else 'disabled'} successfully."
+            return (
+                True,
+                f"Startup entry '{entry_name}' {'enabled' if enabled else 'disabled'} successfully.",
+            )
         except OSError:
             pass
         return True, f"Updated startup shortcut '{entry_name}'."
@@ -270,7 +334,10 @@ def remove(kind: str, loc_key: str, entry_name: str) -> tuple[bool, str]:
     if kind == "reg":
         is_hklm = "HKLM" in loc_key
         if is_hklm and not is_admin():
-            return False, "Administrator elevation is required to delete system-wide startup entries."
+            return (
+                False,
+                "Administrator elevation is required to delete system-wide startup entries.",
+            )
         root = winreg.HKEY_LOCAL_MACHINE if is_hklm else winreg.HKEY_CURRENT_USER
         subkey = _REG_RUNONCE if "RUNONCE" in loc_key else _REG_RUN
         extra_flags = winreg.KEY_WOW64_32KEY if "32" in loc_key else winreg.KEY_WOW64_64KEY
@@ -289,7 +356,10 @@ def remove(kind: str, loc_key: str, entry_name: str) -> tuple[bool, str]:
     if kind == "folder":
         is_common = "COMMON" in loc_key
         if is_common and not is_admin():
-            return False, "Administrator elevation is required to delete system-wide startup shortcuts."
+            return (
+                False,
+                "Administrator elevation is required to delete system-wide startup shortcuts.",
+            )
         file_path = os.path.join(_startup_folder(is_common), entry_name)
         try:
             if os.path.exists(file_path):
@@ -319,6 +389,9 @@ def add(name: str, command: str, scope: str = "USER") -> tuple[bool, str]:
                 winreg.SetValueEx(app_key, name, 0, winreg.REG_BINARY, _APPROVED_ENABLED)
         except OSError:
             pass
-        return True, f"Added '{name}' to startup registry ({'All Users' if is_system else 'Current User'})."
+        return (
+            True,
+            f"Added '{name}' to startup registry ({'All Users' if is_system else 'Current User'}).",
+        )
     except OSError as exc:
         return False, f"Failed to add startup entry: {exc}"

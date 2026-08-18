@@ -1,8 +1,7 @@
 """Unit tests for the platform-neutral Startup Manager and both of its backends."""
 
-import os
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -46,8 +45,11 @@ def test_startup_item_to_dict():
 
 
 def test_extract_executable_path():
-    assert _extract_executable_path('"C:\\Program Files\\App\\app.exe" --arg') == "C:\\Program Files\\App\\app.exe"
-    assert _extract_executable_path('C:\\Utils\\tool.exe /start') == "C:\\Utils\\tool.exe"
+    assert (
+        _extract_executable_path('"C:\\Program Files\\App\\app.exe" --arg')
+        == "C:\\Program Files\\App\\app.exe"
+    )
+    assert _extract_executable_path("C:\\Utils\\tool.exe /start") == "C:\\Utils\\tool.exe"
     assert _extract_executable_path("") == ""
     assert _extract_executable_path("notepad.exe") == "notepad.exe"
 
@@ -172,9 +174,7 @@ def test_linux_system_entry_is_hidden_not_deleted(linux_autostart, tmp_path, mon
     system_dir = tmp_path / "etc-xdg-autostart"
     system_dir.mkdir()
     packaged = system_dir / "org.gnome.Tracker.desktop"
-    packaged.write_text(
-        "[Desktop Entry]\nType=Application\nName=Tracker\nExec=tracker-miner\n"
-    )
+    packaged.write_text("[Desktop Entry]\nType=Application\nName=Tracker\nExec=tracker-miner\n")
     monkeypatch.setattr(startup_linux, "SYSTEM_AUTOSTART_DIR", str(system_dir))
 
     items = get_startup_items()

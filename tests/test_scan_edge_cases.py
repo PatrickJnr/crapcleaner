@@ -6,8 +6,6 @@ a user's own files as reclaimable junk.
 """
 
 import os
-import shutil
-import stat
 import subprocess
 import threading
 

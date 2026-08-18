@@ -81,13 +81,37 @@ def extract_executable_path(command: str) -> str:
 
 
 _HIGH_IMPACT_KEYWORDS = (
-    "discord", "steam", "epicgames", "spotify", "teams", "slack", "creative cloud",
-    "adobe", "chrome", "edge", "browser", "origin", "battle.net", "overwolf", "docker",
+    "discord",
+    "steam",
+    "epicgames",
+    "spotify",
+    "teams",
+    "slack",
+    "creative cloud",
+    "adobe",
+    "chrome",
+    "edge",
+    "browser",
+    "origin",
+    "battle.net",
+    "overwolf",
+    "docker",
 )
 
 _MEDIUM_IMPACT_KEYWORDS = (
-    "onedrive", "dropbox", "googledrive", "syncthing", "antivirus", "security",
-    "razer", "logitech", "corsair", "icue", "nvidia", "amd", "realtek",
+    "onedrive",
+    "dropbox",
+    "googledrive",
+    "syncthing",
+    "antivirus",
+    "security",
+    "razer",
+    "logitech",
+    "corsair",
+    "icue",
+    "nvidia",
+    "amd",
+    "realtek",
 )
 
 

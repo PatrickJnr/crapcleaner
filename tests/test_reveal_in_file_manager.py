@@ -56,7 +56,9 @@ def test_linux_never_invokes_explorer(sample):
         return None
 
     with patch.object(files_mod.os, "name", "posix"):
-        with patch.object(files_mod, "which", side_effect=lambda t: f"/usr/bin/{t}" if t == "xdg-open" else None):
+        with patch.object(
+            files_mod, "which", side_effect=lambda t: f"/usr/bin/{t}" if t == "xdg-open" else None
+        ):
             with patch.object(files_mod.subprocess, "Popen", side_effect=fake_popen):
                 assert reveal_in_file_manager(sample) is True
 

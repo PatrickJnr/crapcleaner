@@ -4,7 +4,6 @@ import csv
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 from typing import Any
 
@@ -66,12 +65,12 @@ from PySide6.QtWidgets import (
 
 from crapcleaner.config import config_path, load_settings, save_settings, update_settings
 from crapcleaner.constants import DEFAULT_CONFIG
-from crapcleaner.gui.effects import AnimatedNumber, SegmentedBar, Sparkline, add_depth, glow
 from crapcleaner.gui.dialogs import (
     ConfirmDeleteDialog,
     DuplicateFilesDialog,
     ReportDialog,
 )
+from crapcleaner.gui.effects import AnimatedNumber, SegmentedBar, Sparkline, add_depth, glow
 from crapcleaner.gui.icons import icon as material_icon
 from crapcleaner.gui.theme import THEMES
 from crapcleaner.gui.theme import color as theme_color
@@ -89,9 +88,9 @@ from crapcleaner.system.capabilities import (
     get_capability,
 )
 from crapcleaner.system.live_metrics import sample_live_metrics
-from crapcleaner.system.services import startup_types as service_startup_types
 from crapcleaner.system.memory_actions import available_actions as available_memory_actions
 from crapcleaner.system.memory_actions import get_action as get_memory_action
+from crapcleaner.system.services import startup_types as service_startup_types
 from crapcleaner.utils.contributors import fetch_avatar_file, fetch_contributors
 from crapcleaner.utils.files import file_manager_name, reveal_in_file_manager
 from crapcleaner.utils.format import (
@@ -1026,7 +1025,9 @@ class DashboardView(QWidget):
         # Equal-width placeholder segments: the categories are known, the sizes are not.
         self.breakdown_bar.set_segments([(name, 1.0, "faint") for name in preview], muted=True)
         for name in preview:
-            self.breakdown_rows.addWidget(self._breakdown_row("faint", name, "not scanned", dim=True))
+            self.breakdown_rows.addWidget(
+                self._breakdown_row("faint", name, "not scanned", dim=True)
+            )
 
         # The rows above are groups, so the summary counts groups too - counting
         # categories here read as a mismatch against the five rows shown.
@@ -3029,7 +3030,11 @@ class HistoryView(QWidget):
     def apply_theme(self, theme: str):
         self._theme = theme
         self.table.set_empty_text(theme, "No history yet. Run a scan or cleanup to get started.")
-        for pair in ((self.c1_val, self.c1_sub), (self.c2_val, self.c2_sub), (self.c3_val, self.c3_sub)):
+        for pair in (
+            (self.c1_val, self.c1_sub),
+            (self.c2_val, self.c2_sub),
+            (self.c3_val, self.c3_sub),
+        ):
             restyle_stat_card(pair[0], pair[1], theme)
 
 
@@ -6865,7 +6870,9 @@ class AddStartupDialog(QDialog):
         scope_lbl = QLabel("Scope:")
         scope_lbl.setFixedWidth(80)
         self.scope_combo = QComboBox()
-        self.scope_combo.addItems(["Current User (User Registry)", "All Users (System Registry - Admin Required)"])
+        self.scope_combo.addItems(
+            ["Current User (User Registry)", "All Users (System Registry - Admin Required)"]
+        )
         scope_row.addWidget(scope_lbl)
         scope_row.addWidget(self.scope_combo)
         lay.addLayout(scope_row)
@@ -7018,10 +7025,18 @@ class StartupView(QWidget):
         # 2. Metric Cards Row
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(12)
-        c1, self.total_card_val, self.total_card_sub = stat_card("TOTAL STARTUP", "0", "Configured entries", self._theme)
-        c2, self.enabled_card_val, self.enabled_card_sub = stat_card("ENABLED", "0", "Launch on boot", self._theme)
-        c3, self.disabled_card_val, self.disabled_card_sub = stat_card("DISABLED", "0", "Bypassed by system", self._theme)
-        c4, self.impact_card_val, self.impact_card_sub = stat_card("HIGH IMPACT", "0", "Resource heavy", self._theme)
+        c1, self.total_card_val, self.total_card_sub = stat_card(
+            "TOTAL STARTUP", "0", "Configured entries", self._theme
+        )
+        c2, self.enabled_card_val, self.enabled_card_sub = stat_card(
+            "ENABLED", "0", "Launch on boot", self._theme
+        )
+        c3, self.disabled_card_val, self.disabled_card_sub = stat_card(
+            "DISABLED", "0", "Bypassed by system", self._theme
+        )
+        c4, self.impact_card_val, self.impact_card_sub = stat_card(
+            "HIGH IMPACT", "0", "Resource heavy", self._theme
+        )
         for c in (c1, c2, c3, c4):
             metrics_row.addWidget(c)
         layout.addLayout(metrics_row)
@@ -7038,12 +7053,16 @@ class StartupView(QWidget):
         f_lay.addWidget(search_icon)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search startup apps by name, publisher, location, or command...")
+        self.search_input.setPlaceholderText(
+            "Search startup apps by name, publisher, location, or command..."
+        )
         self.search_input.textChanged.connect(self._filter_items)
         f_lay.addWidget(self.search_input, 2)
 
         self.scope_combo = QComboBox()
-        self.scope_combo.addItems(["All Scopes", "Current User (HKCU)", "All Users (HKLM)", "Startup Folders"])
+        self.scope_combo.addItems(
+            ["All Scopes", "Current User (HKCU)", "All Users (HKLM)", "Startup Folders"]
+        )
         self.scope_combo.currentIndexChanged.connect(self._filter_items)
         f_lay.addWidget(self.scope_combo)
 
@@ -7057,19 +7076,31 @@ class StartupView(QWidget):
         # 4. Startup Items Table
         self._populating = False  # Guard against reentrant itemClicked during sort
         self.table = CrapTable(0, 6)
-        self.table.setHorizontalHeaderLabels([
-            "State",
-            "Application",
-            "Publisher",
-            "Location",
-            "Impact",
-            "Command Line",
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "State",
+                "Application",
+                "Publisher",
+                "Location",
+                "Impact",
+                "Command Line",
+            ]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -7095,7 +7126,9 @@ class StartupView(QWidget):
         worker.done.connect(self._on_startup_loaded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -7116,7 +7149,9 @@ class StartupView(QWidget):
         self.disabled_card_val.setText(str(disabled))
         self.impact_card_val.setText(str(high_impact))
 
-        self.status_label.setText(f"Loaded {total} startup items ({enabled} enabled, {disabled} disabled).")
+        self.status_label.setText(
+            f"Loaded {total} startup items ({enabled} enabled, {disabled} disabled)."
+        )
         self._filter_items()
 
     def _on_failed(self, msg: str):
@@ -7174,13 +7209,17 @@ class StartupView(QWidget):
 
         for row, item in enumerate(items):
             # Column 0: State (sortable + checkable)
-            state_item = NumericItem("Enabled" if item.enabled else "Disabled", value=1 if item.enabled else 0)
+            state_item = NumericItem(
+                "Enabled" if item.enabled else "Disabled", value=1 if item.enabled else 0
+            )
             state_item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled
                 | Qt.ItemFlag.ItemIsSelectable
                 | Qt.ItemFlag.ItemIsUserCheckable
             )
-            state_item.setCheckState(Qt.CheckState.Checked if item.enabled else Qt.CheckState.Unchecked)
+            state_item.setCheckState(
+                Qt.CheckState.Checked if item.enabled else Qt.CheckState.Unchecked
+            )
             if item.enabled:
                 state_item.setForeground(QColor(_c(self._theme, "safe")))
             else:
@@ -7241,7 +7280,7 @@ class StartupView(QWidget):
         if table_item.column() == 0:
             item = self._item_for_row(table_item.row())
             if item:
-                new_state = (table_item.checkState() == Qt.CheckState.Checked)
+                new_state = table_item.checkState() == Qt.CheckState.Checked
                 if new_state != item.enabled:
                     self._toggle_item(item, new_state)
 
@@ -7262,7 +7301,11 @@ class StartupView(QWidget):
         worker.done.connect(self._on_action_done)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_action_worker", None)
+                if getattr(self, "_action_worker", None) is worker
+                else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -7288,7 +7331,11 @@ class StartupView(QWidget):
         worker.done.connect(self._on_action_done)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_action_worker", None)
+                if getattr(self, "_action_worker", None) is worker
+                else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -7306,7 +7353,11 @@ class StartupView(QWidget):
             worker.done.connect(self._on_action_done)
             worker.failed.connect(self._on_failed)
             worker.finished.connect(
-                lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+                lambda: (
+                    setattr(self, "_action_worker", None)
+                    if getattr(self, "_action_worker", None) is worker
+                    else None
+                )
             )
             worker.finished.connect(worker.deleteLater)
             worker.start()
@@ -7314,7 +7365,9 @@ class StartupView(QWidget):
     def _on_action_done(self, ok: bool, message: str):
         self.result_label.setText(message)
         self.result_icon.setPixmap(
-            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+            material_icon(
+                "check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")
+            ).pixmap(18, 18)
         )
         self.result_banner.setVisible(True)
         if ok:
@@ -7327,7 +7380,9 @@ class StartupView(QWidget):
             except Exception:
                 pass
         else:
-            QMessageBox.information(self, "Open Location", f"Target file not found:\n{item.file_path}")
+            QMessageBox.information(
+                self, "Open Location", f"Target file not found:\n{item.file_path}"
+            )
 
     def _copy_command(self, item: Any):
         QApplication.clipboard().setText(item.command)
@@ -7373,7 +7428,9 @@ class StartupView(QWidget):
 
     def apply_theme(self, theme: str):
         self._theme = theme
-        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};")
+        self.hero_title.setStyleSheet(
+            f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
         self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
         self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
         if self._filtered_items:
@@ -7470,7 +7527,9 @@ class SystemUpdatesView(QWidget):
         hero_lay.addLayout(hero_top)
 
         self.hero_title = QLabel(f"{self._capability.title} Manager")
-        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};")
+        self.hero_title.setStyleSheet(
+            f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
         hero_lay.addWidget(self.hero_title)
 
         self.status_label = QLabel(
@@ -7506,10 +7565,18 @@ class SystemUpdatesView(QWidget):
         # 2. Metric Cards Row
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(12)
-        c1, self.avail_card_val, self.avail_card_sub = stat_card("AVAILABLE UPDATES", "0", "Ready to install", self._theme)
-        c2, self.size_card_val, self.size_card_sub = stat_card("DOWNLOAD SIZE", "0 B", "Cumulative package size", self._theme)
-        c3, self.crit_card_val, self.crit_card_sub = stat_card("CRITICAL / SECURITY", "0", "High severity fixes", self._theme)
-        c4, self.hist_card_val, self.hist_card_sub = stat_card("INSTALLED HOTFIXES", "0", "Recent history", self._theme)
+        c1, self.avail_card_val, self.avail_card_sub = stat_card(
+            "AVAILABLE UPDATES", "0", "Ready to install", self._theme
+        )
+        c2, self.size_card_val, self.size_card_sub = stat_card(
+            "DOWNLOAD SIZE", "0 B", "Cumulative package size", self._theme
+        )
+        c3, self.crit_card_val, self.crit_card_sub = stat_card(
+            "CRITICAL / SECURITY", "0", "High severity fixes", self._theme
+        )
+        c4, self.hist_card_val, self.hist_card_sub = stat_card(
+            "INSTALLED HOTFIXES", "0", "Recent history", self._theme
+        )
         for c in (c1, c2, c3, c4):
             metrics_row.addWidget(c)
         layout.addLayout(metrics_row)
@@ -7519,18 +7586,28 @@ class SystemUpdatesView(QWidget):
         self.avail_table = CrapTable(0, 5)
         # Windows identifies updates by KB article; package managers use the package
         # version, so the second column is labelled per platform.
-        self.avail_table.setHorizontalHeaderLabels([
-            "Title",
-            "KB Article" if self._capability.platform == "windows" else "Version",
-            "Severity",
-            "Size",
-            "Category",
-        ])
+        self.avail_table.setHorizontalHeaderLabels(
+            [
+                "Title",
+                "KB Article" if self._capability.platform == "windows" else "Version",
+                "Severity",
+                "Size",
+                "Category",
+            ]
+        )
         self.avail_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.avail_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.avail_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.avail_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.avail_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.avail_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.avail_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.avail_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.avail_table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.avail_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.avail_table.setMinimumHeight(180)
         layout.addWidget(self.avail_table)
@@ -7558,16 +7635,24 @@ class SystemUpdatesView(QWidget):
         layout.addWidget(hist_filter_card)
 
         self.hist_table = CrapTable(0, 4)
-        self.hist_table.setHorizontalHeaderLabels([
-            "HotFix ID" if self._capability.platform == "windows" else "Transaction",
-            "Description",
-            "Installed Date",
-            "Installed By" if self._capability.platform == "windows" else "Source",
-        ])
-        self.hist_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.hist_table.setHorizontalHeaderLabels(
+            [
+                "HotFix ID" if self._capability.platform == "windows" else "Transaction",
+                "Description",
+                "Installed Date",
+                "Installed By" if self._capability.platform == "windows" else "Source",
+            ]
+        )
+        self.hist_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.hist_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.hist_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.hist_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.hist_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.hist_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.hist_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.hist_table.setMinimumHeight(220)
         layout.addWidget(self.hist_table)
@@ -7592,7 +7677,9 @@ class SystemUpdatesView(QWidget):
         worker.done.connect(self._on_updates_loaded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -7643,7 +7730,9 @@ class SystemUpdatesView(QWidget):
 
         if report.error:
             self.result_label.setText(f"{self._capability.title} Note: {report.error}")
-            self.result_icon.setPixmap(material_icon("warning", _c(self._theme, "warning")).pixmap(18, 18))
+            self.result_icon.setPixmap(
+                material_icon("warning", _c(self._theme, "warning")).pixmap(18, 18)
+            )
             self.result_banner.setVisible(True)
         else:
             self.result_banner.setVisible(False)
@@ -7657,7 +7746,9 @@ class SystemUpdatesView(QWidget):
         explained = explain_windows_error(msg)
         self.status_label.setText(f"Failed to check updates: {explained}")
         self.result_label.setText(f"Update Check Note: {explained}")
-        self.result_icon.setPixmap(material_icon("warning", _c(self._theme, "danger")).pixmap(18, 18))
+        self.result_icon.setPixmap(
+            material_icon("warning", _c(self._theme, "danger")).pixmap(18, 18)
+        )
         self.result_banner.setVisible(True)
 
     def _populate_available(self, items: list[Any]):
@@ -7725,7 +7816,8 @@ class SystemUpdatesView(QWidget):
             return
 
         filtered = [
-            h for h in hist
+            h
+            for h in hist
             if query in h.id.lower() or query in h.title.lower() or query in h.description.lower()
         ]
         self._populate_history(filtered)
@@ -7763,7 +7855,11 @@ class SystemUpdatesView(QWidget):
         worker.done.connect(self._on_install_done)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_install_worker", None) if getattr(self, "_install_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_install_worker", None)
+                if getattr(self, "_install_worker", None) is worker
+                else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -7772,7 +7868,9 @@ class SystemUpdatesView(QWidget):
         self.install_btn.setEnabled(True)
         self.result_label.setText(msg)
         self.result_icon.setPixmap(
-            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+            material_icon(
+                "check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")
+            ).pixmap(18, 18)
         )
         self.result_banner.setVisible(True)
         self.refresh()
@@ -7801,7 +7899,9 @@ class SystemUpdatesView(QWidget):
 
     def apply_theme(self, theme: str):
         self._theme = theme
-        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};")
+        self.hero_title.setStyleSheet(
+            f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
         self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
         self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
         if self._report:
@@ -7897,7 +7997,9 @@ class ServicesView(QWidget):
         hero_lay.addLayout(hero_top)
 
         self.hero_title = QLabel("Services Manager")
-        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};")
+        self.hero_title.setStyleSheet(
+            f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};"
+        )
         hero_lay.addWidget(self.hero_title)
 
         self.status_label = QLabel("Ready")
@@ -7925,10 +8027,18 @@ class ServicesView(QWidget):
         # 2. Metric Cards Row
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(12)
-        c1, self.total_card_val, self.total_card_sub = stat_card("TOTAL SERVICES", "0", "Installed services", self._theme)
-        c2, self.running_card_val, self.running_card_sub = stat_card("RUNNING", "0", "Active processes", self._theme)
-        c3, self.stopped_card_val, self.stopped_card_sub = stat_card("STOPPED", "0", "Inactive", self._theme)
-        c4, self.disabled_card_val, self.disabled_card_sub = stat_card("DISABLED", "0", "Cannot start", self._theme)
+        c1, self.total_card_val, self.total_card_sub = stat_card(
+            "TOTAL SERVICES", "0", "Installed services", self._theme
+        )
+        c2, self.running_card_val, self.running_card_sub = stat_card(
+            "RUNNING", "0", "Active processes", self._theme
+        )
+        c3, self.stopped_card_val, self.stopped_card_sub = stat_card(
+            "STOPPED", "0", "Inactive", self._theme
+        )
+        c4, self.disabled_card_val, self.disabled_card_sub = stat_card(
+            "DISABLED", "0", "Cannot start", self._theme
+        )
         for c in (c1, c2, c3, c4):
             metrics_row.addWidget(c)
         layout.addLayout(metrics_row)
@@ -7964,7 +8074,11 @@ class ServicesView(QWidget):
 
         self.type_combo = QComboBox()
         self.type_combo.addItems(
-            [f"All {self._unit_plural.title()}", "Third-Party Only", f"System {self._unit_plural.title()}"]
+            [
+                f"All {self._unit_plural.title()}",
+                "Third-Party Only",
+                f"System {self._unit_plural.title()}",
+            ]
         )
         self.type_combo.currentIndexChanged.connect(self._filter_services)
         f_lay.addWidget(self.type_combo)
@@ -7973,19 +8087,31 @@ class ServicesView(QWidget):
 
         # 4. Services Table
         self.table = CrapTable(0, 6)
-        self.table.setHorizontalHeaderLabels([
-            "Display Name",
-            "Service Name",
-            "Status",
-            "Startup Type",
-            "Log On As",
-            "Description",
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "Display Name",
+                "Service Name",
+                "Status",
+                "Startup Type",
+                "Log On As",
+                "Description",
+            ]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -8009,7 +8135,9 @@ class ServicesView(QWidget):
         worker.done.connect(self._on_services_loaded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -8216,7 +8344,11 @@ class ServicesView(QWidget):
         worker.done.connect(self._on_action_done)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_action_worker", None) if getattr(self, "_action_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_action_worker", None)
+                if getattr(self, "_action_worker", None) is worker
+                else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -8224,7 +8356,9 @@ class ServicesView(QWidget):
     def _on_action_done(self, ok: bool, msg: str):
         self.result_label.setText(msg)
         self.result_icon.setPixmap(
-            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+            material_icon(
+                "check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")
+            ).pixmap(18, 18)
         )
         self.result_banner.setVisible(True)
         if ok:
@@ -8287,7 +8421,9 @@ class ServicesView(QWidget):
 
     def apply_theme(self, theme: str):
         self._theme = theme
-        self.hero_title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};")
+        self.hero_title.setStyleSheet(
+            f"font-size: 20px; font-weight: 800; color: {_c(theme, 'text')};"
+        )
         self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
         self.result_label.setStyleSheet(f"font-weight: 600; color: {_c(theme, 'text')};")
         if self._filtered_services:
@@ -8451,9 +8587,15 @@ class AppUpdatesView(QWidget):
             ["Package", "Current Version", "Available Version", "Manager"]
         )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -8491,7 +8633,9 @@ class AppUpdatesView(QWidget):
         worker.done.connect(self._on_results)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            lambda: (
+                setattr(self, "_worker", None) if getattr(self, "_worker", None) is worker else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -8525,7 +8669,9 @@ class AppUpdatesView(QWidget):
 
         if total:
             mgrs = len(managers_with_updates)
-            err_suffix = f" ({len(errors)} manager error{'s' if len(errors) != 1 else ''})" if errors else ""
+            err_suffix = (
+                f" ({len(errors)} manager error{'s' if len(errors) != 1 else ''})" if errors else ""
+            )
             self.status_label.setText(
                 f"{total} update{'s' if total != 1 else ''} available across "
                 f"{mgrs} manager{'s' if mgrs != 1 else ''}.{err_suffix}"
@@ -8621,7 +8767,9 @@ class AppUpdatesView(QWidget):
         count = len(self._selected_updates())
         busy = self._update_worker is not None
         self.update_selected_btn.setEnabled(count > 0 and not busy)
-        self.update_selected_btn.setText(f"Update Selected ({count})" if count else "Update Selected")
+        self.update_selected_btn.setText(
+            f"Update Selected ({count})" if count else "Update Selected"
+        )
 
     # ------------------------------------------------------------------
     # Actions
@@ -8692,21 +8840,27 @@ class AppUpdatesView(QWidget):
         self.update_selected_btn.setEnabled(False)
         self.refresh_btn.setEnabled(False)
 
-        worker = PackageUpdateWorker(manager=manager, pkg_id=pkg_id, update_all=update_all, parent=self)
+        worker = PackageUpdateWorker(
+            manager=manager, pkg_id=pkg_id, update_all=update_all, parent=self
+        )
         self._update_worker = worker
         worker.done.connect(self._on_update_done)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(
-            lambda: setattr(self, "_update_worker", None)
-            if getattr(self, "_update_worker", None) is worker
-            else None
+            lambda: (
+                setattr(self, "_update_worker", None)
+                if getattr(self, "_update_worker", None) is worker
+                else None
+            )
         )
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_update_done(self, ok: bool, msg: str):
         self.result_icon.setPixmap(
-            material_icon("check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")).pixmap(18, 18)
+            material_icon(
+                "check" if ok else "warning", _c(self._theme, "safe" if ok else "warning")
+            ).pixmap(18, 18)
         )
         self.result_label.setText(msg)
         self.result_banner.setVisible(True)

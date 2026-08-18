@@ -1,15 +1,8 @@
 """Integration and GUI tests for StartupView, WindowsUpdateView, and ServicesView."""
 
-from unittest.mock import MagicMock, patch
-
-from PySide6.QtWidgets import QApplication
-
 from crapcleaner.gui.app import MainWindow
 from crapcleaner.gui.views import (
     AddStartupDialog,
-    ServicesView,
-    StartupView,
-    WindowsUpdateView,
 )
 from crapcleaner.system.services import ServiceItem
 from crapcleaner.system.startup import StartupItem

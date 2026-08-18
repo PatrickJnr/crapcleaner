@@ -32,7 +32,9 @@ __all__ = [
 ]
 
 
-def check_windows_updates(include_history: bool = True, timeout: float = 30.0) -> SystemUpdateReport:
+def check_windows_updates(
+    include_history: bool = True, timeout: float = 30.0
+) -> SystemUpdateReport:
     """Deprecated alias for :func:`crapcleaner.system.system_updates.check_system_updates`."""
     return check_system_updates(include_history=include_history, timeout=timeout)
 

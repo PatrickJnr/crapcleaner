@@ -239,11 +239,11 @@ def explain_windows_error(raw_error: str | None) -> str:
 
     raw_clean = str(raw_error).strip()
     code = extract_error_code(raw_clean)
-    
+
     if code:
         code_norm = f"0x{code[2:].lower()}"
         code_display = f"0x{code[2:].upper()}"
-        
+
         for key, (summary, detail) in WINDOWS_ERROR_MAP.items():
             if key.lower() == code_norm:
                 return f"{summary} ({code_display}): {detail}"
@@ -262,11 +262,11 @@ def explain_windows_error(raw_error: str | None) -> str:
             return f"Access Denied ({code_display}): Administrator privileges are required to perform this operation."
         if code_norm.startswith("0x80070"):
             return f"System Error ({code_display}): Windows system service or file error during update operation."
-        
+
         return f"Windows Error ({code_display}): An error occurred during the update operation ({raw_clean})."
 
     low = raw_clean.lower()
-    
+
     if "access is denied" in low or "unauthorized" in low:
         return "Access Denied: Administrator privileges are required to perform this operation."
     if "wuauserv is not running" in low or "service is stopped" in low:

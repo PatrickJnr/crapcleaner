@@ -57,7 +57,6 @@ from crapcleaner.system.capabilities import (
     is_supported,
 )
 from crapcleaner.utils.format import format_datetime, format_size
-from crapcleaner.utils.platform import is_windows
 
 
 class MainWindow(QMainWindow):

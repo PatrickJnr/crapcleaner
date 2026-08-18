@@ -1,9 +1,6 @@
 """Tests for Windows error translation and explanation utilities."""
 
-import pytest
-
 from crapcleaner.utils.windows_errors import (
-    WINDOWS_ERROR_MAP,
     explain_windows_error,
     extract_error_code,
 )

@@ -22,6 +22,7 @@ def nav_label(key: str, fallback: str) -> str:
     capability = get_capability(key)
     return capability.nav_label if capability.supported else fallback
 
+
 NAV_SECTIONS = [
     (
         "OVERVIEW",
@@ -150,7 +151,8 @@ class Sidebar(QFrame):
         # Navigation sections — only show items whose key is in _page_keys
         for section_title, items in NAV_SECTIONS:
             visible_items = [
-                (k, lbl, ico) for k, lbl, ico in items
+                (k, lbl, ico)
+                for k, lbl, ico in items
                 if self._page_keys is None or k in self._page_keys
             ]
             if not visible_items:
