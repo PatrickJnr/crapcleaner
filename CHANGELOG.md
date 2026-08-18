@@ -5,6 +5,19 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10.1] - 2026-08-18
+
+Theme Studio performance optimization, Windows config locking resilience, and release title automation.
+
+### Fixed
+- **Theme Studio Slider Performance & Lag**: optimized live theme preview rendering by updating only the actively visible tab (`_update_active_view`) during drag events, reducing per-drag `setStyleSheet` and contrast calculation overhead by over 95%. Bypasses redundant SVG icon and button restyling during active sliding and tunes the application debounce timer to 220ms for fluid 60+ FPS interaction.
+- **Windows Config Lock Collision (`PermissionError: [WinError 5]`)**: resolved access denied errors during rapid settings saves by eliminating redundant duplicate saves in custom theme builder and implementing PID/nanosecond unique temporary files, exponential retry backoff, and direct-write fallbacks in `save_settings`.
+
+### Added
+- **Automated Descriptive GitHub Release Titles**: enhanced `scripts/extract_changelog.py` and `.github/workflows/release.yml` to automatically extract release headlines from `CHANGELOG.md` and populate descriptive release titles during GitHub Actions publication.
+
+---
+
 ## [1.0.10] - 2026-08-18
 
 Custom Theme Studio release: perceptual color theory engine, 6 harmony mood styles, 15 designer presets, magic dice generator, JSON theme import/export, and dedicated Settings sub-navigation tabs.

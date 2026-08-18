@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from scripts.extract_changelog import extract_changelog
+from scripts.extract_changelog import extract_changelog, extract_release_title
 
 SAMPLE_CHANGELOG = """# Changelog
 
@@ -77,6 +77,26 @@ def test_extract_topmost_when_no_version_specified():
         tmp_path.unlink(missing_ok=True)
 
 
+def test_extract_release_title():
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as f:
+        f.write(SAMPLE_CHANGELOG)
+        tmp_path = Path(f.name)
+
+    try:
+        title_107 = extract_release_title("1.0.7", tmp_path)
+        assert title_107 == "v1.0.7: Feature improvements release"
+
+        title_v106 = extract_release_title("v1.0.6", tmp_path)
+        assert title_v106 == "v1.0.6: Theme Gallery release"
+
+        title_top = extract_release_title(None, tmp_path)
+        assert title_top == "v1.0.7: Feature improvements release"
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def test_extract_nonexistent_file():
     notes = extract_changelog("1.0.6", "non_existent_file.md")
     assert notes == ""
+    title = extract_release_title("1.0.6", "non_existent_file.md")
+    assert title == "v1.0.6"

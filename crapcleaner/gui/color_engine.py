@@ -154,9 +154,13 @@ def generate_custom_palette(
 
     # Clamp tuning factors
     s_contrast = max(0.6, min(1.4, float(surface_contrast)))
-    a_intensity = max(0.5, min(1.6, float(accent_intensity)))
+    a_intensity = max(0.4, min(1.6, float(accent_intensity)))
     bg_factor = max(0.6, min(1.4, float(bg_darkness)))
     mood_key = mood.lower() if mood.lower() in MOOD_STYLES else "cohesive"
+
+    # Normalized contrast & vibrancy scales (0.0 to 1.0)
+    contrast_scale = (s_contrast - 0.6) / 0.8  # 0.0 at 60%, 1.0 at 140%
+    vibrancy_scale = (a_intensity - 0.4) / 1.2  # 0.0 at 40%, 1.0 at 160%
 
     # Mood-specific saturation & tint scaling
     if mood_key == "vibrant":
@@ -165,7 +169,7 @@ def generate_custom_palette(
         surface_depth = 1.15
     elif mood_key == "muted":
         tint_s_scale = 0.05
-        accent_s_boost = 0.80
+        accent_s_boost = 0.75
         surface_depth = 0.90
     elif mood_key == "oled":
         tint_s_scale = 0.04
@@ -173,7 +177,7 @@ def generate_custom_palette(
         surface_depth = 1.20
     elif mood_key == "pastel":
         tint_s_scale = 0.10
-        accent_s_boost = 0.70
+        accent_s_boost = 0.65
         surface_depth = 0.85
     elif mood_key == "minimal":
         tint_s_scale = 0.02
@@ -184,42 +188,42 @@ def generate_custom_palette(
         accent_s_boost = 1.00
         surface_depth = 1.00
 
-    # Effective accent saturation
-    effective_s = max(0.15, min(1.0, s * a_intensity * accent_s_boost))
+    # Effective accent saturation: scales smoothly with vibrancy slider
+    effective_s = max(0.10, min(1.0, s * (0.35 + 0.95 * vibrancy_scale) * accent_s_boost))
 
     # Perceptual accent lightness tuning
     h_bias = hue_lightness_bias(h)
     if is_dark:
-        # If hue is yellow/green, slightly lower lightness to avoid blinding glare
-        target_accent_l = 0.54 + (0.08 * (1.0 - h_bias))
-        accent_l = max(0.48, min(0.70, lum if 0.44 <= lum <= 0.68 else target_accent_l))
-        hover_l = min(0.82, accent_l + 0.08)
-        pressed_l = max(0.38, accent_l - 0.08)
+        # Lower vibrancy gives a calmer/deeper tone; higher vibrancy gives an illuminated neon punch
+        target_accent_l = 0.44 + (0.18 * vibrancy_scale) + (0.06 * (1.0 - h_bias))
+        accent_l = max(0.40, min(0.72, target_accent_l))
+        hover_l = min(0.84, accent_l + 0.08)
+        pressed_l = max(0.32, accent_l - 0.08)
     else:
-        # Light mode: darker accent for crisp readability
-        target_accent_l = 0.42 - (0.06 * h_bias)
-        accent_l = max(0.32, min(0.52, lum if 0.30 <= lum <= 0.56 else target_accent_l))
-        hover_l = max(0.24, accent_l - 0.07)
-        pressed_l = max(0.18, accent_l - 0.13)
+        # Light mode: darker accent for crisp readability, higher vibrancy increases contrast
+        target_accent_l = 0.50 - (0.18 * vibrancy_scale) - (0.06 * h_bias)
+        accent_l = max(0.26, min(0.56, target_accent_l))
+        hover_l = max(0.20, accent_l - 0.07)
+        pressed_l = max(0.15, accent_l - 0.12)
 
     accent = hsl_to_hex(h, effective_s, accent_l)
     accent_hover = hsl_to_hex(h, effective_s, hover_l)
     accent_pressed = hsl_to_hex(h, effective_s, pressed_l)
     r_a, g_a, b_a = hex_to_rgb(accent)
-    accent_soft = f"rgba({r_a}, {g_a}, {b_a}, 0.16)"
+    accent_soft = f"rgba({r_a}, {g_a}, {b_a}, {0.10 + 0.12 * vibrancy_scale:.2f})"
 
     # Base tint for background and surfaces
-    tint_s = min(0.25, max(0.01, s * tint_s_scale))
+    tint_s = min(0.28, max(0.01, s * tint_s_scale * (0.6 + 0.6 * vibrancy_scale)))
 
     if is_oled:
-        # OLED True Black canvas
+        # OLED True Black canvas with dynamic contrast steps
         window = "#000000"
-        panel = hsl_to_hex(h, tint_s * 0.5, 0.030)
-        surface = hsl_to_hex(h, tint_s, 0.065 * s_contrast)
-        surface2 = hsl_to_hex(h, tint_s, 0.105 * s_contrast)
-        elevated = hsl_to_hex(h, tint_s, 0.145 * s_contrast)
-        border = hsl_to_hex(h, tint_s, 0.130 * s_contrast)
-        border2 = hsl_to_hex(h, tint_s, 0.220 * s_contrast)
+        panel = hsl_to_hex(h, tint_s * 0.5, 0.020 + 0.030 * contrast_scale)
+        surface = hsl_to_hex(h, tint_s, 0.040 + 0.060 * contrast_scale)
+        surface2 = hsl_to_hex(h, tint_s, 0.070 + 0.090 * contrast_scale)
+        elevated = hsl_to_hex(h, tint_s, 0.100 + 0.120 * contrast_scale)
+        border = hsl_to_hex(h, tint_s, 0.080 + 0.140 * contrast_scale)
+        border2 = hsl_to_hex(h, tint_s, 0.140 + 0.200 * contrast_scale)
 
         text = "#ffffff"
         muted = hsl_to_hex(h, min(0.08, tint_s), 0.72)
@@ -232,15 +236,15 @@ def generate_custom_palette(
         info = "#38bdf8"
 
     elif is_dark:
-        # Dark mode surface stratification
-        base_bg_l = (0.065 / bg_factor) * surface_depth
-        window_l = max(0.035, min(0.11, base_bg_l))
-        panel_l = max(0.060, min(0.14, window_l + (0.026 * s_contrast)))
-        surface_l = max(0.090, min(0.18, window_l + (0.065 * s_contrast)))
-        surface2_l = max(0.125, min(0.23, window_l + (0.105 * s_contrast)))
-        elevated_l = max(0.165, min(0.29, window_l + (0.150 * s_contrast)))
-        border_l = max(0.140, min(0.27, surface_l + (0.050 * s_contrast)))
-        border2_l = max(0.220, min(0.39, border_l + 0.085))
+        # Dark mode surface stratification with dynamic contrast
+        base_bg_l = max(0.025, min(0.085, (0.070 / bg_factor) - (0.020 * contrast_scale)))
+        window_l = base_bg_l
+        panel_l = window_l + 0.020 + (0.040 * contrast_scale)
+        surface_l = window_l + 0.045 + (0.085 * contrast_scale)
+        surface2_l = window_l + 0.075 + (0.135 * contrast_scale)
+        elevated_l = window_l + 0.110 + (0.185 * contrast_scale)
+        border_l = surface_l + 0.035 + (0.105 * contrast_scale)
+        border2_l = border_l + 0.055 + (0.140 * contrast_scale)
 
         window = hsl_to_hex(h, tint_s, window_l)
         panel = hsl_to_hex(h, tint_s, panel_l)
@@ -264,14 +268,13 @@ def generate_custom_palette(
 
     else:
         # Light mode surface stratification
-        base_bg_l = min(0.985, (0.965 * bg_factor))
-        window_l = max(0.92, min(0.98, base_bg_l))
+        window_l = max(0.92, min(0.985, (0.975 * bg_factor) - (0.030 * contrast_scale)))
         panel_l = 1.0 if mood_key == "minimal" else max(0.97, min(1.0, 0.99))
-        surface_l = max(0.90, min(0.95, window_l - (0.035 * s_contrast)))
-        surface2_l = max(0.84, min(0.91, window_l - (0.080 * s_contrast)))
+        surface_l = max(0.86, min(0.96, window_l - (0.025 + 0.065 * contrast_scale)))
+        surface2_l = max(0.78, min(0.92, window_l - (0.055 + 0.115 * contrast_scale)))
         elevated = "#ffffff"
-        border_l = max(0.76, min(0.86, surface_l - (0.070 * s_contrast)))
-        border2_l = max(0.64, min(0.76, border_l - 0.100))
+        border_l = max(0.68, min(0.88, surface_l - (0.045 + 0.125 * contrast_scale)))
+        border2_l = max(0.55, min(0.78, border_l - (0.075 + 0.100 * contrast_scale)))
 
         window = hsl_to_hex(h, tint_s, window_l)
         panel = hsl_to_hex(h, tint_s, panel_l)

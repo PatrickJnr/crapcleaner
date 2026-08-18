@@ -8,7 +8,7 @@ contrast and vibrancy, and preview live multi-tab UI mockups before saving.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -325,11 +325,13 @@ class LiveThemePreviewCard(QFrame):
     def _set_preview_view(self, key: str) -> None:
         idx = {"overview": 0, "table": 1, "matrix": 2}.get(key, 0)
         self.preview_stack.setCurrentIndex(idx)
+        if hasattr(self, "_palette") and self._palette:
+            self._update_active_view()
 
     def update_palette(
         self, palette: dict[str, str], primary_hex: str, mode: str, mood: str = "cohesive"
     ) -> None:
-        """Apply generated colors to all simulated mockup widgets."""
+        """Apply generated colors to simulated mockup widgets."""
         self._palette = palette
         self._primary_color = primary_hex
         self._mode = mode
@@ -377,78 +379,87 @@ class LiveThemePreviewCard(QFrame):
             f"font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;"
         )
 
-        # Stat Box
-        self.stat_box.setStyleSheet(
-            f"background-color: {p['surface']}; border: 1px solid {p['border2']}; border-radius: 6px;"
-        )
-        self.stat_title.setStyleSheet(
-            f"color: {p['muted']}; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;"
-        )
-        self.stat_val.setStyleSheet(f"color: {p['text']}; font-size: 14px; font-weight: 800;")
-        self.stat_sub.setStyleSheet(f"color: {p['faint']}; font-size: 10px;")
+        self._update_active_view()
 
-        # Badges Box
-        self.badges_box.setStyleSheet(
-            f"background-color: {p['surface']}; border: 1px solid {p['border2']}; border-radius: 6px;"
-        )
-        self.badge_safe.setStyleSheet(
-            f"background-color: {p['success_soft']}; color: {p['success']}; "
-            f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
-        )
-        self.badge_warn.setStyleSheet(
-            f"background-color: {p['warning_soft']}; color: {p['warning']}; "
-            f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
-        )
-        self.badge_danger.setStyleSheet(
-            f"background-color: {p['danger_soft']}; color: {p['danger']}; "
-            f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
-        )
+    def _update_active_view(self) -> None:
+        if not hasattr(self, "_palette") or not self._palette:
+            return
+        p = self._palette
+        is_dark = getattr(self, "_mode", "dark").lower() != "light"
+        idx = self.preview_stack.currentIndex()
 
-        # Buttons
-        self.mock_primary_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {p['accent']}; color: #ffffff; "
-            f"font-weight: 700; border: none; border-radius: 5px; padding: 3px 10px; font-size: 10px; }} "
-            f"QPushButton:hover {{ background-color: {p['accent_hover']}; }}"
-        )
-        self.mock_secondary_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {p['surface2']}; color: {p['text']}; "
-            f"font-weight: 600; border: 1px solid {p['border']}; border-radius: 5px; padding: 3px 10px; font-size: 10px; }}"
-        )
-        self.mock_danger_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {p['danger_soft']}; color: {p['danger']}; "
-            f"font-weight: 600; border: 1px solid {p['danger']}; border-radius: 5px; padding: 3px 10px; font-size: 10px; }}"
-        )
+        if idx == 0:
+            # Overview Tab: update only visible overview elements
+            self.stat_box.setStyleSheet(
+                f"background-color: {p['surface']}; border: 1px solid {p['border2']}; border-radius: 6px;"
+            )
+            self.stat_title.setStyleSheet(
+                f"color: {p['muted']}; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;"
+            )
+            self.stat_val.setStyleSheet(f"color: {p['text']}; font-size: 14px; font-weight: 800;")
+            self.stat_sub.setStyleSheet(f"color: {p['faint']}; font-size: 10px;")
 
-        # Swatches breakdown
-        self.swatch_container.setStyleSheet(
-            f"background-color: {p['surface2']}; border: 1px solid {p['border']}; border-radius: 6px;"
-        )
-        for key, pill in self.swatch_labels:
-            col = p.get(key, "#888888")
-            fg = "#ffffff" if is_dark or key in ("accent", "danger", "success") else "#111827"
-            pill.setStyleSheet(
-                f"background-color: {col}; color: {fg}; "
-                f"border: 1px solid {p['border2']}; border-radius: 3px; font-size: 8px; font-weight: 700;"
+            self.badges_box.setStyleSheet(
+                f"background-color: {p['surface']}; border: 1px solid {p['border2']}; border-radius: 6px;"
+            )
+            self.badge_safe.setStyleSheet(
+                f"background-color: {p['success_soft']}; color: {p['success']}; "
+                f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
+            )
+            self.badge_warn.setStyleSheet(
+                f"background-color: {p['warning_soft']}; color: {p['warning']}; "
+                f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
+            )
+            self.badge_danger.setStyleSheet(
+                f"background-color: {p['danger_soft']}; color: {p['danger']}; "
+                f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
             )
 
-        # Table styling
-        self.mock_table.setStyleSheet(
-            f"QTableWidget {{ background-color: {p['surface']}; color: {p['text']}; "
-            f"gridline-color: {p['border2']}; border: 1px solid {p['border']}; border-radius: 4px; font-size: 10px; }} "
-            f"QHeaderView::section {{ background-color: {p['surface2']}; color: {p['muted']}; "
-            f"font-weight: 700; border: 1px solid {p['border']}; padding: 2px 4px; }}"
-        )
-
-        # Matrix Chips
-        for token_name, (chip, t_name, hex_val) in self.matrix_chips.items():
-            val = p.get(token_name, "#888888")
-            chip_fg = ensure_contrast("#ffffff", val, min_ratio=4.0)
-            chip.setStyleSheet(
-                f"background-color: {val}; border: 1px solid {p['border2']}; border-radius: 4px;"
+            self.mock_primary_btn.setStyleSheet(
+                f"QPushButton {{ background-color: {p['accent']}; color: #ffffff; "
+                f"font-weight: 700; border: none; border-radius: 5px; padding: 3px 10px; font-size: 10px; }} "
+                f"QPushButton:hover {{ background-color: {p['accent_hover']}; }}"
             )
-            t_name.setStyleSheet(f"color: {chip_fg}; font-size: 8px; font-weight: 700;")
-            hex_val.setText(val)
-            hex_val.setStyleSheet(f"color: {chip_fg}; font-size: 8px;")
+            self.mock_secondary_btn.setStyleSheet(
+                f"QPushButton {{ background-color: {p['surface2']}; color: {p['text']}; "
+                f"font-weight: 600; border: 1px solid {p['border']}; border-radius: 5px; padding: 3px 10px; font-size: 10px; }}"
+            )
+            self.mock_danger_btn.setStyleSheet(
+                f"QPushButton {{ background-color: {p['danger_soft']}; color: {p['danger']}; "
+                f"font-weight: 600; border: 1px solid {p['danger']}; border-radius: 5px; padding: 3px 10px; font-size: 10px; }}"
+            )
+
+            self.swatch_container.setStyleSheet(
+                f"background-color: {p['surface2']}; border: 1px solid {p['border']}; border-radius: 6px;"
+            )
+            for key, pill in self.swatch_labels:
+                col = p.get(key, "#888888")
+                fg = "#ffffff" if is_dark or key in ("accent", "danger", "success") else "#111827"
+                pill.setStyleSheet(
+                    f"background-color: {col}; color: {fg}; "
+                    f"border: 1px solid {p['border2']}; border-radius: 3px; font-size: 8px; font-weight: 700;"
+                )
+
+        elif idx == 1:
+            # Table Tab
+            self.mock_table.setStyleSheet(
+                f"QTableWidget {{ background-color: {p['surface']}; color: {p['text']}; "
+                f"gridline-color: {p['border2']}; border: 1px solid {p['border']}; border-radius: 4px; font-size: 10px; }} "
+                f"QHeaderView::section {{ background-color: {p['surface2']}; color: {p['muted']}; "
+                f"font-weight: 700; border: 1px solid {p['border']}; padding: 2px 4px; }}"
+            )
+
+        elif idx == 2:
+            # Matrix Tab: 27 token chips
+            for token_name, (chip, t_name, hex_val) in self.matrix_chips.items():
+                val = p.get(token_name, "#888888")
+                chip_fg = ensure_contrast("#ffffff", val, min_ratio=4.0)
+                chip.setStyleSheet(
+                    f"background-color: {val}; border: 1px solid {p['border2']}; border-radius: 4px;"
+                )
+                t_name.setStyleSheet(f"color: {chip_fg}; font-size: 8px; font-weight: 700;")
+                hex_val.setText(val)
+                hex_val.setStyleSheet(f"color: {chip_fg}; font-size: 8px;")
 
 
 class CustomThemeBuilderWidget(QWidget):
@@ -469,6 +480,10 @@ class CustomThemeBuilderWidget(QWidget):
         self._current_bg_darkness = 1.0
         self._preset_buttons: list[QPushButton] = []
         self._mood_buttons: dict[str, QPushButton] = {}
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(220)
+        self._debounce_timer.timeout.connect(self._apply_debounced)
         self._load_saved_config()
         self._build_ui()
         self._update_preview(auto_apply=False)
@@ -687,6 +702,7 @@ class CustomThemeBuilderWidget(QWidget):
         self.contrast_slider.setRange(60, 140)
         self.contrast_slider.setValue(int(self._current_contrast * 100))
         self.contrast_slider.valueChanged.connect(self._on_contrast_changed)
+        self.contrast_slider.sliderReleased.connect(self._apply_debounced)
         sliders_box.addWidget(self.contrast_slider)
 
         # Accent Intensity Slider
@@ -706,6 +722,7 @@ class CustomThemeBuilderWidget(QWidget):
         self.intensity_slider.setRange(50, 150)
         self.intensity_slider.setValue(int(self._current_intensity * 100))
         self.intensity_slider.valueChanged.connect(self._on_intensity_changed)
+        self.intensity_slider.sliderReleased.connect(self._apply_debounced)
         sliders_box.addWidget(self.intensity_slider)
 
         left_box.addLayout(sliders_box)
@@ -780,12 +797,18 @@ class CustomThemeBuilderWidget(QWidget):
     def _on_contrast_changed(self, value: int) -> None:
         self._current_contrast = value / 100.0
         self.contrast_val_lbl.setText(f"{value}%")
-        self._update_preview(auto_apply=True)
+        self._update_preview(auto_apply=False, full_restyle=False)
+        self._debounce_timer.start(220)
 
     def _on_intensity_changed(self, value: int) -> None:
         self._current_intensity = value / 100.0
         self.intensity_val_lbl.setText(f"{value}%")
-        self._update_preview(auto_apply=True)
+        self._update_preview(auto_apply=False, full_restyle=False)
+        self._debounce_timer.start(220)
+
+    def _apply_debounced(self) -> None:
+        self._debounce_timer.stop()
+        self._update_preview(auto_apply=True, full_restyle=True)
 
     def _on_magic_dice_clicked(self) -> None:
         """Roll random beautiful theme configuration."""
@@ -855,11 +878,7 @@ class CustomThemeBuilderWidget(QWidget):
             else:
                 QMessageBox.warning(self, "Import Error", "Invalid theme JSON configuration.")
 
-    def _update_preview(self, auto_apply: bool = False) -> None:
-        self.color_swatch_btn.setStyleSheet(
-            f"background-color: {self._current_primary}; border: 2px solid #ffffff; "
-            f"border-radius: 18px;"
-        )
+    def _update_preview(self, auto_apply: bool = False, full_restyle: bool = True) -> None:
         palette = generate_custom_palette(
             primary_color=self._current_primary,
             mode=self._current_mode,
@@ -872,30 +891,32 @@ class CustomThemeBuilderWidget(QWidget):
             palette, self._current_primary, self._current_mode, self._current_mood
         )
 
-        # Style Dark / Light mode segment buttons cleanly
-        is_dark = self._current_mode == "dark"
-        active_btn_style = (
-            f"QPushButton {{ background-color: {palette['accent']}; color: #ffffff; "
-            f"border: 1px solid {palette['accent_hover']}; border-radius: 6px; padding: 6px 12px; font-weight: 700; font-size: 11px; }}"
-        )
-        inactive_btn_style = (
-            f"QPushButton {{ background-color: {palette['surface2']}; color: {palette['muted']}; "
-            f"border: 1px solid {palette['border']}; border-radius: 6px; padding: 6px 12px; font-weight: 500; font-size: 11px; }}"
-            f"QPushButton:hover {{ background-color: {palette['elevated']}; color: {palette['text']}; }}"
-        )
-        self.dark_btn.setStyleSheet(active_btn_style if is_dark else inactive_btn_style)
-        self.light_btn.setStyleSheet(inactive_btn_style if is_dark else active_btn_style)
-        self.dark_btn.setIcon(
-            material_icon("dark_mode", "#ffffff" if is_dark else palette["muted"])
-        )
-        self.light_btn.setIcon(
-            material_icon("light_mode", palette["muted"] if is_dark else "#ffffff")
-        )
+        if full_restyle or auto_apply:
+            self.color_swatch_btn.setStyleSheet(
+                f"background-color: {self._current_primary}; border: 2px solid #ffffff; "
+                f"border-radius: 18px;"
+            )
+            # Style Dark / Light mode segment buttons cleanly
+            is_dark = self._current_mode == "dark"
+            active_btn_style = (
+                f"QPushButton {{ background-color: {palette['accent']}; color: #ffffff; "
+                f"border: 1px solid {palette['accent_hover']}; border-radius: 6px; padding: 6px 12px; font-weight: 700; font-size: 11px; }}"
+            )
+            inactive_btn_style = (
+                f"QPushButton {{ background-color: {palette['surface2']}; color: {palette['muted']}; "
+                f"border: 1px solid {palette['border']}; border-radius: 6px; padding: 6px 12px; font-weight: 500; font-size: 11px; }}"
+                f"QPushButton:hover {{ background-color: {palette['elevated']}; color: {palette['text']}; }}"
+            )
+            self.dark_btn.setStyleSheet(active_btn_style if is_dark else inactive_btn_style)
+            self.light_btn.setStyleSheet(inactive_btn_style if is_dark else active_btn_style)
+            self.dark_btn.setIcon(
+                material_icon("dark_mode", "#ffffff" if is_dark else palette["muted"])
+            )
+            self.light_btn.setIcon(
+                material_icon("light_mode", palette["muted"] if is_dark else "#ffffff")
+            )
 
         if auto_apply:
-            from crapcleaner.config import update_settings
-            from crapcleaner.gui.theme import invalidate_custom_theme_cache
-
             custom_cfg = {
                 "primary_color": self._current_primary,
                 "mode": self._current_mode,
@@ -904,14 +925,9 @@ class CustomThemeBuilderWidget(QWidget):
                 "accent_intensity": self._current_intensity,
                 "bg_darkness": self._current_bg_darkness,
             }
-            invalidate_custom_theme_cache()
-            update_settings(custom_theme=custom_cfg, theme="custom")
             self.theme_applied.emit(custom_cfg)
 
     def _apply_and_save(self) -> None:
-        from crapcleaner.config import update_settings
-        from crapcleaner.gui.theme import invalidate_custom_theme_cache
-
         custom_cfg = {
             "primary_color": self._current_primary,
             "mode": self._current_mode,
@@ -920,8 +936,6 @@ class CustomThemeBuilderWidget(QWidget):
             "accent_intensity": self._current_intensity,
             "bg_darkness": self._current_bg_darkness,
         }
-        invalidate_custom_theme_cache()
-        update_settings(custom_theme=custom_cfg, theme="custom")
         self.theme_applied.emit(custom_cfg)
 
     def _reset_to_defaults(self) -> None:

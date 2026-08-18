@@ -1,8 +1,7 @@
-"""Local settings persistence stored in the platform config directory."""
-
 import json
 import os
 import threading
+import time
 from typing import Any
 
 from crapcleaner.constants import CONFIG_DIR_NAME, CONFIG_FILE, CONFIG_VERSION, DEFAULT_CONFIG
@@ -74,15 +73,38 @@ def save_settings(settings: dict[str, Any]) -> None:
     with _lock:
         os.makedirs(config_dir(), exist_ok=True)
         path = config_path()
-        temp = path + ".tmp"
+        temp = f"{path}.{os.getpid()}.{time.time_ns()}.tmp"
         # Merge onto what is already stored so partial saves (e.g. the settings
         # form) never reset untouched keys such as window_geometry.
         merged = load_settings()
         merged.update(settings)
         merged["config_version"] = CONFIG_VERSION
-        with open(temp, "w", encoding="utf-8") as fh:
-            json.dump(merged, fh, indent=2, sort_keys=True)
-        os.replace(temp, path)
+
+        payload = json.dumps(merged, indent=2, sort_keys=True)
+        try:
+            with open(temp, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+
+            # Resilient atomic replace for Windows with retry backoff against transient file locks
+            replaced = False
+            for attempt in range(8):
+                try:
+                    os.replace(temp, path)
+                    replaced = True
+                    break
+                except (PermissionError, OSError):
+                    time.sleep(0.015 * (attempt + 1))
+
+            if not replaced:
+                # Fallback: direct write if replace is blocked by antivirus or indexer
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+        finally:
+            if os.path.exists(temp):
+                try:
+                    os.remove(temp)
+                except OSError:
+                    pass
 
     # The safety layer caches the user's exclusion rules, so an edit here has to be
     # published or it would not take effect until the process restarted.
