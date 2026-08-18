@@ -2,7 +2,7 @@
 
 APP_NAME = "CrapCleaner"
 APP_DISPLAY_NAME = "CrapCleaner"
-VERSION = "1.0.9.1"
+VERSION = "1.0.10"
 COMPANY_NAME = "CrapCleaner"
 APP_URL = "https://github.com/PatrickJnr/crapcleaner"
 
@@ -35,4 +35,11 @@ DEFAULT_CONFIG = {
     "window_geometry": "",
     "storage_favorites": [],
     "last_scan_snapshot": {},
+    "custom_theme": {
+        "primary_color": "#3b82f6",
+        "mode": "dark",
+        "surface_contrast": 1.0,
+        "accent_intensity": 1.0,
+        "bg_darkness": 1.0,
+    },
 }

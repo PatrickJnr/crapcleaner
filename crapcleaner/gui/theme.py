@@ -1248,6 +1248,35 @@ WINDOWS_95 = {
     "safe": "#008000",
 }
 
+CUSTOM = {
+    "window": "#0c111c",
+    "panel": "#111827",
+    "surface": "#1e293b",
+    "surface2": "#283548",
+    "elevated": "#334155",
+    "border": "#283548",
+    "border2": "#3b4d66",
+    "text": "#f8fafc",
+    "muted": "#94a3b8",
+    "faint": "#64748b",
+    "accent": "#3b82f6",
+    "accent_hover": "#60a5fa",
+    "accent_pressed": "#2563eb",
+    "accent_soft": "rgba(59, 130, 246, 0.15)",
+    "success": "#34d399",
+    "success_soft": "rgba(52, 211, 153, 0.15)",
+    "warning": "#fbbf24",
+    "warning_soft": "rgba(251, 191, 36, 0.15)",
+    "danger": "#f87171",
+    "danger_soft": "rgba(248, 113, 113, 0.15)",
+    "review": "#fb923c",
+    "review_soft": "rgba(251, 146, 60, 0.15)",
+    "info": "#38bdf8",
+    "info_soft": "rgba(56, 189, 248, 0.15)",
+    "selection": "#3b82f6",
+    "safe": "#34d399",
+}
+
 PALETTES = {
     "amber-crt": AMBER_CRT,
     "analog-horror": ANALOG_HORROR,
@@ -1292,6 +1321,7 @@ PALETTES = {
     "vaporwave": VAPORWAVE,
     "vault": VAULT,
     "windows-95": WINDOWS_95,
+    "custom": CUSTOM,
 }
 
 THEME_LABELS = {
@@ -1338,6 +1368,7 @@ THEME_LABELS = {
     "vaporwave": "Vaporwave '90s",
     "vault": "Vault 1950s",
     "windows-95": "Retro OS",
+    "custom": "Custom Theme",
 }
 
 THEME_CATEGORIES = {
@@ -1347,9 +1378,11 @@ THEME_CATEGORIES = {
     "cyber": "Cyber & Synth",
     "code": "Code Palettes",
     "nature": "Warm & Nature",
+    "custom": "Custom",
 }
 
 THEME_CATEGORY_MAP = {
+    "custom": "custom",
     "dark": "modern-dark",
     "adwaita-dark": "modern-dark",
     "oled": "modern-dark",
@@ -1396,6 +1429,7 @@ THEME_CATEGORY_MAP = {
 }
 
 THEME_DESCRIPTIONS = {
+    "custom": "Personalized theme generated from your chosen primary color",
     "dark": "Default dark sleek styling with blue accents",
     "oled": "Pitch-black dark mode optimized for OLED screens",
     "slate": "Cool slate gray with soft balanced tones",
@@ -1900,10 +1934,59 @@ def apply_theme(app: QApplication, theme: str) -> None:
     app.setPalette(pal)
 
 
+_custom_palette_cache: dict = {}
+
+
+def get_custom_theme_palette(custom_config: dict | None = None) -> dict:
+    """Generate and cache the custom palette based on settings or provided config."""
+    global _custom_palette_cache
+    if custom_config is None:
+        try:
+            from crapcleaner.config import load_settings
+
+            settings = load_settings()
+            custom_config = settings.get("custom_theme", {})
+        except Exception:
+            custom_config = {}
+
+    primary = custom_config.get("primary_color", "#3b82f6")
+    mode = custom_config.get("mode", "dark")
+    mood = custom_config.get("mood", "cohesive")
+    s_contrast = custom_config.get("surface_contrast", 1.0)
+    a_intensity = custom_config.get("accent_intensity", 1.0)
+    bg_dark = custom_config.get("bg_darkness", 1.0)
+
+    cache_key = (primary, mode, mood, float(s_contrast), float(a_intensity), float(bg_dark))
+    if _custom_palette_cache.get("key") == cache_key and "palette" in _custom_palette_cache:
+        return _custom_palette_cache["palette"]
+
+    from crapcleaner.gui.color_engine import generate_custom_palette
+
+    pal = generate_custom_palette(
+        primary_color=primary,
+        mode=mode,
+        surface_contrast=s_contrast,
+        accent_intensity=a_intensity,
+        bg_darkness=bg_dark,
+        mood=mood,
+    )
+    _custom_palette_cache["key"] = cache_key
+    _custom_palette_cache["palette"] = pal
+    return pal
+
+
+def invalidate_custom_theme_cache() -> None:
+    """Clear the cached custom palette so the next lookup regenerates it."""
+    global _custom_palette_cache
+    _custom_palette_cache.clear()
+
+
 THEMES = tuple(PALETTES)
 
 
 def palette_for(theme: str) -> dict:
+    if theme == "custom":
+        return get_custom_theme_palette()
     return PALETTES.get(theme, DARK)
 
 

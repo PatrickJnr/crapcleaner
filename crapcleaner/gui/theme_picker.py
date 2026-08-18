@@ -112,6 +112,7 @@ class ThemeCard(QFrame):
         header.setSpacing(6)
 
         self.title_label = QLabel(self._display_name)
+        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
         title_font = self.title_label.font()
         title_font.setBold(True)
         title_font.setPointSize(10)
@@ -119,6 +120,7 @@ class ThemeCard(QFrame):
         header.addWidget(self.title_label, 1)
 
         self.badge_label = QLabel(self._category)
+        self.badge_label.setTextFormat(Qt.TextFormat.PlainText)
         self.badge_label.setProperty("badge", "true")
         self.badge_label.setStyleSheet(
             "font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px;"
@@ -137,6 +139,7 @@ class ThemeCard(QFrame):
 
         # Description
         self.desc_label = QLabel(self._description)
+        self.desc_label.setTextFormat(Qt.TextFormat.PlainText)
         self.desc_label.setStyleSheet("font-size: 11px; color: #8c8c8c;")
         self.desc_label.setWordWrap(False)
         layout.addWidget(self.desc_label)
@@ -144,6 +147,20 @@ class ThemeCard(QFrame):
         # Swatch bar
         self.swatch_bar = SwatchBar(self._swatches, self)
         layout.addWidget(self.swatch_bar)
+
+    def refresh_theme_data(self) -> None:
+        """Refresh dynamic palette, labels, and swatches (e.g. for custom themes)."""
+        self._palette = palette_for(self.theme_id)
+        self._display_name = theme_label(self.theme_id)
+        self._category = get_theme_category_label(self.theme_id)
+        self._description = get_theme_description(self.theme_id)
+        self._is_dark = is_dark_theme(self.theme_id)
+        self._swatches = get_theme_swatches(self.theme_id)
+        self.title_label.setText(self._display_name)
+        self.badge_label.setText(self._category)
+        self.desc_label.setText(self._description)
+        self.swatch_bar.set_colors(self._swatches)
+        self._update_appearance()
 
     def set_active(self, active: bool) -> None:
         if self._is_active != active:
@@ -212,6 +229,7 @@ class ThemeGalleryWidget(QWidget):
     """
 
     theme_changed = Signal(str)
+    open_studio_requested = Signal()
 
     def __init__(self, current_theme: str = "dark", parent: QWidget | None = None):
         super().__init__(parent)
@@ -252,8 +270,10 @@ class ThemeGalleryWidget(QWidget):
         hero_label_tag = QLabel("Active Theme:")
         hero_label_tag.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
         self.hero_name_label = QLabel(theme_label(self._current_theme))
+        self.hero_name_label.setTextFormat(Qt.TextFormat.PlainText)
         self.hero_name_label.setStyleSheet("font-size: 15px; font-weight: 800;")
         self.hero_cat_badge = QLabel(get_theme_category_label(self._current_theme))
+        self.hero_cat_badge.setTextFormat(Qt.TextFormat.PlainText)
         self.hero_cat_badge.setStyleSheet(
             "font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 9px; "
             "background-color: rgba(59, 130, 246, 0.2); color: #60a5fa;"
@@ -265,6 +285,7 @@ class ThemeGalleryWidget(QWidget):
         hero_left.addLayout(hero_title_row)
 
         self.hero_desc_label = QLabel(get_theme_description(self._current_theme))
+        self.hero_desc_label.setTextFormat(Qt.TextFormat.PlainText)
         self.hero_desc_label.setStyleSheet("font-size: 11px; color: #999999;")
         hero_left.addWidget(self.hero_desc_label)
 
@@ -276,6 +297,13 @@ class ThemeGalleryWidget(QWidget):
         # Quick action buttons
         actions_layout = QHBoxLayout()
         actions_layout.setSpacing(6)
+
+        self.studio_btn = QPushButton("Custom Studio")
+        self.studio_btn.setIcon(material_icon("auto_awesome", "#ffffff"))
+        self.studio_btn.setIconSize(QSize(16, 16))
+        self.studio_btn.setToolTip("Open Custom Theme Studio to design your own palette")
+        self.studio_btn.clicked.connect(self.open_studio_requested.emit)
+        actions_layout.addWidget(self.studio_btn)
 
         self.random_btn = QPushButton("Surprise Me")
         self.random_btn.setIcon(material_icon("casino", "#ffffff"))
@@ -347,6 +375,7 @@ class ThemeGalleryWidget(QWidget):
 
         # 4. Filter Status Label
         self.filter_status_label = QLabel(f"Showing all {len(THEMES)} themes:")
+        self.filter_status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.filter_status_label.setStyleSheet(
             "font-size: 11px; font-weight: 600; color: #888888; padding-top: 2px;"
         )
@@ -476,6 +505,8 @@ class ThemeGalleryWidget(QWidget):
 
         # Update cards
         for t_id, card in self._cards.items():
+            if t_id == "custom":
+                card.refresh_theme_data()
             card.set_active(t_id == theme_id)
 
         # Update Hero Banner

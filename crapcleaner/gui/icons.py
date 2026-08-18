@@ -91,6 +91,8 @@ _MATERIAL_NAMES = {
     "play_arrow": "play_arrow",
     "stop": "stop",
     "stop_circle": "stop_circle",
+    "dark_mode": "brightness_2",
+    "light_mode": "brightness_7",
 }
 
 _logger = logging.getLogger(__name__)

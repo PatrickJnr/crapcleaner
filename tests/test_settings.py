@@ -63,17 +63,21 @@ def test_settings_view_tab_navigation_and_controls(app):
     fake_main = FakeMain()
     view = SettingsView(fake_main)
 
-    assert view.tab_stack.count() == 6
+    assert view.tab_stack.count() == 7
     assert view.tab_stack.currentIndex() == 0
 
     # Test tab switching
-    view._set_active_tab("safety", 1)
+    view._set_active_tab("custom_studio", 1)
     assert view.tab_stack.currentIndex() == 1
-    assert view._section_buttons["safety"].property("active") == "true"
+    assert view._section_buttons["custom_studio"].property("active") == "true"
     assert view._section_buttons["themes"].property("active") == "false"
 
-    view._set_active_tab("rules", 4)
-    assert view.tab_stack.currentIndex() == 4
+    view._set_active_tab("safety", 2)
+    assert view.tab_stack.currentIndex() == 2
+    assert view._section_buttons["safety"].property("active") == "true"
+
+    view._set_active_tab("rules", 5)
+    assert view.tab_stack.currentIndex() == 5
 
     # Test category batch selection
     view._disable_all_categories()

@@ -5,6 +5,42 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10] - 2026-08-18
+
+Custom Theme Studio release: perceptual color theory engine, 6 harmony mood styles, 15 designer presets, magic dice generator, JSON theme import/export, and dedicated Settings sub-navigation tabs.
+
+### Added
+- **Custom Theme Studio**: introduces a dedicated workspace inside Settings enabling users to design, fine-tune, and apply personalized themes without manual configuration of dozens of individual hex codes.
+- **Perceptual Color Theory Engine (`color_engine.py`)**:
+  - Implements hue-dependent brightness bias compensation (`hue_lightness_bias`) and perceptual lightness tuning, ensuring high-luminance hues (amber, yellow, lime) avoid blinding glare while deep blues and violets maintain rich vibrancy.
+  - Enforces strict WCAG 2.1 AA/AAA contrast guidelines (minimum 7:1 text contrast and 4.5:1 UI contrast) with automated lightness correction (`ensure_contrast`).
+  - Generates complete 27-token palettes mapping chosen signature colors across stratified background levels (`window`, `panel`, `surface`, `surface2`, `elevated`, `border`, `border2`), semantic states (`success`, `warning`, `danger`, `review`, `info`, `selection`), and typography.
+- **6 Palette Harmony Mood Styles**:
+  - `Cohesive` (default balanced surface tinting with 14% primary saturation)
+  - `Vibrant` (high-energy saturated surfaces and neon accents)
+  - `Muted` (subdued slate undertones for low-profile visual focus)
+  - `OLED Pure` (true `#000000` deep black canvas with stratified dark panels and glowing accent highlights)
+  - `Pastel` (soft, airy low-saturation tones)
+  - `Minimal` (clean monochromatic neutral greys with single accent focus)
+- **15 Curated Designer Color Presets**: one-click curated palettes (*Sapphire Blue*, *Emerald Forest*, *Cyber Violet*, *Sunset Amber*, *Crimson Velvet*, *Rose Gold*, *Hyper Cyan*, *Deep Slate*, *Mint Sage*, *Solar Orange*, *Royal Indigo*, *Cherry Blossom*, *Arctic Frost*, *Matrix Lime*, *Espresso Gold*).
+- **Color Harmonies & Magic Dice Generator**:
+  - `generate_color_harmonies` computing Analogous ($H \pm 30^\circ$), Complementary ($H + 180^\circ$), Triadic ($H \pm 120^\circ$), and Split-Complementary variations.
+  - "Surprise Me (Magic Dice)" rolling harmonious, randomized palettes across curated hues and mood formulas on demand.
+- **Theme JSON Export & Import**:
+  - Serialization and parsing tools (`export_custom_theme_json`, `import_custom_theme_json`) with clipboard copy and modal import dialog for sharing themes.
+- **Interactive Multi-View Live Preview**:
+  - Live preview card featuring switchable views: Mockup Overview, Clean-up Queue Table, and 27-Token Palette Matrix with live contrast ratio badge meter (`AAA`, `AA`, `LOW`).
+- **Dedicated Sub-Navigation Tabs in Settings**:
+  - Clean separation into `Theme Gallery` and `Custom Theme Studio`, providing full viewport height for both browsing 40+ built-in themes and designing custom themes.
+  - Added "Custom Studio" shortcut button on the active theme hero banner.
+
+### Fixed
+- **Table Column Sorting Recursion Error**: resolved `RecursionError` in PySide6 `NumericItem` during table column sorting by isolating numerical sort values to `Qt.ItemDataRole.UserRole + 99` and handling string fallbacks safely.
+- **Mnemonic Accelerator Underscore Artifacts**: escaped ampersands in button labels (`Apply && Save Custom Theme`) and enforced `Qt.TextFormat.PlainText` on labels to prevent unwanted mnemonic accelerator parsing.
+- **Live Theme Application on Color Pick**: instant real-time visual application across the entire application upon selecting a color or changing tuning sliders.
+
+---
+
 ## [1.0.9.1] - 2026-08-18
 
 Source installation fix for Python 3.10 and 3.11.

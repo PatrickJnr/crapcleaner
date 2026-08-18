@@ -195,9 +195,16 @@ Because system-wide XDG autostart entries live in root-owned `/etc/xdg/autostart
 - Live search, per-manager filtering, and upgrades run one package at a time, across a multi-row selection, or across an entire manager. A queued selection continues past any package that fails.
 - Installers are allowed 30 minutes for a single package and 2 hours for a whole-manager upgrade, because a half-installed package is worse than a slow one.
 
-### 16. Visual Theme Gallery & Themes (43 Palettes)
-- **43 built-in curated themes** across 6 distinct categories: *Modern Dark* (Dark, Adwaita Dark, OLED Black, Midnight Blue, Slate, Graphite, High Contrast), *Light & Pastel* (Light, Adwaita Light, Arctic Light, Bubblegum Pop, Parchment), *Retro & Vintage* (Windows 95, Commodore 64, Game Boy, Amber CRT, Matrix Terminal, Vault 1950s, Analog VHS, Pulp '70s), *Cyber & Synth* (Cyberpunk Neon, Synthwave Outrun, Vaporwave '90s, Solar Eclipse), *Code Palettes* (Dracula, Monokai Pro, Tokyo Night, Nord, Gruvbox, One Dark Pro, Catppuccin Mocha, Solarized Dark), and *Warm & Nature* (Forest, Matcha Tea, Sunset Orange, Desert Dune, Espresso Roast, Coffee, Sakura Blossom, Lavender Dream, Crimson Velvet, Ocean Deep, Facility Orange).
-- **Interactive Theme Gallery**: Real-time 5-color swatch bars, active hero card, search filtering, dynamic category count chips, "Surprise Me" randomizer, and default reset.
+### 16. Custom Theme Studio & Built-in Themes Gallery (43+ Palettes)
+- **Dedicated Custom Theme Studio**: A creative workspace inside Preferences for designing, fine-tuning, and instantly applying custom themes without manual configuration of dozens of hex codes.
+  - **Perceptual Color Theory Engine (`color_engine.py`)**: Features hue-dependent brightness bias compensation (`hue_lightness_bias`) and perceptual lightness tuning, ensuring high-luminance hues (amber, yellow, lime) avoid blinding glare while deep blues and violets maintain rich vibrancy.
+  - **6 Palette Harmony Mood Styles**: Choose between *Cohesive* (balanced surface tinting with 14% saturation), *Vibrant* (high-energy saturated surfaces and neon accents), *Muted* (subdued slate undertones), *OLED Pure* (true `#000000` deep black canvas), *Pastel* (soft, airy gentle tones), and *Minimal* (clean monochromatic neutral greys with single accent focus).
+  - **15 Curated Designer Presets**: Instant one-click palettes (*Sapphire Blue, Emerald Forest, Cyber Violet, Sunset Amber, Crimson Velvet, Rose Gold, Hyper Cyan, Deep Slate, Mint Sage, Solar Orange, Royal Indigo, Cherry Blossom, Arctic Frost, Matrix Lime, Espresso Gold*).
+  - **Multi-View Interactive Live Preview**: Switch between Overview Mockup, Clean-up Candidate Table, and 27-Token Palette Matrix with a real-time WCAG 2.1 contrast ratio rating meter (`AAA`, `AA`, `LOW`).
+  - **Harmonies, Magic Dice & JSON Sharing**: Automatic generation of Analogous, Complementary, Triadic, and Split-Complementary palettes, a "Surprise Me (Magic Dice)" one-click randomizer, and seamless theme JSON export/import.
+  - **Real-Time Live Application**: Color picker choices, hex typing, slider tweaks, and mood switches update the live app instantly.
+- **43 Built-in Curated Themes** across 6 distinct categories: *Modern Dark* (Dark, Adwaita Dark, OLED Black, Midnight Blue, Slate, Graphite, High Contrast), *Light & Pastel* (Light, Adwaita Light, Arctic Light, Bubblegum Pop, Parchment), *Retro & Vintage* (Windows 95, Commodore 64, Game Boy, Amber CRT, Matrix Terminal, Vault 1950s, Analog VHS, Pulp '70s), *Cyber & Synth* (Cyberpunk Neon, Synthwave Outrun, Vaporwave '90s, Solar Eclipse), *Code Palettes* (Dracula, Monokai Pro, Tokyo Night, Nord, Gruvbox, One Dark Pro, Catppuccin Mocha, Solarized Dark), and *Warm & Nature* (Forest, Matcha Tea, Sunset Orange, Desert Dune, Espresso Roast, Coffee, Sakura Blossom, Lavender Dream, Crimson Velvet, Ocean Deep, Facility Orange).
+- **Interactive Theme Gallery**: Real-time 5-color swatch bars, active hero card with direct "Custom Studio" shortcut, search filtering, dynamic category count chips, "Surprise Me" randomizer, and default reset.
 - **OLED Black** uses true black (`#000000`) backgrounds with near-black panels so OLED panels can switch pixels off, while keeping text, borders, and disabled states readable.
 - Themes apply instantly and cross-fade smoothly; a *Reduce motion* preference disables the transition.
 - Pure Google Material Icons integrated with dynamic theme color adaptation (zero unicode emojis).
@@ -209,8 +216,8 @@ Because system-wide XDG autostart entries live in root-owned `/etc/xdg/autostart
 - Deletions fall back to a FreeDesktop-compliant `~/.local/share/Trash` implementation when `gio` and `trash-put` are unavailable, so choosing the Recycle Bin never silently means permanent deletion.
 
 ### 18. Preferences & Configuration
-- Segmented sub-tabbed settings view for *Appearance & Themes*, *Safety & Protection*, *Exclusions & Roots*, *Scan Performance*, *Category Rules*, and *Backup & Sync*.
-- Preferences, theme, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
+- Segmented sub-tabbed settings view for *Theme Gallery*, *Custom Theme Studio*, *Safety & Protection*, *Exclusions & Roots*, *Scan Performance*, *Category Rules*, and *Backup & Sync*.
+- Preferences, custom theme configuration, window geometry, cleanup category selections, exclusions, and scan options are stored locally in `config.json` under the platform config directory.
 - The config file is versioned, so future releases can migrate older files; unknown, malformed, or wrongly typed entries fall back to defaults instead of preventing startup.
 - Full JSON export, import, and factory reset support for settings migration.
 

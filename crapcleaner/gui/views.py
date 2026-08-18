@@ -65,6 +65,7 @@ from PySide6.QtWidgets import (
 
 from crapcleaner.config import config_path, load_settings, save_settings, update_settings
 from crapcleaner.constants import DEFAULT_CONFIG
+from crapcleaner.gui.custom_theme_builder import CustomThemeBuilderWidget
 from crapcleaner.gui.dialogs import (
     ConfirmDeleteDialog,
     DuplicateFilesDialog,
@@ -155,10 +156,12 @@ def page_header(title: str, subtitle: str = "") -> QWidget:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(2)
     title_label = QLabel(title)
+    title_label.setTextFormat(Qt.TextFormat.PlainText)
     title_label.setProperty("pageTitle", "true")
     layout.addWidget(title_label)
     if subtitle:
         sub = QLabel(subtitle)
+        sub.setTextFormat(Qt.TextFormat.PlainText)
         sub.setProperty("pageSubtitle", "true")
         sub.setWordWrap(True)
         layout.addWidget(sub)
@@ -168,6 +171,7 @@ def page_header(title: str, subtitle: str = "") -> QWidget:
 def badge(text: str, level: str = "") -> QLabel:
     """Small pill label used for status and safety markers."""
     label = QLabel(text)
+    label.setTextFormat(Qt.TextFormat.PlainText)
     label.setProperty("badge", "true")
     if level:
         label.setProperty("level", level)
@@ -177,6 +181,7 @@ def badge(text: str, level: str = "") -> QLabel:
 def section_label(text: str) -> QLabel:
     """Uppercase section heading used inside cards."""
     label = QLabel(text)
+    label.setTextFormat(Qt.TextFormat.PlainText)
     label.setProperty("section", "true")
     return label
 
@@ -192,12 +197,15 @@ def stat_card(
     lay.setSpacing(5)
 
     t_lbl = QLabel(title)
+    t_lbl.setTextFormat(Qt.TextFormat.PlainText)
     t_lbl.setProperty("section", "true")
 
     v_lbl = QLabel(value)
+    v_lbl.setTextFormat(Qt.TextFormat.PlainText)
     v_lbl.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {_c(theme, 'text')};")
 
     s_lbl = QLabel(subtitle)
+    s_lbl.setTextFormat(Qt.TextFormat.PlainText)
     s_lbl.setProperty("subtle", "true")
     s_lbl.setStyleSheet(f"font-size: 11px; color: {_c(theme, 'muted')};")
 
@@ -251,21 +259,44 @@ class SkeletonBlock(QFrame):
 
 
 class NumericItem(QTableWidgetItem):
-    """Table item that sorts by a numeric value stored in UserRole."""
+    """Table item that sorts by a numeric value stored in a dedicated sort role."""
+
+    _SORT_ROLE = Qt.ItemDataRole.UserRole + 99
 
     def __init__(self, text: str = "", value=None):
         super().__init__(text)
         if value is not None:
-            self.setData(Qt.ItemDataRole.UserRole, value)
+            self.setData(self._SORT_ROLE, value)
+
+    def set_sort_value(self, value):
+        self.setData(self._SORT_ROLE, value)
 
     def __lt__(self, other):
-        a = self.data(Qt.ItemDataRole.UserRole)
-        b = other.data(Qt.ItemDataRole.UserRole)
-        if a is not None and b is not None and a != b:
-            return a < b
-        # No super().__lt__() here: PySide re-dispatches it back into this
-        # override, which recurses until RecursionError.
-        return self.text().lower() < other.text().lower()
+        if not isinstance(other, QTableWidgetItem):
+            return False
+
+        a = self.data(self._SORT_ROLE)
+        if a is None:
+            a = self.data(Qt.ItemDataRole.UserRole)
+
+        b = other.data(self._SORT_ROLE)
+        if b is None:
+            b = other.data(Qt.ItemDataRole.UserRole)
+
+        if a is not None and b is not None:
+            if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                if a != b:
+                    return a < b
+            elif type(a) is type(b):
+                try:
+                    if a != b:
+                        return a < b
+                except TypeError:
+                    pass
+
+        self_txt = self.text() or ""
+        other_txt = other.text() or ""
+        return self_txt.casefold() < other_txt.casefold()
 
 
 class CrapTable(QTableWidget):
@@ -3088,7 +3119,8 @@ class SettingsView(QWidget):
         nav_row.setSpacing(6)
 
         self._sections = [
-            ("themes", "Appearance & Themes", "palette"),
+            ("themes", "Theme Gallery", "palette"),
+            ("custom_studio", "Custom Theme Studio", "auto_awesome"),
             ("safety", "Safety & Protection", "security"),
             ("exclusions", "Exclusions & Roots", "folder"),
             ("performance", "Scan Performance", "speed"),
@@ -3113,24 +3145,33 @@ class SettingsView(QWidget):
         # 3. Stack of Tab Pages
         self.tab_stack = QStackedWidget()
 
-        # --- PAGE 0: Appearance & Themes ---
-        page_themes = QWidget()
-        lay_themes = QVBoxLayout(page_themes)
-        lay_themes.setContentsMargins(0, 4, 0, 0)
-        lay_themes.setSpacing(10)
+        # --- PAGE 0: Theme Gallery ---
+        page_themes_scroll = QScrollArea()
+        page_themes_scroll.setWidgetResizable(True)
+        page_themes_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        page_themes_container = QWidget()
+        lay_themes = QVBoxLayout(page_themes_container)
+        lay_themes.setContentsMargins(0, 4, 8, 4)
+        lay_themes.setSpacing(14)
 
+        # 1. Visual Theme Gallery
         current_theme = self.settings.get("theme", "dark")
-        self.theme_gallery = ThemeGalleryWidget(current_theme, page_themes)
+        self.theme_gallery = ThemeGalleryWidget(current_theme, page_themes_container)
         self.theme_combo = self.theme_gallery.theme_combo
         self.theme_gallery.theme_changed.connect(self._on_theme_changed)
-        lay_themes.addWidget(self.theme_gallery, 1)
+        self.theme_gallery.open_studio_requested.connect(
+            lambda: self._set_active_tab("custom_studio", 1)
+        )
+        lay_themes.addWidget(self.theme_gallery)
 
+        # 2. Motion & Transitions
         motion_card = QFrame()
         motion_card.setProperty("card", "true")
         motion_lay = QVBoxLayout(motion_card)
         motion_lay.setContentsMargins(14, 10, 14, 10)
         motion_lay.setSpacing(4)
         motion_title = QLabel("Motion & Visual Transitions")
+        motion_title.setTextFormat(Qt.TextFormat.PlainText)
         motion_title.setProperty("strong", "true")
         motion_lay.addWidget(motion_title)
         self.reduce_motion_check = QCheckBox("Reduce motion (skip the theme cross-fade)")
@@ -3139,7 +3180,25 @@ class SettingsView(QWidget):
         motion_lay.addWidget(self.reduce_motion_check)
         lay_themes.addWidget(motion_card)
 
-        self.tab_stack.addWidget(page_themes)
+        page_themes_scroll.setWidget(page_themes_container)
+        self.tab_stack.addWidget(page_themes_scroll)
+
+        # --- PAGE 1: Custom Theme Studio ---
+        page_studio_scroll = QScrollArea()
+        page_studio_scroll.setWidgetResizable(True)
+        page_studio_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        page_studio_container = QWidget()
+        lay_studio = QVBoxLayout(page_studio_container)
+        lay_studio.setContentsMargins(0, 4, 8, 4)
+        lay_studio.setSpacing(14)
+
+        self.custom_builder = CustomThemeBuilderWidget(page_studio_container)
+        self.custom_builder.theme_applied.connect(self._on_custom_theme_applied)
+        lay_studio.addWidget(self.custom_builder)
+        lay_studio.addStretch(1)
+
+        page_studio_scroll.setWidget(page_studio_container)
+        self.tab_stack.addWidget(page_studio_scroll)
 
         # --- PAGE 1: Safety & Protection ---
         page_safety = QWidget()
@@ -3458,11 +3517,19 @@ class SettingsView(QWidget):
 
     def _set_active_tab(self, key: str, index: int):
         self.tab_stack.setCurrentIndex(index)
+        theme = getattr(self, "_theme", "dark")
+        accent_col = theme_color(theme, "accent")
+        muted_col = theme_color(theme, "muted")
         for k, btn in self._section_buttons.items():
             is_active = k == key
             btn.setProperty("active", "true" if is_active else "false")
             btn.style().unpolish(btn)
             btn.style().polish(btn)
+        for idx, (k, _, icon_name) in enumerate(self._sections):
+            if k in self._section_buttons:
+                btn = self._section_buttons[k]
+                icon_col = accent_col if idx == index else muted_col
+                btn.setIcon(material_icon(icon_name, icon_col))
 
     def _enable_all_categories(self):
         for i in range(self.cat_list.count()):
@@ -3528,6 +3595,20 @@ class SettingsView(QWidget):
                 self.theme_gallery.select_theme(theme, emit_signal=False)
             else:
                 self.theme_combo.setCurrentIndex(THEMES.index(theme))
+
+    def _on_custom_theme_applied(self, custom_cfg: dict):
+        """Apply and persist custom theme configuration."""
+        from crapcleaner.gui.theme import invalidate_custom_theme_cache
+
+        invalidate_custom_theme_cache()
+        self.settings["theme"] = "custom"
+        self.settings["custom_theme"] = custom_cfg
+        save_settings({"theme": "custom", "custom_theme": custom_cfg})
+        if hasattr(self, "theme_gallery"):
+            self.theme_gallery.select_theme("custom", emit_signal=False)
+        switch = getattr(self._main, "switch_theme", None)
+        if switch is not None:
+            switch("custom")
 
     def _on_theme_changed(self, theme: str):
         """Apply theme selected from the visual theme gallery."""
