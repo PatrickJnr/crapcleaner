@@ -5,6 +5,22 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9.1] - 2026-08-18
+
+Source installation fix for Python 3.10 and 3.11.
+
+### Fixed
+- **Import Failure On Python 3.10 And 3.11**: computes the installer account name outside the f-string in `crapcleaner.system.backends.updates_windows`. A backslash inside an f-string expression is a syntax error before Python 3.12, so that module could not be imported on the older interpreters this project supports, and the System Updates page raised on Windows before it could report anything. The published 1.0.9 executables bundle their own Python 3.12 and are unaffected; this reaches installations made from source with `pip`, `uv`, or a checkout.
+- **Linter Coverage Of The Update Backend**: `ruff` stops at the first syntax error in a file, so the rest of `updates_windows.py` had never been checked. It is linted and formatted with the rest of the codebase now.
+
+### Changed
+- **File-Type Analysis Wording**: corrects the 1.0.9 note about where file sizes come from. On Windows the directory listing carries the size and reading it from the entry costs nothing; on Linux the entry still needs a stat, though one relative to the open directory rather than a fresh resolution of the whole path. The improvement is real on both, and largest on Windows.
+
+### Internal
+- **Cross-Platform Test Corrections**: three tests asserted Windows-specific behaviour and failed on the Linux side of the CI matrix. The services badge now takes its noun from the view rather than hard-coding *services*, since the page correctly reads *units* under systemd; the XDG autostart fixture redirects the system directory as well as the user one, so a listing no longer includes whatever the host distribution installed; and the file-type analysis test asserts that stat calls do not scale with file count rather than requiring an exact count, which differs between platforms.
+
+---
+
 ## [1.0.9] - 2026-08-17
 
 Platform-aware architecture release: Startup, Services, and System Updates managers that adapt to Windows or Linux, plus cross-platform App Updates.
