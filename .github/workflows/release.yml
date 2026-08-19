@@ -19,14 +19,14 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install Linux System Dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends             libegl1 libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0             libxcb-xfixes0 libfontconfig1 libdbus-1-3 libxcb-glx0 libxcb-shm0 libxcb-sync1             libxcb-xinput0 libx11-xcb1 libglib2.0-0
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -44,9 +44,9 @@ jobs:
     needs: verify
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -63,7 +63,7 @@ jobs:
           Get-FileHash CrapCleaner.exe -Algorithm SHA256 | Format-List > checksum-windows.txt
           Get-Content checksum-windows.txt
       - name: Upload Binary Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: CrapCleaner-Windows-x64
           path: |
@@ -80,7 +80,7 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install Linux System Dependencies
         run: |
           sudo apt-get update -qq -o Acquire::Retries=3 -o Acquire::http::Timeout="20"
@@ -90,7 +90,7 @@ jobs:
             libxcb-xfixes0 libfontconfig1 libdbus-1-3 libxcb-glx0 libxcb-shm0 libxcb-sync1 \
             libxcb-xinput0 libx11-xcb1 libglib2.0-0
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -110,7 +110,7 @@ jobs:
           sha256sum crapcleaner-linux-x86_64.tar.gz >> checksum-linux.txt
           cat checksum-linux.txt
       - name: Upload Binary Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: CrapCleaner-Linux-x64
           path: |
@@ -125,14 +125,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Download Windows Artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: CrapCleaner-Windows-x64
           path: release-dist/windows
       - name: Download Linux Artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: CrapCleaner-Linux-x64
           path: release-dist/linux
@@ -164,7 +164,7 @@ jobs:
           echo "title=$TITLE" >> $GITHUB_OUTPUT
           cat release_notes.md
       - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag_info.outputs.tag }}
           name: ${{ steps.release_meta.outputs.title }}

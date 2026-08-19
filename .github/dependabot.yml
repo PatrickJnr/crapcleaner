@@ -14,6 +14,10 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Requirements are ranges, not pins. Only raise a floor when the existing range
+    # cannot accept the new release; security advisories are reported separately and
+    # are unaffected by this.
+    versioning-strategy: increase-if-necessary
     commit-message:
       prefix: build
     groups:
