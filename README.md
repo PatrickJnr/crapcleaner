@@ -2,12 +2,22 @@
 
 A fast, transparent cleanup and disk analysis utility built for power users, developers, and gamers, with Windows and Linux support from a single codebase.
 
+[![Latest release](https://img.shields.io/github/v/release/PatrickJnr/crapcleaner?color=3b82f6)](https://github.com/PatrickJnr/crapcleaner/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/PatrickJnr/crapcleaner/total?color=10b981)](https://github.com/PatrickJnr/crapcleaner/releases)
 [![CI](https://github.com/PatrickJnr/crapcleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/PatrickJnr/crapcleaner/actions/workflows/ci.yml)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3b82f6.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue.svg)](#)
 [![Lint & Format: Ruff](https://img.shields.io/badge/lint%20%26%20format-ruff-7f52ff.svg)](https://github.com/astral-sh/ruff)
 [![Package Manager: uv](https://img.shields.io/badge/package%20manager-uv-de5fe9.svg)](https://github.com/astral-sh/uv)
+
+### Download
+
+**[Windows (.exe)](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner.exe)**  ·  **[Linux (x86_64)](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/crapcleaner-linux-x86_64)**  ·  [All releases and checksums](https://github.com/PatrickJnr/crapcleaner/releases/latest)
+
+Portable single files. Nothing to install, no account, no background service, and
+nothing is sent anywhere. Every cleanup is previewed first and defaults to the
+Recycle Bin, so a mistake is recoverable.
 
 ---
 
@@ -235,8 +245,11 @@ Because system-wide XDG autostart entries live in root-owned `/etc/xdg/autostart
 
 Download the latest standalone executable from the [GitHub Releases](https://github.com/PatrickJnr/crapcleaner/releases/latest) page:
 
-- **Windows (64-bit)**: `CrapCleaner.exe` (portable binary, no Python or installation required).
-- **Linux (64-bit)**: `crapcleaner` (ELF executable, compatible with Ubuntu, Fedora, Arch, Debian).
+- **Windows (64-bit)**: [`CrapCleaner.exe`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner.exe) - portable binary, no Python or installation required.
+- **Linux (64-bit)**: [`crapcleaner-linux-x86_64`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/crapcleaner-linux-x86_64) - ELF executable built against glibc 2.35 (Ubuntu 22.04), so it also runs on newer Debian, Fedora, and Arch installs. Mark it executable with `chmod +x` after downloading.
+
+Every release ships a `checksums.txt` with SHA-256 sums for all binaries. The Windows
+build is not code-signed, so SmartScreen will warn on first run.
 
 ### Option 2: Run via Astral uv / pip
 
