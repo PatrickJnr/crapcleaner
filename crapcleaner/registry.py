@@ -12,6 +12,7 @@ from crapcleaner.categories.gaming import get_categories as gaming_categories
 from crapcleaner.categories.gpu import get_categories as gpu_categories
 from crapcleaner.categories.node import get_categories as node_categories
 from crapcleaner.categories.python import get_categories as python_categories
+from crapcleaner.categories.trash import get_categories as trash_categories
 from crapcleaner.categories.windows import get_categories as windows_categories
 from crapcleaner.models.category import CleanupCategory
 
@@ -26,6 +27,7 @@ SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = [
     ("Gaming", gaming_categories),
     ("AI", ai_categories),
     ("Docker", docker_categories),
+    ("System", trash_categories),
 ]
 
 

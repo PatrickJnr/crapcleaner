@@ -10,11 +10,6 @@ from crapcleaner.utils.platform import (
     is_windows,
 )
 
-#: Categories in this module that are meaningful off Windows too. Emptying the
-#: trash works on both platforms through the same action; everything else here
-#: targets a Windows-only path and must not appear on Linux.
-_CROSS_PLATFORM_IDS = frozenset({"recycle_bin"})
-
 
 def get_categories() -> list[CleanupCategory]:
     local = get_local_appdata()
@@ -359,24 +354,7 @@ def get_categories() -> list[CleanupCategory]:
             )
         )
 
-    categories.append(
-        CleanupCategory(
-            id="recycle_bin",
-            name="Recycle Bin",
-            group="Windows",
-            description="Empties the Recycle Bin using the official Windows API. Permanently deletes its contents - requires explicit confirmation.",
-            safety_level=SafetyLevel.REVIEW,
-            action="empty_recycle_bin",
-            what_it_contains="Items previously sent to the Windows Recycle Bin across all drives.",
-            why_it_grows="Deleted files remain stored in the Recycle Bin until explicitly emptied.",
-            why_safe_to_delete="Permanently removes files you previously chose to delete.",
-            regeneration_behavior="Empty until more items are deleted to the Recycle Bin.",
-            reversible=False,
-            targets=[],
-        )
-    )
-
     if not is_windows():
-        return [c for c in categories if c.id in _CROSS_PLATFORM_IDS]
+        return []
 
     return categories

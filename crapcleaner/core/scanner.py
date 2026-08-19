@@ -221,14 +221,19 @@ class ScanEngine:
             for index, category in enumerate(self.categories):
                 if self._stop_event.is_set():
                     break
-                if progress_cb is not None:
-                    progress_cb(category.name, f"{index + 1}/{total_categories}", 0)
                 futures.append(pool.submit(scan_one, index, category))
 
             # Collect in submission order so results/progress stay deterministic.
+            # Progress is reported here rather than at submission time: every
+            # category is queued within milliseconds, so a submit-time report
+            # names whichever category was queued last while a different one is
+            # still running - which is how a multi-minute directory walk ends up
+            # displayed under the name of the fast category ahead of it.
             for index, future in enumerate(futures):
-                outcome = future.result()
                 category = self.categories[index]
+                if progress_cb is not None:
+                    progress_cb(category.name, f"{index + 1}/{total_categories}", 0)
+                outcome = future.result()
                 if progress_cb is not None:
                     progress_cb(category.name, f"{index + 1}/{total_categories}", 1)
                 if outcome is None:

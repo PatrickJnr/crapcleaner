@@ -54,6 +54,25 @@ def test_linux_app_categories(mock_win, mock_linux):
     assert "spotify_cache" in ids
 
 
+@patch("crapcleaner.categories.apps.is_linux", return_value=True)
+@patch("crapcleaner.categories.apps.is_windows", return_value=False)
+def test_linux_app_caches_cover_every_install_method(mock_win, mock_linux):
+    """A Flatpak or Snap install keeps its cache somewhere else entirely (issue #7)."""
+    by_id = {c.id: c for c in get_apps_categories()}
+
+    for cid, flatpak_id, snap_name in (
+        ("discord_cache", "com.discordapp.Discord", "discord"),
+        ("slack_cache", "com.slack.Slack", "slack"),
+        ("spotify_cache", "com.spotify.Client", "spotify"),
+    ):
+        paths = [t.path.replace("\\", "/") for t in by_id[cid].targets]
+        assert any(f".var/app/{flatpak_id}/" in p for p in paths), f"{cid}: no Flatpak path"
+        assert any(f"snap/{snap_name}/current/" in p for p in paths), f"{cid}: no Snap path"
+        assert any(".var/app" not in p and "/snap/" not in p for p in paths), (
+            f"{cid}: no native path"
+        )
+
+
 @patch("crapcleaner.categories.browsers.is_linux", return_value=True)
 @patch("crapcleaner.categories.browsers.is_windows", return_value=False)
 def test_linux_browser_categories(mock_win, mock_linux):

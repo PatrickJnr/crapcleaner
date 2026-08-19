@@ -16,11 +16,17 @@ body:
   - type: textarea
     id: cache_paths
     attributes:
-      label: Target Path(s) on Windows
-      description: Where are the junk/cache files stored? (e.g. `%LOCALAPPDATA%\Tool\Cache`)
+      label: Target Path(s)
+      description: |
+        Where are the junk/cache files stored? Give the paths for every platform and install
+        method you know about - Flatpak and Snap sandbox an app's data somewhere different
+        from the distro package, so all three are worth listing.
       placeholder: |
-        %LOCALAPPDATA%\MyTool\cache
-        %APPDATA%\MyTool\GPUCache
+        Windows:  %LOCALAPPDATA%\MyTool\cache
+        Windows:  %APPDATA%\MyTool\GPUCache
+        Linux:    ~/.cache/mytool
+        Flatpak:  ~/.var/app/org.example.MyTool/cache/mytool
+        Snap:     ~/snap/mytool/current/.cache/mytool
     validations:
       required: true
   - type: dropdown

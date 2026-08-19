@@ -47,12 +47,9 @@ def _walk_one(root: str, max_dirs: int):
             if visited > max_dirs:
                 break
             visited += 1
-            dirnames[:] = [
-                d
-                for d in dirnames
-                if (d in TOOL_CACHE_DIRS or not _is_skipped_dir(d))
-                and not os.path.islink(os.path.join(dirpath, d))
-            ]
+            # walk_safe never lists a symlink or junction among the directories,
+            # so no per-entry link check is needed here.
+            dirnames[:] = [d for d in dirnames if d in TOOL_CACHE_DIRS or not _is_skipped_dir(d)]
             yield dirpath, dirnames, filenames
     except OSError:
         return

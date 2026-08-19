@@ -487,6 +487,111 @@ class TestExpandedCoverage:
         assert not models.selected_by_default
 
 
+class TestStorageScanStreaming:
+    """A whole-volume scan must show data while it runs, and agree with the final tree."""
+
+    def _tree(self, tmp_path, dirs: int = 6, files_per_dir: int = 4):
+        for d in range(dirs):
+            folder = tmp_path / f"dir{d}" / "nested"
+            folder.mkdir(parents=True)
+            for f in range(files_per_dir):
+                (folder / f"file{f}.bin").write_bytes(b"x" * 1024)
+        return str(tmp_path)
+
+    def test_partial_snapshots_never_overcount_the_final_tree(self, tmp_path):
+        root = self._tree(tmp_path)
+        seen: list = []
+        final = analyze_storage_hierarchy(
+            root, max_depth=3, partial_cb=seen.append, partial_interval=0.01
+        )
+        assert final is not None
+        assert final.size == 6 * 4 * 1024
+        for snapshot in seen:
+            assert snapshot.size <= final.size
+            assert snapshot.file_count <= final.file_count
+
+    def test_worker_count_does_not_change_the_result(self, tmp_path):
+        root = self._tree(tmp_path, dirs=8, files_per_dir=3)
+        single = analyze_storage_hierarchy(root, max_depth=3, max_workers=1)
+        many = analyze_storage_hierarchy(root, max_depth=3, max_workers=16)
+        assert single is not None and many is not None
+        assert (single.size, single.file_count, single.dir_count) == (
+            many.size,
+            many.file_count,
+            many.dir_count,
+        )
+        assert [c.name for c in single.children] == [c.name for c in many.children]
+
+    def test_cancellation_stops_a_parallel_scan(self, tmp_path):
+        root = self._tree(tmp_path, dirs=4, files_per_dir=2)
+        stop = threading.Event()
+        stop.set()
+        node = analyze_storage_hierarchy(root, max_depth=3, stop_event=stop, max_workers=8)
+        assert node is not None
+        assert node.file_count == 0
+
+
+class TestScanProgressAttribution:
+    """A stall must be reported under the category that is actually running."""
+
+    def _category(self, cid: str, finder) -> CleanupCategory:
+        return CleanupCategory(
+            id=cid,
+            name=cid,
+            group="Testing",
+            description="",
+            safety_level=SafetyLevel.SAFE,
+            finder=finder,
+            finder_args=(),
+        )
+
+    def test_slow_category_is_named_while_it_runs(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_finder():
+            started.set()
+            release.wait(10)
+            return []
+
+        categories = [
+            self._category("fast", lambda: []),
+            self._category("slow", slow_finder),
+        ]
+        events: list[tuple[str, int]] = []
+        engine = ScanEngine(categories)
+
+        def run():
+            engine.run(progress_cb=lambda name, position, state: events.append((name, state)))
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        assert started.wait(10)
+        time.sleep(0.2)
+
+        # Mid-stall the last thing reported must be "slow", not the fast category
+        # that happened to be queued in front of it.
+        assert events[-1][0] == "slow"
+        release.set()
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+        assert ("slow", 1) in events
+
+    def test_a_category_whose_targets_do_not_exist_costs_nothing(self, tmp_path):
+        absent = CleanupCategory(
+            id="absent",
+            name="Absent",
+            group="Testing",
+            description="",
+            safety_level=SafetyLevel.SAFE,
+            targets=[CacheTarget(path=str(tmp_path / "missing" / "cache"))],
+        )
+        started = time.monotonic()
+        result = ScanEngine([absent]).run().results[0]
+        assert result.size == 0 and result.item_count == 0
+        assert time.monotonic() - started < 1.0
+
+
 class TestColdPreview:
     """A preview with no prior scan must not report a finder category as empty."""
 

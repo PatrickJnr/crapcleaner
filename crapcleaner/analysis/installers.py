@@ -100,7 +100,6 @@ def scan_installers(
         for dirpath, dirnames, filenames in walk_safe(root, topdown=True):
             if stop_event is not None and stop_event.is_set():
                 break
-            dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
 
             for name in filenames:
                 if stop_event is not None and stop_event.is_set():
