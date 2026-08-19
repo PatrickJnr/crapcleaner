@@ -6,7 +6,9 @@ import shutil
 import stat
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 def expand_env(path: str) -> str:
@@ -22,11 +24,44 @@ def resolve_paths(paths: list[str]) -> list[str]:
     return out
 
 
+def _windows_volume_info(root: str) -> tuple[str, str]:
+    """(label, filesystem) for a Windows volume, or empty strings if unreadable.
+
+    Drives that have no label, or that fail the query (an empty card reader, a
+    disconnected network drive), report "" rather than a placeholder.
+    """
+    label_buf = ctypes.create_unicode_buffer(261)
+    fs_buf = ctypes.create_unicode_buffer(261)
+    try:
+        ok = ctypes.windll.kernel32.GetVolumeInformationW(
+            ctypes.c_wchar_p(root),
+            label_buf,
+            ctypes.sizeof(label_buf) // ctypes.sizeof(ctypes.c_wchar),
+            None,
+            None,
+            None,
+            fs_buf,
+            ctypes.sizeof(fs_buf) // ctypes.sizeof(ctypes.c_wchar),
+        )
+    except (AttributeError, OSError):
+        return "", ""
+    if not ok:
+        return "", ""
+    return label_buf.value, fs_buf.value
+
+
 def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
     if is_windows():
         target = f"{drive}\\" if not drive.endswith(("\\", "/")) else drive
         total, used, free = shutil.disk_usage(target)
-        return {"total": total, "used": used, "free": free}
+        label, filesystem = _windows_volume_info(target)
+        return {
+            "total": total,
+            "used": used,
+            "free": free,
+            "label": label,
+            "filesystem": filesystem,
+        }
 
     target = drive if drive and drive != "C:" else "/"
     total, used, free = shutil.disk_usage(target)
@@ -236,9 +271,12 @@ def is_admin() -> bool:
         except Exception:
             return False
     try:
-        return os.geteuid() == 0
-    except AttributeError:  # pragma: no cover - platforms without POSIX ids
-        return False
+        geteuid = getattr(os, "geteuid", None)
+        if geteuid is not None:
+            return geteuid() == 0
+    except Exception:
+        pass
+    return False
 
 
 def can_elevate() -> bool:
@@ -339,20 +377,49 @@ def get_windows_dir() -> str:
 
 
 def which(program: str) -> str | None:
-    for base in os.environ.get("PATH", "").split(os.pathsep):
-        candidate = os.path.join(base, program)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-        if os.path.isfile(candidate + ".exe"):
-            return candidate + ".exe"
-    return None
+    """Resolve an executable on PATH, honouring PATHEXT on Windows."""
+    return shutil.which(program)
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """Outcome of one external command.
+
+    Mapping access (``result["stdout"]`` / ``result.get("returncode")``) is kept so
+    the many existing call sites keep working, but attribute access is typed.
+    A command that never ran carries `error` and a negative `returncode`, so a
+    failure can never be mistaken for empty-but-successful output.
+    """
+
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and self.returncode == 0
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key) from None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
 
 
 def run_command(
     args: list[str],
     timeout: float = 120.0,
     cwd: str | None = None,
-) -> dict[str, object]:
+    env_extra: dict[str, str] | None = None,
+) -> CommandResult:
+    """Run `args` to completion and capture its output. Never raises."""
+    env = os.environ.copy()
+    if env_extra:
+        env.update(env_extra)
     try:
         proc = subprocess.run(
             args,
@@ -360,23 +427,26 @@ def run_command(
             text=True,
             timeout=timeout,
             cwd=cwd,
+            env=env,
             creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0),
         )
-        return {
-            "returncode": proc.returncode,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "error": None,
-        }
+        return CommandResult(
+            returncode=proc.returncode,
+            stdout=proc.stdout or "",
+            stderr=proc.stderr or "",
+        )
     except subprocess.TimeoutExpired as exc:
-        return {
-            "returncode": -1,
-            "stdout": exc.stdout or "",
-            "stderr": "timed out",
-            "error": "timed out",
-        }
+        raw_out = exc.stdout or ""
+        out_text = (
+            raw_out.decode("utf-8", errors="replace")
+            if isinstance(raw_out, bytes)
+            else str(raw_out)
+        )
+        return CommandResult(returncode=-1, stdout=out_text, stderr="timed out", error="timed out")
     except FileNotFoundError as exc:
-        return {"returncode": -2, "stdout": "", "stderr": str(exc), "error": str(exc)}
+        return CommandResult(returncode=-2, stderr=str(exc), error=str(exc))
+    except OSError as exc:
+        return CommandResult(returncode=-1, stderr=str(exc), error=str(exc))
 
 
 def is_frozen() -> bool:

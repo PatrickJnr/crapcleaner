@@ -148,16 +148,40 @@ def find_duplicates(
     processed = 0
     total_candidates = sum(len(paths) for paths in matching_prefix_groups.values())
 
-    for (size, _), paths in matching_prefix_groups.items():
+    needs_full_hash: list[tuple[int, str]] = []
+    for (size, prefix_digest), paths in matching_prefix_groups.items():
         if size <= _PREFIX_SIZE:
             # Files smaller than or equal to prefix size are already fully verified!
-            by_full_hash.setdefault((size, _), []).extend(paths)
+            by_full_hash.setdefault((size, prefix_digest), []).extend(paths)
             processed += len(paths)
             if progress_cb is not None:
                 progress_cb(processed, total_candidates)
             continue
+        needs_full_hash.extend((size, path) for path in paths)
 
-        for path in paths:
+    def _process_full(item: tuple[int, str]) -> tuple[int, str, str | None]:
+        size, path = item
+        if stop_event is not None and stop_event.is_set():
+            return size, path, None
+        return size, path, _hash_full_file(path)
+
+    # Hashing is I/O bound, so a few readers overlap seek time with checksum work.
+    # The pool stays small on purpose: a spinning disk loses more to competing seeks
+    # than it gains from concurrency. Results are consumed in submission order, so
+    # grouping does not depend on which worker finishes first.
+    full_workers = min(max_workers, len(needs_full_hash)) if needs_full_hash else 0
+    if full_workers > 1:
+        with ThreadPoolExecutor(max_workers=full_workers) as pool:
+            for size, path, full_digest in pool.map(_process_full, needs_full_hash):
+                if stop_event is not None and stop_event.is_set():
+                    return []
+                processed += 1
+                if full_digest:
+                    by_full_hash.setdefault((size, full_digest), []).append(path)
+                if progress_cb is not None and processed % 20 == 0:
+                    progress_cb(processed, total_candidates)
+    else:
+        for size, path in needs_full_hash:
             if stop_event is not None and stop_event.is_set():
                 return []
             full_digest = _hash_full_file(path)

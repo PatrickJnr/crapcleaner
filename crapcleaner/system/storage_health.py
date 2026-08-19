@@ -5,6 +5,7 @@ TRIM enablement status, and capacity metrics without running destructive tests.
 """
 
 import json
+import os
 import shutil
 import threading
 import time
@@ -222,9 +223,9 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
 
 def _get_linux_storage_health() -> list[DiskHealthInfo]:
     disks: list[DiskHealthInfo] = []
-    # Try lsblk with json output
+    # Try lsblk with json byte output
     res = run_command(
-        ["lsblk", "-J", "-d", "-o", "NAME,MODEL,ROTA,SIZE,TYPE,TRAN,FSTYPE"],
+        ["lsblk", "-J", "-b", "-d", "-o", "NAME,MODEL,ROTA,SIZE,TYPE,TRAN,FSTYPE,MOUNTPOINT"],
         timeout=5.0,
     )
     raw = str(res.get("stdout", "")).strip()
@@ -240,14 +241,28 @@ def _get_linux_storage_health() -> list[DiskHealthInfo]:
                 if tran == "NVME":
                     media = "NVMe SSD"
 
+                raw_size = item.get("size")
+                try:
+                    capacity = int(raw_size) if raw_size is not None else 0
+                except (ValueError, TypeError):
+                    capacity = 0
+
+                free_space = 0
+                mp = item.get("mountpoint")
+                if mp and os.path.exists(mp):
+                    try:
+                        _, _, free_space = shutil.disk_usage(mp)
+                    except OSError:
+                        pass
+
                 disks.append(
                     DiskHealthInfo(
                         device_id=f"/dev/{name}",
                         model=model,
                         media_type=media,
                         bus_type=tran,
-                        capacity=0,
-                        free_space=0,
+                        capacity=capacity,
+                        free_space=free_space,
                         filesystem=item.get("fstype") or "ext4",
                         trim_supported=True if "SSD" in media else None,
                         trim_enabled=True if "SSD" in media else None,

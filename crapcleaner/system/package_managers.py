@@ -10,13 +10,12 @@ Supported managers:
 
 import re
 import shutil
-import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from crapcleaner.utils.platform import is_linux, is_windows
+from crapcleaner.utils.platform import is_linux, is_windows, run_command
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -112,20 +111,9 @@ def detect_managers() -> list:
 
 
 def _run(args, timeout=60.0, env_extra=None):
-    import os
-
-    env = os.environ.copy()
-    if env_extra:
-        env.update(env_extra)
-    try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=env)
-        return result.returncode, result.stdout or "", result.stderr or ""
-    except subprocess.TimeoutExpired:
-        return -1, "", "Command timed out"
-    except FileNotFoundError:
-        return -1, "", f"Command not found: {args[0]}"
-    except Exception as exc:
-        return -1, "", str(exc)
+    """(returncode, stdout, stderr) for one package-manager command."""
+    result = run_command(args, timeout=timeout, env_extra=env_extra)
+    return result.returncode, result.stdout, result.stderr
 
 
 # ---------------------------------------------------------------------------

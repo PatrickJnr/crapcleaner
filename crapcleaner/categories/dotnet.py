@@ -95,10 +95,10 @@ def get_categories() -> list[CleanupCategory]:
             finder_args=(vs_root,),
         ),
         CleanupCategory(
-            id="jetbrains_caches",
-            name="Rider / JetBrains caches",
+            id="resharper_caches",
+            name="JetBrains ReSharper / Rider caches",
             group=".NET",
-            description="Caches for JetBrains IDEs (Rider, ReSharper, etc.). Rebuilt on next IDE start.",
+            description="Caches for JetBrains .NET tools (ReSharper, Rider). Rebuilt on next IDE start.",
             safety_level=SafetyLevel.LOW_RISK,
             targets=jetbrains_caches,
         ),

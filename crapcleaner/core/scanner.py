@@ -6,7 +6,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-from crapcleaner.core.cache import ScanCache
+from crapcleaner.core.cache import ScanCache, ttl_for_group
 from crapcleaner.core.size import _Cancelled, compute_dir_size
 from crapcleaner.models.category import CleanupCategory
 from crapcleaner.models.report import ScanCategoryResult, ScanReport
@@ -28,6 +28,7 @@ def scan_category(
     skipped = 0
     errors: list[str] = []
     counter = [0]
+    cache_ttl = ttl_for_group(category.group)
 
     if not category.has_targets:
         return ScanCategoryResult(
@@ -62,6 +63,7 @@ def scan_category(
                 target.recurse,
                 target.only_files,
                 max_files,
+                ttl=cache_ttl,
             )
             if cached is not None:
                 total += cached[0]
@@ -99,7 +101,7 @@ def scan_category(
 
     if category.finder is not None:
         if cache is not None:
-            found_paths = cache.get_finder(category.finder, category.finder_args)
+            found_paths = cache.get_finder(category.finder, category.finder_args, ttl=cache_ttl)
         else:
             found_paths = None
         if found_paths is None:
@@ -110,24 +112,29 @@ def scan_category(
             if stop_event is not None and stop_event.is_set():
                 raise _Cancelled
             if cache is not None:
-                cached = cache.get_dir(found, (), True, False, max_files)
+                cached = cache.get_dir(found, (), True, False, max_files, ttl=cache_ttl)
                 if cached is not None:
                     total += cached[0]
                     count += cached[1]
                     skipped += cached[2]
                     continue
             try:
-                t, c, s = compute_dir_size(
-                    found,
-                    max_files=max_files,
-                    stop_event=stop_event,
-                    counter=counter,
-                )
-                total += t
-                count += c
-                skipped += s
-                if cache is not None:
-                    cache.put_dir(found, (), True, False, max_files, t, c, s)
+                if os.path.isfile(found):
+                    sz = os.path.getsize(found)
+                    total += sz
+                    count += 1
+                else:
+                    t, c, s = compute_dir_size(
+                        found,
+                        max_files=max_files,
+                        stop_event=stop_event,
+                        counter=counter,
+                    )
+                    total += t
+                    count += c
+                    skipped += s
+                    if cache is not None:
+                        cache.put_dir(found, (), True, False, max_files, t, c, s)
             except _Cancelled:
                 raise
             except OSError as exc:

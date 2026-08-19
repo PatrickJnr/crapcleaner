@@ -10,7 +10,12 @@ from datetime import datetime
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
 from crapcleaner.utils.files import walk_safe
-from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_windows
+from crapcleaner.utils.platform import (
+    get_appdata,
+    get_local_appdata,
+    get_user_profile,
+    is_windows,
+)
 
 MODEL_EXTENSIONS = (
     ".gguf",
@@ -39,6 +44,12 @@ class AiDataItem:
 
 
 def _ai_roots() -> list[tuple[str, str]]:
+    """Known local model stores, one entry per application that actually exists.
+
+    ComfyUI and text-generation-webui are cloned wherever the user likes, so only
+    the conventional locations are probed - a filesystem-wide hunt for model files
+    is not something a cleaner should do.
+    """
     user = get_user_profile()
     local = get_local_appdata()
     roots = {
@@ -46,10 +57,17 @@ def _ai_roots() -> list[tuple[str, str]]:
         "LM Studio": os.path.join(user, ".lmstudio"),
         "Hugging Face": os.path.join(local, "huggingface"),
         "Torch Hub": os.path.join(local, "torch"),
+        "Jan.ai": os.path.join(user, "jan"),
+        "ComfyUI": os.path.join(user, "ComfyUI"),
+        "text-generation-webui": os.path.join(user, "text-generation-webui"),
     }
     if is_windows():
         roots["Ollama (local)"] = os.path.join(local, "Ollama")
         roots["LM Studio (local)"] = os.path.join(local, "LM Studio")
+        roots["Jan.ai (roaming)"] = os.path.join(get_appdata(), "Jan", "data")
+    else:
+        roots["Jan.ai (config)"] = os.path.join(user, ".config", "Jan", "data")
+        roots["ComfyUI (documents)"] = os.path.join(user, "Documents", "ComfyUI")
     return [(app, path) for app, path in roots.items() if os.path.isdir(path)]
 
 
@@ -100,7 +118,7 @@ def get_ai_data(min_size: int = INSPECT_MIN_SIZE) -> list[AiDataItem]:
 def find_ai_model_dirs() -> list[str]:
     found: list[str] = []
     for _app, root in _ai_roots():
-        for sub in ("models", "hub", "blobs"):
+        for sub in ("models", "hub", "blobs", "checkpoints", os.path.join("models", "checkpoints")):
             p = os.path.join(root, sub)
             if os.path.isdir(p):
                 found.append(p)
@@ -141,7 +159,7 @@ def get_categories() -> list[CleanupCategory]:
             id="ai_models",
             name="AI models (read-only report)",
             group="AI",
-            description="Model weight data for Ollama, LM Studio, and Hugging Face. NEVER deleted automatically. Use the AI Data tab to inspect individual files.",
+            description="Model weight data for Ollama, LM Studio, Hugging Face, Jan.ai, ComfyUI, and text-generation-webui. NEVER deleted automatically. Use the AI Data tab to inspect individual files.",
             safety_level=SafetyLevel.DANGEROUS,
             auto_selected=False,
             finder=find_ai_model_dirs,

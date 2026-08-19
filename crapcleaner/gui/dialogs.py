@@ -53,6 +53,7 @@ class DuplicateFilesDialog(QDialog):
         )
         intro.setWordWrap(True)
         h_lay.addWidget(intro)
+
         layout.addWidget(header_card)
 
         # Quick selection helpers
@@ -190,6 +191,7 @@ class ConfirmCleanupDialog(QDialog):
         dry_run_default: bool = True,
         use_recycle_bin_default: bool = True,
         parent=None,
+        locked_by: list[str] | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Confirm Cleanup Operation")
@@ -214,6 +216,16 @@ class ConfirmCleanupDialog(QDialog):
         )
         intro.setWordWrap(True)
         h_lay.addWidget(intro)
+
+        if locked_by:
+            warning = QLabel(
+                f"<b>{', '.join(locked_by)}</b> "
+                f"{'is' if len(locked_by) == 1 else 'are'} running. Files still in use are "
+                "skipped and listed in the report - close the browser first for a full clean."
+            )
+            warning.setWordWrap(True)
+            warning.setProperty("level", "warn")
+            h_lay.addWidget(warning)
         layout.addWidget(header_card)
 
         # Search filter for categories

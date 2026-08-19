@@ -27,7 +27,6 @@ hiddenimports = list(
     set(
         [
             'crapcleaner',
-            'crapcleaner.app',
             'crapcleaner.constants',
             'crapcleaner.config',
             'crapcleaner.history',
@@ -35,6 +34,7 @@ hiddenimports = list(
             'crapcleaner.reports',
             'crapcleaner.cli',
             'crapcleaner.analysis',
+            'crapcleaner.analysis.recycle_bin',
             'crapcleaner.categories',
             'crapcleaner.core',
             'crapcleaner.gui',
@@ -50,10 +50,11 @@ hiddenimports = list(
             'crapcleaner.system',
             'crapcleaner.utils',
             'crapcleaner.utils.contributors',
-            'crapcleaner.utils.formatting',
-            'crapcleaner.utils.recycle_bin',
-            'crapcleaner.utils.theme_watcher',
+            'crapcleaner.utils.format',
+            'crapcleaner.utils.files',
+            'crapcleaner.utils.platform',
             'crapcleaner.utils.updater',
+            'crapcleaner.utils.windows_errors',
             'PySide6.QtCore',
             'PySide6.QtGui',
             'PySide6.QtWidgets',
@@ -107,24 +108,57 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe_name = 'CrapCleaner' if sys.platform.startswith('win') else 'crapcleaner-linux-x86_64'
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name=exe_name,
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-)
+# onefile by default; the build scripts set this to 'onedir' for a folder build,
+# which starts noticeably faster because nothing is unpacked at launch.
+ONEDIR = os.environ.get('CRAPCLEANER_BUILD_MODE', 'onefile').strip().lower() == 'onedir'
+
+if ONEDIR:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name=exe_name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name=exe_name,
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name=exe_name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )

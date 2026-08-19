@@ -16,6 +16,10 @@ TTL. Direct additions/removals in a scanned root invalidate it immediately;
 deeply nested changes that do not touch a root directory's timestamps are
 bounded by the TTL, so results never stay stale for longer than the TTL.
 
+Groups that are written to continuously (browser caches, Windows Temp) use a
+shorter TTL - see :func:`ttl_for_group` - because a directory's timestamp is not
+a reliable signal for a change one level below it.
+
 The cache is persisted to JSON under the config directory and written
 atomically. It only ever holds display/scan data; cleaning always works from
 live disk state.
@@ -56,6 +60,20 @@ def _finder_key(finder, args) -> str | None:
         return json.dumps(["finder", name, list(args)], sort_keys=True)
     except (TypeError, ValueError):
         return None
+
+
+#: Groups whose targets are rewritten while the app is open - a browser writes to
+#: its cache continuously, and Windows writes to Temp. A directory timestamp does
+#: not reliably move when a file changes one level below it (NTFS updates it
+#: lazily), so these entries are given a short life instead of a deeper, and much
+#: more expensive, validity check.
+VOLATILE_TTL = 45.0
+_VOLATILE_GROUPS = frozenset({"Browsers", "Windows"})
+
+
+def ttl_for_group(group: str) -> float | None:
+    """A shorter TTL for constantly rewritten groups, or None for the default."""
+    return VOLATILE_TTL if group in _VOLATILE_GROUPS else None
 
 
 def _probe(path: str) -> list[int] | None:
@@ -116,10 +134,13 @@ class ScanCache:
         except OSError:
             pass
 
-    def _fresh(self, entry: dict[str, Any], probes: dict[str, list[int]]) -> bool:
+    def _fresh(
+        self, entry: dict[str, Any], probes: dict[str, list[int]], ttl: float | None = None
+    ) -> bool:
         if not self.enabled:
             return False
-        if time.time() - entry.get("cached_at", 0) > self._ttl:
+        max_age = self._ttl if ttl is None else min(self._ttl, ttl)
+        if time.time() - entry.get("cached_at", 0) > max_age:
             return False
         for path, expected in probes.items():
             if _probe(path) != expected:
@@ -133,6 +154,7 @@ class ScanCache:
         recurse: bool = True,
         only_files: bool = False,
         max_files: int = 200000,
+        ttl: float | None = None,
     ) -> tuple[int, int, int] | None:
         key = _dir_key(path, patterns, recurse, only_files, max_files)
         with self._lock:
@@ -140,7 +162,7 @@ class ScanCache:
             if entry is None:
                 self._misses += 1
                 return None
-            if not self._fresh(entry, {path: entry.get("probe", [])}):
+            if not self._fresh(entry, {path: entry.get("probe", [])}, ttl):
                 self._misses += 1
                 return None
             self._hits += 1
@@ -172,7 +194,7 @@ class ScanCache:
                 "cached_at": time.time(),
             }
 
-    def get_finder(self, finder, args) -> list[str] | None:
+    def get_finder(self, finder, args, ttl: float | None = None) -> list[str] | None:
         if not self.enabled:
             return None
         key = _finder_key(finder, args)
@@ -183,7 +205,7 @@ class ScanCache:
             if entry is None:
                 self._misses += 1
                 return None
-            if not self._fresh(entry, entry.get("probes", {})):
+            if not self._fresh(entry, entry.get("probes", {}), ttl):
                 self._misses += 1
                 return None
             self._hits += 1

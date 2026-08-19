@@ -4,8 +4,8 @@ REM  CrapCleaner build script - packages the Python app into a
 REM  standalone Windows executable with PyInstaller.
 REM
 REM  Usage:
-REM    scriptsuild_windows.bat          one-file GUI exe (dist\CrapCleaner.exe)
-REM    scriptsuild_windows.bat onedir   folder build, faster startup
+REM    scripts\build_windows.bat          one-file GUI exe (dist\CrapCleaner.exe)
+REM    scripts\build_windows.bat onedir   folder build, faster startup
 REM                        (dist\CrapCleaner\CrapCleaner.exe)
 REM
 REM  Requires: Python 3.10+ with PySide6. PyInstaller is installed
@@ -43,6 +43,7 @@ REM Font assets must be bundled so icons render in the frozen exe.
 set "DATAFLAG=--add-data "crapcleaner/assets;crapcleaner/assets""
 
 echo [build] Building %MODE% executable...
+set "CRAPCLEANER_BUILD_MODE=%MODE%"
 if exist "CrapCleaner.spec" (
     %PY% -m PyInstaller --noconfirm --clean CrapCleaner.spec
 ) else (

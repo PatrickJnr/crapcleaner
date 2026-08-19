@@ -150,7 +150,7 @@ def _delete_target_files(
             pass
 
     try:
-        if only_files and os.path.isfile(target_path):
+        if os.path.isfile(target_path):
             handle_file(target_path)
             return outcome()
 

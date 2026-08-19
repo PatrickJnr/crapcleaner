@@ -133,4 +133,12 @@ def get_categories() -> list[CleanupCategory]:
             safety_level=SafetyLevel.REVIEW,
             action="docker_builder_prune",
         ),
+        CleanupCategory(
+            id="docker_buildx_prune",
+            name="Docker Buildx cache",
+            group="Docker",
+            description="Runs 'docker buildx prune -af' - clears cached BuildKit layers for every buildx builder. Images and volumes are untouched. Requires confirmation.",
+            safety_level=SafetyLevel.REVIEW,
+            action="docker_buildx_prune",
+        ),
     ]

@@ -8,13 +8,19 @@ import json
 import os
 import platform
 import socket
-import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
 from crapcleaner.utils.format import format_size
-from crapcleaner.utils.platform import get_drive_info, is_linux, is_windows, list_drives, which
+from crapcleaner.utils.platform import (
+    get_drive_info,
+    is_linux,
+    is_windows,
+    list_drives,
+    run_command,
+    which,
+)
 
 
 @dataclass
@@ -418,13 +424,11 @@ def _get_nvidia_smi_vram() -> dict[str, int]:
                 break
     if smi:
         try:
-            out = subprocess.run(
+            out = run_command(
                 [smi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                timeout=4,
+                timeout=4.0,
             )
-            if out.returncode == 0:
+            if out.ok:
                 for line in out.stdout.splitlines():
                     if "," in line:
                         g_name, mem_mb = line.split(",", 1)
@@ -453,8 +457,8 @@ def _get_gpu_specs() -> list[GpuSpec]:
             "Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion, AdapterRAM, VideoModeDescription | ConvertTo-Json -Compress",
         ]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if res.returncode == 0 and res.stdout.strip():
+            res = run_command(cmd, timeout=5.0)
+            if res.ok and res.stdout.strip():
                 raw = json.loads(res.stdout.strip())
                 items = [raw] if isinstance(raw, dict) else raw
                 for item in items:
@@ -476,22 +480,23 @@ def _get_gpu_specs() -> list[GpuSpec]:
         # Match WMI and Registry GPUs to obtain true 64-bit VRAM
         matched_reg_indices = set()
         for wmi in wmi_gpus:
-            w_name = wmi["name"]
+            w_name = str(wmi.get("name", ""))
             w_lower = w_name.lower()
-            drv = wmi["driver_version"]
-            ram = wmi["adapter_ram_bytes"]
-            mode = wmi["resolution"]
+            drv = str(wmi.get("driver_version", ""))
+            ram = int(wmi.get("adapter_ram_bytes", 0))
+            mode = str(wmi.get("resolution", ""))
 
             # Try matching with registry for 64-bit qwMemorySize
             best_vram = ram
             for idx, reg in enumerate(reg_gpus):
-                r_lower = reg["name"].lower()
+                r_lower = str(reg.get("name", "")).lower()
                 if r_lower in w_lower or w_lower in r_lower:
                     matched_reg_indices.add(idx)
-                    if reg["vram"] > best_vram or (best_vram >= 4293918720 and reg["vram"] > 0):
-                        best_vram = reg["vram"]
-                    if not drv and reg["driver_version"]:
-                        drv = reg["driver_version"]
+                    r_vram = int(reg.get("vram", 0))
+                    if r_vram > best_vram or (best_vram >= 4293918720 and r_vram > 0):
+                        best_vram = r_vram
+                    if not drv and reg.get("driver_version"):
+                        drv = str(reg["driver_version"])
                     break
 
             # Try matching with nvidia-smi
@@ -534,8 +539,8 @@ def _get_gpu_specs() -> list[GpuSpec]:
         lspci = which("lspci")
         if lspci:
             try:
-                res = subprocess.run([lspci], capture_output=True, text=True, timeout=5)
-                if res.returncode == 0:
+                res = run_command([lspci], timeout=5.0)
+                if res.ok:
                     for line in res.stdout.splitlines():
                         lowered = line.lower()
                         if "vga compatible controller" in lowered or "3d controller" in lowered:
@@ -756,8 +761,10 @@ def print_specs_summary(specs: SystemSpecs, json_output: bool = False) -> None:
     for d in specs.drives:
         fs_str = f" [{d.file_system}]" if d.file_system else ""
         label_str = f" ({d.label})" if d.label else ""
+        drive_name = d.drive if d.drive.endswith(":") or not is_windows() else f"{d.drive}:"
+        prefix = f"Drive {drive_name}" if is_windows() else drive_name
         print(
-            f"  - Drive {d.drive}:{label_str}{fs_str} "
+            f"  - {prefix}{label_str}{fs_str} "
             f"{format_size(d.used_bytes)} / {format_size(d.total_bytes)} ({d.percent_used}% full) | Free: {format_size(d.free_bytes)}"
         )
     print("=" * 65)

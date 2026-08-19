@@ -136,9 +136,9 @@ def _normalized_exclusions(exclusions: list[str] | None) -> tuple[tuple[str, str
 
     key = tuple(exclusions)
     with _cache_lock:
-        cached = _exclusions_cache
-    if cached is not None and cached[0] == key:
-        return cached[1]
+        cached_exclusions = _exclusions_cache
+    if cached_exclusions is not None and cached_exclusions[0] == key:
+        return cached_exclusions[1]
 
     normalized = _normalize_rules(exclusions)
     with _cache_lock:

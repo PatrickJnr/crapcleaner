@@ -7,7 +7,12 @@ touching source code, Git repositories, or user assets.
 import os
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import get_appdata, get_local_appdata, get_user_profile
+from crapcleaner.utils.platform import (
+    get_appdata,
+    get_local_appdata,
+    get_user_profile,
+    is_windows,
+)
 
 _CACHE_SUBDIRS = (
     "Cache",
@@ -338,6 +343,47 @@ def get_categories() -> list[CleanupCategory]:
                 targets=android_targets,
             )
         )
+
+    # Compiler caches shared by every project on the machine
+    sccache_dirs = (
+        [os.path.join(local, "Mozilla", "sccache")]
+        if is_windows()
+        else [os.path.join(user, ".cache", "sccache")]
+    )
+    categories.append(
+        CleanupCategory(
+            id="sccache",
+            name="sccache compiler cache",
+            group="Developer tools",
+            description="Compiled object cache shared by sccache across all Rust and C/C++ builds.",
+            safety_level=SafetyLevel.SAFE,
+            what_it_contains="Cached compiler outputs keyed by source hash.",
+            why_it_grows="Every distinct compilation stores its object output for reuse.",
+            why_safe_to_delete="Only a build-time optimisation; the next build recompiles.",
+            regeneration_behavior="Repopulated as projects are rebuilt.",
+            reversible=True,
+            targets=[CacheTarget(path=path) for path in sccache_dirs],
+        )
+    )
+
+    zig_dirs = (
+        [os.path.join(local, "zig")] if is_windows() else [os.path.join(user, ".cache", "zig")]
+    )
+    categories.append(
+        CleanupCategory(
+            id="zig_cache",
+            name="Zig global cache",
+            group="Developer tools",
+            description="Zig's global build cache. Source code and zig-out artifacts are untouched.",
+            safety_level=SafetyLevel.SAFE,
+            what_it_contains="Cached compilation units and the Zig package manager's downloads.",
+            why_it_grows="Each build and fetched dependency adds cached artifacts.",
+            why_safe_to_delete="Rebuilt on the next build; only compilation time is lost.",
+            regeneration_behavior="Recreated by the next zig build.",
+            reversible=True,
+            targets=[CacheTarget(path=path) for path in zig_dirs],
+        )
+    )
 
     # JetBrains IDE Caches
     jb_targets = []

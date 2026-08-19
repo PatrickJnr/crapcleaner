@@ -17,6 +17,13 @@ if [ ! -x "$PYTHON_BIN" ]; then
     fi
 fi
 
+MODE="${1:-onefile}"
+if [ "$MODE" != "onefile" ] && [ "$MODE" != "onedir" ]; then
+    echo "usage: $0 [onefile|onedir]" >&2
+    exit 1
+fi
+export CRAPCLEANER_BUILD_MODE="$MODE"
+
 "$PYTHON_BIN" -m pip install .
 "$PYTHON_BIN" -m pip install pyinstaller
 if [ -f "CrapCleaner.spec" ]; then
@@ -25,5 +32,10 @@ else
     "$PYTHON_BIN" -m PyInstaller --noconfirm --clean --onefile --windowed --name crapcleaner-linux-x86_64 --paths . --collect-all crapcleaner --add-data "crapcleaner/assets:crapcleaner/assets" scripts/launcher.py
 fi
 
-echo "Linux binary built at: $DIST_DIR/crapcleaner-linux-x86_64"
-ls -lh "$DIST_DIR/crapcleaner-linux-x86_64"
+if [ "$MODE" = "onedir" ]; then
+    BUILT="$DIST_DIR/crapcleaner-linux-x86_64/crapcleaner-linux-x86_64"
+else
+    BUILT="$DIST_DIR/crapcleaner-linux-x86_64"
+fi
+echo "Linux binary built at: $BUILT"
+ls -lh "$BUILT"

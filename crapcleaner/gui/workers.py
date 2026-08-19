@@ -359,6 +359,36 @@ class StorageAnalysisWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class StorageExpandWorker(QThread):
+    """Measures one subtree on demand, so the first view does not pay for the whole disk."""
+
+    done = Signal(str, object)  # requested path, StorageNode
+    failed = Signal(str)
+
+    def __init__(self, path: str, depth: int = 2, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self._depth = depth
+        self._stop_event = threading.Event()
+
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
+    def run(self):
+        try:
+            from crapcleaner.analysis.storage import analyze_storage_hierarchy
+
+            node = analyze_storage_hierarchy(
+                self._path,
+                max_depth=self._depth,
+                stop_event=self._stop_event,
+            )
+            if not self._stop_event.is_set():
+                self.done.emit(self._path, node)
+        except Exception as exc:  # pragma: no cover - defensive
+            self.failed.emit(str(exc))
+
+
 class MemoryReportWorker(QThread):
     """Reads RAM, swap, and VRAM statistics off the main thread."""
 

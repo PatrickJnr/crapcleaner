@@ -6,7 +6,9 @@ and Linux without third-party dependencies.
 """
 
 import ctypes
+import glob
 import os
+import threading
 import time
 from dataclasses import dataclass
 
@@ -70,37 +72,51 @@ class RamVitals:
 
 @dataclass
 class GpuVitals:
+    """Live GPU readings. A metric that could not be read stays ``None``.
+
+    Vendors expose wildly different subsets - NVML gives everything, amdgpu sysfs
+    gives load and often temperature, a plain Windows display adapter gives only a
+    name and VRAM size - so every field is optional and rendered as "N/A" when
+    missing rather than as a fabricated zero.
+    """
+
     available: bool = False
     name: str = "GPU"
-    temperature_c: int = 0
-    utilization_pct: float = 0.0
-    vram_used_bytes: int = 0
-    vram_total_bytes: int = 0
+    temperature_c: int | None = None
+    utilization_pct: float | None = None
+    vram_used_bytes: int | None = None
+    vram_total_bytes: int | None = None
     thermal_status: str = "optimal"  # "cool", "optimal", "warm", "hot"
 
     @property
     def temp_str(self) -> str:
-        if not self.available or self.temperature_c <= 0:
+        if not self.available or not self.temperature_c or self.temperature_c <= 0:
             return "N/A"
         return f"{self.temperature_c}°C"
 
     @property
+    def utilization_str(self) -> str:
+        if not self.available or self.utilization_pct is None:
+            return "N/A"
+        return f"{int(self.utilization_pct)}%"
+
+    @property
     def vram_used_str(self) -> str:
-        return format_size(self.vram_used_bytes)
+        return format_size(self.vram_used_bytes) if self.vram_used_bytes else "--"
 
     @property
     def vram_total_str(self) -> str:
-        return format_size(self.vram_total_bytes)
+        return format_size(self.vram_total_bytes) if self.vram_total_bytes else "--"
 
     @property
     def vram_fraction_str(self) -> str:
-        if self.vram_total_bytes <= 0:
+        if not self.vram_total_bytes:
             return "-- / --"
         return f"{self.vram_used_str} / {self.vram_total_str}"
 
     @property
     def vram_percent(self) -> float:
-        if self.vram_total_bytes <= 0:
+        if not self.vram_total_bytes or not self.vram_used_bytes:
             return 0.0
         return round((self.vram_used_bytes / self.vram_total_bytes) * 100.0, 1)
 
@@ -193,6 +209,104 @@ if is_windows():
         ]
 
 
+def _thermal_status(temp_c: int | None) -> str:
+    if temp_c is None:
+        return "optimal"
+    if temp_c >= 82:
+        return "hot"
+    if temp_c >= 70:
+        return "warm"
+    if temp_c <= 50:
+        return "cool"
+    return "optimal"
+
+
+def _read_sysfs(path: str | None) -> str | None:
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return None
+
+
+#: PCI vendor ids of GPUs whose Linux drivers publish usable sysfs telemetry.
+_GPU_VENDOR_NAMES = {"0x1002": "AMD Radeon", "0x8086": "Intel Graphics"}
+
+
+@dataclass
+class _SysfsGpu:
+    """Paths under /sys/class/drm for one GPU. Any of them may be absent."""
+
+    name: str
+    busy_path: str | None = None
+    temp_path: str | None = None
+    vram_total_path: str | None = None
+    vram_used_path: str | None = None
+
+    def sample(self) -> GpuVitals:
+        busy = _read_sysfs(self.busy_path)
+        raw_temp = _read_sysfs(self.temp_path)
+        temp_c = None
+        if raw_temp is not None:
+            try:
+                temp_c = int(raw_temp) // 1000  # hwmon reports millidegrees
+            except ValueError:
+                temp_c = None
+
+        def _bytes(path: str | None) -> int | None:
+            raw = _read_sysfs(path)
+            try:
+                return int(raw) if raw is not None else None
+            except ValueError:
+                return None
+
+        utilization = None
+        if busy is not None:
+            try:
+                utilization = min(100.0, max(0.0, float(busy)))
+            except ValueError:
+                utilization = None
+
+        return GpuVitals(
+            available=True,
+            name=self.name,
+            temperature_c=temp_c,
+            utilization_pct=utilization,
+            vram_used_bytes=_bytes(self.vram_used_path),
+            vram_total_bytes=_bytes(self.vram_total_path),
+            thermal_status=_thermal_status(temp_c),
+        )
+
+
+def _discover_sysfs_gpu(drm_root: str = "/sys/class/drm") -> _SysfsGpu | None:
+    for card in sorted(glob.glob(os.path.join(drm_root, "card[0-9]"))):
+        device = os.path.join(card, "device")
+        vendor = _read_sysfs(os.path.join(device, "vendor"))
+        name = _GPU_VENDOR_NAMES.get((vendor or "").lower())
+        if not name:
+            continue
+
+        def _present(*parts: str) -> str | None:
+            candidate = os.path.join(device, *parts)
+            return candidate if os.path.exists(candidate) else None
+
+        temp_path = next(
+            iter(sorted(glob.glob(os.path.join(device, "hwmon", "hwmon*", "temp1_input")))), None
+        )
+        gpu = _SysfsGpu(
+            name=name,
+            busy_path=_present("gpu_busy_percent"),
+            temp_path=temp_path,
+            vram_total_path=_present("mem_info_vram_total"),
+            vram_used_path=_present("mem_info_vram_used"),
+        )
+        if gpu.busy_path or gpu.temp_path or gpu.vram_total_path:
+            return gpu
+    return None
+
+
 class LiveMetricsCollector:
     """Singleton-style metrics collector holding previous tick deltas."""
 
@@ -214,12 +328,16 @@ class LiveMetricsCollector:
         self._last_kernel_time: int = 0
         self._last_user_time: int = 0
         self._last_cpu_percent: float = 0.0
+        self._last_linux_total: int = 0
+        self._last_linux_idle: int = 0
         self._cpu_cores = os.cpu_count() or 4
-        # GPU / NVML state
+        # GPU / NVML / Sysfs state
         self._nvml = None
         self._nvml_initialized = False
         self._nvml_handle = None
         self._gpu_name = "GPU"
+        self._sysfs_gpu: _SysfsGpu | None = None
+        self._adapter_gpu: GpuVitals | None = None
         self._init_gpu()
 
     def _init_gpu(self):
@@ -243,6 +361,35 @@ class LiveMetricsCollector:
                         )
         except Exception:
             self._nvml_initialized = False
+
+        if self._nvml_initialized:
+            return
+
+        if is_linux():
+            self._sysfs_gpu = _discover_sysfs_gpu()
+            if self._sysfs_gpu is not None:
+                self._gpu_name = self._sysfs_gpu.name
+        elif is_windows():
+            # A display adapter with no vendor telemetry library still has a name and
+            # a VRAM size worth showing. The query talks to WMI, so it runs off the
+            # sampling path and only fills in once it answers.
+            threading.Thread(target=self._load_adapter_gpu, daemon=True).start()
+
+    def _load_adapter_gpu(self) -> None:
+        try:
+            from crapcleaner.system.hardware import _get_gpu_specs
+
+            specs = _get_gpu_specs()
+        except Exception:
+            return
+        if not specs:
+            return
+        primary = specs[0]
+        self._adapter_gpu = GpuVitals(
+            available=True,
+            name=primary.name or "Display Adapter",
+            vram_total_bytes=primary.adapter_ram_bytes or None,
+        )
 
     def sample(self) -> SystemLiveSnapshot:
         now = time.monotonic()
@@ -398,15 +545,15 @@ class LiveMetricsCollector:
                     with open("/proc/stat", encoding="utf-8") as f:
                         line = f.readline()
                     parts = [int(x) for x in line.split()[1:]]
-                    idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
+                    linux_idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
                     total = sum(parts)
-                    if hasattr(self, "_last_linux_total") and self._last_linux_total > 0:
+                    if self._last_linux_total > 0:
                         d_total = total - self._last_linux_total
-                        d_idle = idle - self._last_linux_idle
+                        d_idle = linux_idle - self._last_linux_idle
                         if d_total > 0:
                             cpu_percent = round(((d_total - d_idle) / d_total) * 100.0, 1)
                     self._last_linux_total = total
-                    self._last_linux_idle = idle
+                    self._last_linux_idle = linux_idle
             except Exception:
                 pass
 
@@ -476,49 +623,47 @@ class LiveMetricsCollector:
         )
 
     def _sample_gpu(self) -> GpuVitals:
-        if not self._nvml_initialized or not self._nvml_handle or not self._nvml:
-            return GpuVitals()
-        try:
-            temp = ctypes.c_uint32()
-            self._nvml.nvmlDeviceGetTemperature(self._nvml_handle, 0, ctypes.byref(temp))
-            t_val = int(temp.value)
+        if self._nvml_initialized and self._nvml_handle and self._nvml:
+            try:
+                temp = ctypes.c_uint32()
+                self._nvml.nvmlDeviceGetTemperature(self._nvml_handle, 0, ctypes.byref(temp))
+                t_val = int(temp.value)
 
-            class _nvmlUtilization_t(ctypes.Structure):
-                _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
+                class _nvmlUtilization_t(ctypes.Structure):
+                    _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
 
-            util = _nvmlUtilization_t()
-            self._nvml.nvmlDeviceGetUtilizationRates(self._nvml_handle, ctypes.byref(util))
+                util = _nvmlUtilization_t()
+                self._nvml.nvmlDeviceGetUtilizationRates(self._nvml_handle, ctypes.byref(util))
 
-            class _nvmlMemory_t(ctypes.Structure):
-                _fields_ = [
-                    ("total", ctypes.c_ulonglong),
-                    ("free", ctypes.c_ulonglong),
-                    ("used", ctypes.c_ulonglong),
-                ]
+                class _nvmlMemory_t(ctypes.Structure):
+                    _fields_ = [
+                        ("total", ctypes.c_ulonglong),
+                        ("free", ctypes.c_ulonglong),
+                        ("used", ctypes.c_ulonglong),
+                    ]
 
-            mem = _nvmlMemory_t()
-            self._nvml.nvmlDeviceGetMemoryInfo(self._nvml_handle, ctypes.byref(mem))
+                mem = _nvmlMemory_t()
+                self._nvml.nvmlDeviceGetMemoryInfo(self._nvml_handle, ctypes.byref(mem))
 
-            if t_val >= 82:
-                status = "hot"
-            elif t_val >= 70:
-                status = "warm"
-            elif t_val <= 50:
-                status = "cool"
-            else:
-                status = "optimal"
+                return GpuVitals(
+                    available=True,
+                    name=self._gpu_name,
+                    temperature_c=t_val,
+                    utilization_pct=float(util.gpu),
+                    vram_used_bytes=int(mem.used),
+                    vram_total_bytes=int(mem.total),
+                    thermal_status=_thermal_status(t_val),
+                )
+            except Exception:
+                return GpuVitals()
 
-            return GpuVitals(
-                available=True,
-                name=self._gpu_name,
-                temperature_c=t_val,
-                utilization_pct=float(util.gpu),
-                vram_used_bytes=int(mem.used),
-                vram_total_bytes=int(mem.total),
-                thermal_status=status,
-            )
-        except Exception:
-            return GpuVitals()
+        if self._sysfs_gpu is not None:
+            return self._sysfs_gpu.sample()
+
+        if self._adapter_gpu is not None:
+            return self._adapter_gpu
+
+        return GpuVitals()
 
     def _sample_uptime_and_power(self) -> tuple[str, str]:
         uptime_str = ""

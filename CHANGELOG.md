@@ -5,6 +5,40 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.11] - 2026-08-19
+
+Engineering audit implementation: correctness and safety fixes, a modular GUI views package, faster duplicate hashing and storage analysis, wider cleanup coverage, and machine-readable CLI progress.
+
+### Fixed
+- **Duplicate cleanup category IDs**: `directx_shader_cache` now has a single owner (Windows provider) and the .NET provider's JetBrains entry became `resharper_caches`, so no two categories share an ID or scan the same path twice. Enforced by tests.
+- **Individual file cleanup targets**: a target pointing at a single file (stray `.pyc` files) is now sized, previewed, and deleted correctly through the normal pipeline instead of being silently skipped.
+- **Platform-specific categories**: Windows-only targets are no longer registered on Linux and vice versa. This covers the application providers (winget, Chocolatey, Scoop vs apt, dnf, pacman, Flatpak, Snap) and the Windows system provider, so a Linux install no longer lists Prefetch, CBS logs, or Windows TEMP. Emptying the trash stays available on both platforms.
+- **Windows drive formatting**: drive letters render one colon (`Drive C:`), Linux mount points are printed unchanged.
+- **Storage analyzer traversal**: the analyzer uses the shared reparse-point guard and skips junctions and symlinks instead of resolving through them, so data that lives on another volume is never billed to the scanned drive.
+- **Recursive CSV storage export**: a list-rooted storage report now exports every descendant instead of stopping at the top level.
+- **Linux storage health**: capacity comes from byte-accurate `lsblk -b` output and free space is correlated through the device's mount point. An unmounted device keeps its real capacity rather than reporting zeros.
+- **Cold cleanup preview reported zero**: `crapcleaner --cleanup-preview` runs without a prior scan, so categories that discover their targets through a finder (`__pycache__`, stray `.pyc`, Python tool caches, AI models) previewed as empty while the cleanup would have removed thousands of files. The preview now resolves those finders when no scan data exists.
+- **Blank volume label and filesystem on Windows**: PC Specs printed drives with no label or filesystem because `get_drive_info` never queried them. Both now come from `GetVolumeInformationW`, and a drive that cannot be queried reports blank rather than a placeholder.
+- **Ruff and mypy**: both pass with zero errors across the package, with no suppressions or broad `Any` casts added.
+- **PyInstaller packaging**: stale hidden imports were replaced with modules that actually exist, and `onedir` builds a real folder distribution (`EXE` + `COLLECT`) instead of silently producing a onefile build. Both build scripts pass their mode through and report the matching output path.
+
+### Added
+- **Running-browser detection before cleanup**: one process listing identifies every relevant browser; the confirmation dialog, status bar, and CLI warn that locked cache files will be skipped. Browsers are never terminated, and a cleanup that skipped locked files is reported as partial rather than complete.
+- **Wider browser coverage**: Thorium on Windows and Linux, Floorp on Linux, alongside the existing Chromium and Firefox derivatives. Only cache directories are targeted.
+- **Wider developer cache coverage**: shared `sccache` and Zig compiler caches, project-local `.ruff_cache`, `.mypy_cache`, `.pytest_cache`, and `.tox` folders discovered through the existing single scan-root walk, and the Docker Buildx cache exposed as a confirmed `docker buildx prune` action rather than a file delete.
+- **Vendor-neutral GPU telemetry**: AMD and Intel load, temperature, and VRAM through Linux DRM sysfs, NVML retained for NVIDIA, and any Windows display adapter contributing its name and VRAM size. A metric the hardware does not expose is shown as `N/A` instead of a fabricated zero.
+- **Wider local AI model discovery**: Jan.ai, ComfyUI, and text-generation-webui model stores in their conventional locations. Models remain inspection-only and are never auto-selected.
+- **`--progress-jsonl` streaming CLI progress**: scans and cleanups emit one standalone JSON object per line covering start, per-category progress and results, warnings, errors, cancellation, and completion (including a `partial` flag). Standard output is unchanged without the flag.
+
+### Changed
+- **GUI views modularized**: the 9,000-line `gui/views.py` became a `gui/views/` package with one module per major view plus a shared widgets module. Public imports and lazy view creation are unchanged.
+- **Centralized subprocess execution**: `run_command` returns a typed `CommandResult` with consistent timeout, working-directory, and environment handling, and every capturing subprocess call site now goes through it, so a failed command can never look like empty-but-successful output.
+- **Parallel duplicate hashing**: full SHA-256 hashing runs on a bounded worker pool and consumes results in submission order, keeping grouping deterministic while staying responsive to cancellation.
+- **Scan cache invalidation**: continuously rewritten groups (browser caches, Windows Temp) use a short TTL so a stale entry cannot outlive its data, while static categories keep the full TTL.
+- **On-demand storage drill-down**: navigating past the analyzed depth measures that folder in a worker and keeps the result, instead of requiring a slower whole-drive pass at a higher depth.
+
+---
+
 ## [1.0.10.1] - 2026-08-18
 
 Theme Studio performance optimization, Windows config locking resilience, and release title automation.

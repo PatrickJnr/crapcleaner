@@ -7,7 +7,13 @@ from crapcleaner.utils.platform import (
     get_local_appdata,
     get_program_data,
     get_windows_dir,
+    is_windows,
 )
+
+#: Categories in this module that are meaningful off Windows too. Emptying the
+#: trash works on both platforms through the same action; everything else here
+#: targets a Windows-only path and must not appear on Linux.
+_CROSS_PLATFORM_IDS = frozenset({"recycle_bin"})
 
 
 def get_categories() -> list[CleanupCategory]:
@@ -369,5 +375,8 @@ def get_categories() -> list[CleanupCategory]:
             targets=[],
         )
     )
+
+    if not is_windows():
+        return [c for c in categories if c.id in _CROSS_PLATFORM_IDS]
 
     return categories

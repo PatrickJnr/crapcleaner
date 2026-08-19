@@ -41,3 +41,9 @@ class TestRegistry:
         groups = group_categories(cats)
         assert sum(len(v) for v in groups.values()) == len(cats)
         assert "Windows" in groups
+
+    def test_all_category_ids_are_unique(self):
+        cats = get_all_categories()
+        cat_ids = [c.id for c in cats]
+        duplicates = [cid for cid in set(cat_ids) if cat_ids.count(cid) > 1]
+        assert len(cat_ids) == len(set(cat_ids)), f"Duplicate category IDs found: {duplicates}"

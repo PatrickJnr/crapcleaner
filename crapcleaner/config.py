@@ -61,7 +61,8 @@ def load_settings() -> dict[str, Any]:
     for key, value in loaded.items():
         if key in DEFAULT_CONFIG and isinstance(value, type(DEFAULT_CONFIG[key])):
             if key == "custom_theme" and isinstance(value, dict):
-                merged_custom = dict(DEFAULT_CONFIG["custom_theme"])
+                custom_default = DEFAULT_CONFIG.get("custom_theme")
+                merged_custom = dict(custom_default) if isinstance(custom_default, dict) else {}
                 merged_custom.update(value)
                 settings["custom_theme"] = merged_custom
             else:

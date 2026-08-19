@@ -6,11 +6,10 @@ to do, and unsupported actions are reported instead of attempted.
 """
 
 import os
-import subprocess
 from dataclasses import asdict, dataclass, field
 
 from crapcleaner.system.memory_report import MemoryStats, get_gpu_memory, get_memory_stats
-from crapcleaner.utils.platform import is_admin, is_linux, is_windows
+from crapcleaner.utils.platform import is_admin, is_linux, is_windows, run_command
 
 RAM = "ram"
 VRAM = "vram"
@@ -523,7 +522,7 @@ def _purge_standby_list() -> tuple[bool, str]:
 
 def _drop_caches() -> tuple[bool, str]:
     try:
-        subprocess.run(["sync"], check=False, timeout=30)
+        run_command(["sync"], timeout=30.0)
     except Exception:
         getattr(os, "sync", lambda: None)()
     try:

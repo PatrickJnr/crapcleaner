@@ -166,27 +166,21 @@ def generate_custom_palette(
     if mood_key == "vibrant":
         tint_s_scale = 0.24
         accent_s_boost = 1.25
-        surface_depth = 1.15
     elif mood_key == "muted":
         tint_s_scale = 0.05
         accent_s_boost = 0.75
-        surface_depth = 0.90
     elif mood_key == "oled":
         tint_s_scale = 0.04
         accent_s_boost = 1.30
-        surface_depth = 1.20
     elif mood_key == "pastel":
         tint_s_scale = 0.10
         accent_s_boost = 0.65
-        surface_depth = 0.85
     elif mood_key == "minimal":
         tint_s_scale = 0.02
         accent_s_boost = 1.00
-        surface_depth = 1.00
     else:  # cohesive
         tint_s_scale = 0.14
         accent_s_boost = 1.00
-        surface_depth = 1.00
 
     # Effective accent saturation: scales smoothly with vibrancy slider
     effective_s = max(0.10, min(1.0, s * (0.35 + 0.95 * vibrancy_scale) * accent_s_boost))

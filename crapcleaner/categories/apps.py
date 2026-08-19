@@ -266,9 +266,9 @@ def get_categories() -> list[CleanupCategory]:
     user = get_user_profile()
     program_data = get_program_data()
 
-    categories = _get_windows_categories(appdata, local, user, program_data)
-
     if is_linux():
-        categories.extend(_get_linux_categories(appdata, local, user, program_data))
+        categories = _get_linux_categories(appdata, local, user, program_data)
+    else:
+        categories = _get_windows_categories(appdata, local, user, program_data)
 
     return [category for category in categories if category.targets or category.finder]

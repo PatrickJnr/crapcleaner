@@ -50,24 +50,32 @@ def _walk_one(root: str, max_dirs: int):
             dirnames[:] = [
                 d
                 for d in dirnames
-                if not _is_skipped_dir(d) and not os.path.islink(os.path.join(dirpath, d))
+                if (d in TOOL_CACHE_DIRS or not _is_skipped_dir(d))
+                and not os.path.islink(os.path.join(dirpath, d))
             ]
             yield dirpath, dirnames, filenames
     except OSError:
         return
 
 
+#: Per-project caches written by Python tooling. Each is rebuilt from the project's
+#: own sources on the next run, and none of them holds anything the project needs.
+TOOL_CACHE_DIRS = frozenset({".ruff_cache", ".mypy_cache", ".pytest_cache", ".tox"})
+
+_ARTIFACT_KINDS = 5
+
+
 @lru_cache(maxsize=8)
 def _python_artifacts(roots: tuple, max_dirs: int = 50000) -> tuple:
-    """Walk every root once and collect all four Python artifact types.
+    """Walk every root once and collect every Python artifact type.
 
-    The four finder categories previously walked the same roots independently,
-    so a full-drive scan re-traversed the tree up to four times. This merges
-    those traversals into a single walk (parallelized across roots) and caches
-    the result per (roots, max_dirs) for the duration of a scan.
+    The finder categories previously walked the same roots independently, so a
+    full-drive scan re-traversed the tree once per category. This merges those
+    traversals into a single walk (parallelized across roots) and caches the
+    result per (roots, max_dirs) for the duration of a scan.
     """
-    results: dict[str, tuple[list[str], list[str], list[str], list[str]]] = {
-        root: ([], [], [], []) for root in roots
+    results: dict[str, tuple[list[str], ...]] = {
+        root: tuple([] for _ in range(_ARTIFACT_KINDS)) for root in roots
     }
 
     def _scan(root: str):
@@ -75,11 +83,15 @@ def _python_artifacts(roots: tuple, max_dirs: int = 50000) -> tuple:
         pyc_files: list[str] = []
         egg_info: list[str] = []
         build_dirs: list[str] = []
+        tool_caches: list[str] = []
         for dirpath, dirnames, filenames in _walk_one(root, max_dirs):
             keep = []
             for d in dirnames:
                 if d == "__pycache__":
                     pycache.append(os.path.join(dirpath, "__pycache__"))
+                    continue
+                if d in TOOL_CACHE_DIRS:
+                    tool_caches.append(os.path.join(dirpath, d))
                     continue
                 if _is_skipped_dir(d):
                     continue
@@ -97,7 +109,7 @@ def _python_artifacts(roots: tuple, max_dirs: int = 50000) -> tuple:
                 elif d == "build" and _looks_like_python_build(dirpath, d):
                     build_dirs.append(os.path.join(dirpath, d))
                     dirnames.remove(d)
-        results[root] = (pycache, pyc_files, egg_info, build_dirs)
+        results[root] = (pycache, pyc_files, egg_info, build_dirs, tool_caches)
 
     if len(roots) > 1:
         with ThreadPoolExecutor(max_workers=min(4, len(roots))) as pool:
@@ -106,11 +118,11 @@ def _python_artifacts(roots: tuple, max_dirs: int = 50000) -> tuple:
         for root in roots:
             _scan(root)
 
-    merged: tuple[list[str], list[str], list[str], list[str]] = ([], [], [], [])
+    merged: tuple[list[str], ...] = tuple([] for _ in range(_ARTIFACT_KINDS))
     for root in roots:
-        for i in range(4):
+        for i in range(_ARTIFACT_KINDS):
             merged[i].extend(results[root][i])
-    return tuple(merged)
+    return merged
 
 
 def find_pycache_dirs(roots: list[str], max_dirs: int = 50000) -> list[str]:
@@ -127,6 +139,10 @@ def find_egg_info_dirs(roots: list[str], max_dirs: int = 50000) -> list[str]:
 
 def find_build_dirs(roots: list[str], max_dirs: int = 50000) -> list[str]:
     return _python_artifacts(tuple(roots or []), max_dirs)[3]
+
+
+def find_tool_cache_dirs(roots: list[str], max_dirs: int = 50000) -> list[str]:
+    return _python_artifacts(tuple(roots or []), max_dirs)[4]
 
 
 def _looks_like_python_build(parent: str, build_name: str) -> bool:
@@ -239,6 +255,27 @@ def get_categories(
             description="Metadata folders left behind by older Python packaging tooling. Safe to remove; regenerated on build.",
             safety_level=SafetyLevel.REVIEW,
             finder=find_egg_info_dirs,
+            finder_args=(scan_roots,),
+        )
+    )
+
+    categories.append(
+        CleanupCategory(
+            id="python_tool_caches",
+            name="Python tool caches (.ruff_cache, .mypy_cache, .pytest_cache, .tox)",
+            group="Python",
+            description=(
+                "Per-project caches written by Ruff, mypy, pytest and tox inside the "
+                "projects under your scan roots. Rebuilt from the project's own sources "
+                "on the next run; .tox environments take longest to recreate."
+            ),
+            safety_level=SafetyLevel.LOW_RISK,
+            what_it_contains="Lint results, type-check results, test caches and tox virtualenvs.",
+            why_it_grows="Every project keeps its own copy, and each tool run adds to it.",
+            why_safe_to_delete="No source code or configuration lives in these folders.",
+            regeneration_behavior="Recreated the next time the tool runs in that project.",
+            reversible=True,
+            finder=find_tool_cache_dirs,
             finder_args=(scan_roots,),
         )
     )

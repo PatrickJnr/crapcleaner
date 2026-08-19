@@ -109,22 +109,23 @@ Because system-wide XDG autostart entries live in root-owned `/etc/xdg/autostart
 ## Features
 
 ### 1. Storage Dashboard, Live System Vitals & Quick-Access
-- **Live System Telemetry Dashboard**: real-time network throughput (download/upload rates, session transfer totals, and active connection adapter), RAM load with dynamic high-memory pressure alerts and one-click Memory Cleaner access, real-time multi-core CPU utilization, GPU temperature monitoring & VRAM consumption (NVIDIA NVML & Linux DRM), and live system uptime with fluid exponential moving average (EMA) smoothing and cubic eased animations.
+- **Live System Telemetry Dashboard**: real-time network throughput (download/upload rates, session transfer totals, and active connection adapter), RAM load with dynamic high-memory pressure alerts and one-click Memory Cleaner access, real-time multi-core CPU utilization, GPU load, temperature, and VRAM consumption (NVIDIA through NVML, AMD and Intel through Linux DRM sysfs, and any Windows display adapter for name and VRAM size) - a metric the hardware does not expose is shown as `N/A` rather than as a zero, and live system uptime with fluid exponential moving average (EMA) smoothing and cubic eased animations.
 - **Live Vitals Sparklines**: a rolling 60-sample history strip under the Memory, Processor, Graphics, and Network cards, fed from the Dashboard's existing vitals tick so no card runs a timer of its own.
 - **Reclaimable Breakdown**: a proportional bar and the top categories by size, coloured by safety level. Before a first scan it lists the category groups a scan would check, so the panel is informative on a fresh install rather than blank.
 - **Scan Insights & Space Recommendations**: interactive cleanup summary showing instant visual proportions of Safe vs Reviewable space, top storage-consuming categories, and actionable cleanup tips before execution.
 - **Storage Analyzer Quick-Access Bookmarks**: one-click favorites bar in the Storage Breakdown view (Home, Downloads, Documents, AppData / .config, Temp, Videos) for instant directory navigation and inspection.
 - Real-time disk capacity and reclaimable space calculation across all mounted drives.
-- Storage Breakdown: proportional storage grid where each cell's area maps to its size, so the largest consumers stand out immediately. Drill into folders, navigate with the keyboard (arrows, Enter, Backspace), and hover for full paths; junction, symlink, and loop protection is preserved throughout.
+- Storage Breakdown: proportional storage grid where each cell's area maps to its size, so the largest consumers stand out immediately. Drill into folders, navigate with the keyboard (arrows, Enter, Backspace), and hover for full paths; junction, symlink, and loop protection is preserved throughout, and a folder deeper than the analyzed depth is measured on demand when you navigate into it instead of forcing a slower whole-drive pass up front.
 - Drive health, media type, and TRIM diagnostics are cached briefly and shared across views, so switching views does not re-run the underlying platform query.
 - Storage Breakdown by functional file types (Videos, Images, Audio, Code, Archives, Documents, Executables, Databases, Disk Images).
 
 ### 2. Deep Cleanup Categories (75+ targets)
 - **Windows System**: User and system TEMP directories, CBS servicing logs (`C:\Windows\Logs\CBS`), Delivery Optimization cache, Font Cache, Cryptnet SSL certificate cache, DirectX and GPU shader caches, and Prefetch traces.
-- **Developer Tools**: VS Code, Cursor, Windsurf, Zed, JetBrains IDEs (IntelliJ, PyCharm, WebStorm, Rider, CLion), Android SDK build caches, Gradle daemon logs, Bun cache, Unity Editor caches & ShaderCache, Godot Engine caches, Unreal Engine DDC, and CMake build packages.
+- **Developer Tools**: VS Code, Cursor, Windsurf, Zed, JetBrains IDEs (IntelliJ, PyCharm, WebStorm, Rider, CLion), Android SDK build caches, Gradle daemon logs, Bun cache, Unity Editor caches & ShaderCache, Godot Engine caches, Unreal Engine DDC, CMake build packages, the shared sccache and Zig compiler caches, and the Docker Buildx cache (cleared through `docker buildx prune`, never by deleting files).
+- **Project-local tool caches**: `.ruff_cache`, `.mypy_cache`, `.pytest_cache`, and `.tox` folders found inside the projects under your configured scan roots. Only these four names are ever collected, and only within those roots - no drive-wide sweep, and no project source is touched.
 - **Package Managers**: npm, yarn, pnpm store, pip, uv, poetry, conda, NuGet, Cargo/Rust cache, Go build cache, Maven, WinGet, Chocolatey, and Scoop.
 - **Gaming & Launchers**: Steam shader and depot caches, Epic Games Launcher, EA Desktop / Origin, Ubisoft Connect, Battle.net, GOG Galaxy, Riot Games / Valorant crash logs, and FiveM cache.
-- **Browsers**: Chrome, Edge, Brave, Opera, Opera GX, Vivaldi, Arc, Firefox, LibreWolf, Waterfox, and Floorp HTTP/GPU/Code caches (leaving bookmarks, passwords, history, and active sessions intact).
+- **Browsers**: Chrome, Chromium, Edge, Brave, Opera, Opera GX, Vivaldi, Thorium, Arc, Firefox, LibreWolf, Waterfox, and Floorp HTTP/GPU/Code caches (leaving bookmarks, passwords, history, and active sessions intact). Running browsers are detected before a cleanup: you get a warning that locked files will be skipped, never a forced shutdown, and the report says exactly what was skipped.
 - **Linux Package Managers**: APT, DNF, pacman, Flatpak, and Snap caches.
 
 ### 3. Recycle Bin & Trash Inspector
@@ -338,9 +339,33 @@ crapcleaner --clean-safe --execute
 # Find duplicates larger than 10MB
 crapcleaner --duplicates "C:\Users\Username\Downloads" --min-dup-size 10MB
 
+# Stream progress as JSONL/NDJSON for CI or an external frontend
+crapcleaner --scan --progress-jsonl
+crapcleaner --clean-safe --execute --yes --progress-jsonl
+
 # Hardware and OS specifications
 crapcleaner --specs
 ```
+
+### Streaming progress (`--progress-jsonl`)
+
+`--progress-jsonl` turns `--scan` and the cleanup commands into a JSONL/NDJSON
+stream: one standalone JSON object per line on stdout, with no human-readable
+text mixed in. Without the flag nothing about the normal output changes.
+
+| Event | Emitted when |
+| --- | --- |
+| `scan_start` / `cleanup_start` | the run begins, with the category count |
+| `scan_progress` / `cleanup_progress` | a category starts or finishes |
+| `category_result` / `cleanup_result` | per-category totals |
+| `warning` | a locked file, a permission failure, or a running browser |
+| `error` | a category-level failure |
+| `cancelled` | the run was interrupted |
+| `scan_complete` / `cleanup_complete` | totals; cleanups also report `partial` |
+
+Every object carries `event` and a `time` timestamp. A cleanup that could not
+remove everything reports `partial: true` and lists what was skipped - a
+cleanup is never reported as complete when locked files remain.
 
 ---
 

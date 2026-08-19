@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from crapcleaner import __version__
+from crapcleaner.categories.browsers import running_browser_names
 from crapcleaner.config import load_settings, update_settings
 from crapcleaner.core.cache import ScanCache
 from crapcleaner.gui.dialogs import ConfirmCleanupDialog, HelpSafetyDialog, ReportDialog
@@ -461,12 +462,18 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Cleanup", "Select at least one category to clean.")
             return
         use_recycle_bin = self._settings.get("use_recycle_bin", True)
+        locked_by = running_browser_names([c.id for c in categories])
+        if locked_by:
+            self.statusBar().showMessage(
+                f"{', '.join(locked_by)} running - locked cache files will be skipped.", 8000
+            )
         if self._settings.get("confirm_cleanup", True):
             dialog = ConfirmCleanupDialog(
                 categories,
                 dry_run_default=self._settings.get("dry_run_default", True),
                 use_recycle_bin_default=use_recycle_bin,
                 parent=self,
+                locked_by=locked_by,
             )
             if dialog.exec() != ConfirmCleanupDialog.DialogCode.Accepted:
                 return
@@ -520,7 +527,12 @@ class MainWindow(QMainWindow):
                 f"{format_datetime(report.started)} - {format_size(report.total_space_recovered)} recovered"
             )
             self.sidebar.set_badge("cleanup", "")
-            self.statusBar().showMessage("Cleanup completed successfully.", 6000)
+            self.statusBar().showMessage(
+                f"Cleanup finished - {report.total_skipped} item(s) skipped (locked or protected)."
+                if report.total_skipped
+                else "Cleanup completed successfully.",
+                6000,
+            )
             self.cleanup_view.populate(self._categories)
             self.cleanup_view.update_sizes()
             self.dashboard.refresh()

@@ -176,7 +176,8 @@ def _scope_for(name: str) -> str:
 
 def _privileged(args: list[str], scope: str, timeout: float = 20.0):
     """Run a mutating systemctl command, elevating for system units when needed."""
-    if scope == "user" or os.geteuid() == 0:
+    is_root = getattr(os, "geteuid", lambda: 1)() == 0
+    if scope == "user" or is_root:
         return _systemctl(args, scope=scope, timeout=timeout)
 
     if shutil.which("pkexec"):

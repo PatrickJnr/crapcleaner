@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from crapcleaner.core.protected_paths import validate_cleanup_path
-from crapcleaner.models.category import CleanupCategory
+from crapcleaner.models.category import CacheTarget, CleanupCategory
 from crapcleaner.utils.files import walk_safe
 
 
@@ -110,8 +110,16 @@ def generate_cleanup_preview(
     max_items_per_category: int = 500,
     stop_event: threading.Event | None = None,
     progress_cb: Callable[[str, int, int], None] | None = None,
+    resolve_finders: bool = False,
 ) -> CleanupPreview:
-    """Enumerate all files and directories targeted by categories and build a pre-cleanup manifest."""
+    """Enumerate all files and directories targeted by categories and build a pre-cleanup manifest.
+
+    Categories that discover their targets through a finder normally reuse the
+    numbers from the last scan, so opening the preview after a scan is instant.
+    Set `resolve_finders` when no scan has run - a caller that previews cold, like
+    the CLI, would otherwise show zero for categories that will really delete
+    thousands of files.
+    """
     preview = CleanupPreview(generated_at=datetime.now())
     total_cats = len(categories)
 
@@ -148,12 +156,16 @@ def generate_cleanup_preview(
             continue
 
         targets = list(cat.targets)
-        # Skip dynamic full drive finders for quick preview unless explicitly present
-        if cat.finder is not None and len(targets) == 0:
-            cat_prev.estimated_size = cat.size
-            cat_prev.item_count = cat.item_count
-            preview.categories.append(cat_prev)
-            continue
+        if cat.finder is not None and not targets:
+            if not resolve_finders:
+                cat_prev.estimated_size = cat.size
+                cat_prev.item_count = cat.item_count
+                preview.categories.append(cat_prev)
+                continue
+            try:
+                targets = [CacheTarget(path=path) for path in cat.finder(*cat.finder_args)]
+            except OSError as exc:
+                cat_prev.errors.append(f"{cat.name}: {exc}")
 
         total_cat_size = 0
         total_cat_items = 0
@@ -170,7 +182,7 @@ def generate_cleanup_preview(
                 cat_prev.errors.append(reason)
                 continue
 
-            if target.only_files and os.path.isfile(target.path):
+            if os.path.isfile(target.path):
                 try:
                     sz = os.path.getsize(target.path)
                     total_cat_size += sz

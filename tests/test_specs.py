@@ -174,7 +174,7 @@ def test_gui_about_and_specs_views():
     if hasattr(specs_view, "_worker") and specs_view._worker:
         specs_view._worker.wait(5000)
 
-    with patch("crapcleaner.gui.views.fetch_contributors", return_value=[sample_contrib]):
+    with patch("crapcleaner.gui.views.about.fetch_contributors", return_value=[sample_contrib]):
         about_view = AboutView(dummy)
         assert about_view is not None
         if hasattr(about_view, "contrib_worker") and about_view.contrib_worker:

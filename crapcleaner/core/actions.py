@@ -220,6 +220,41 @@ def _docker_builder_prune(
     )
 
 
+@register_action("docker_buildx_prune", "docker buildx prune -af")
+def _docker_buildx_prune(
+    dry_run: bool = False, is_admin: bool = False, category_name: str = ""
+) -> CleanupResult:
+    if which("docker") is None:
+        return CleanupResult(
+            category_id="docker_buildx_prune",
+            category_name=category_name,
+            files_deleted=0,
+            space_recovered=0,
+            skipped=0,
+            errors=["Docker CLI not found."],
+            dry_run=dry_run,
+        )
+    args = ["docker", "buildx", "prune", "-af"]
+    if dry_run:
+        return CleanupResult(
+            category_id="docker_buildx_prune",
+            category_name=category_name,
+            files_deleted=0,
+            space_recovered=0,
+            skipped=0,
+            dry_run=True,
+        )
+    result = run_command(args, timeout=600.0)
+    return _result_for_action(
+        "docker_buildx_prune",
+        category_name,
+        False,
+        result.ok,
+        result.stdout + result.stderr,
+        " ".join(args),
+    )
+
+
 @register_action("pnpm_store_prune", "pnpm store prune")
 def _pnpm_store_prune(
     dry_run: bool = False, is_admin: bool = False, category_name: str = ""

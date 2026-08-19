@@ -35,3 +35,4 @@ Desktop.ini
 *.png
 assets/
 scripts/render_social_preview.py
+AUDIT_IMPLEMENTATION.md

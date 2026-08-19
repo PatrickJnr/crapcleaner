@@ -10,7 +10,7 @@ from ctypes import wintypes
 from datetime import datetime
 from urllib.parse import quote
 
-from crapcleaner.utils.platform import get_user_profile, is_linux, which
+from crapcleaner.utils.platform import get_user_profile, is_linux, run_command, which
 
 
 class _SHFILEOPSTRUCTW(ctypes.Structure):
@@ -167,7 +167,7 @@ def reveal_in_file_manager(path: str, select: bool = True) -> bool:
         # The freedesktop interface highlights the file itself; xdg-open can only open
         # the containing folder, so it is the fallback rather than the first choice.
         if select and not os.path.isdir(target) and which("dbus-send"):
-            result = subprocess.run(
+            result = run_command(
                 [
                     "dbus-send",
                     "--session",
@@ -178,10 +178,9 @@ def reveal_in_file_manager(path: str, select: bool = True) -> bool:
                     f"array:string:file://{target}",
                     "string:",
                 ],
-                capture_output=True,
-                timeout=5,
+                timeout=5.0,
             )
-            if result.returncode == 0:
+            if result.ok:
                 return True
 
         if which("xdg-open"):
@@ -355,15 +354,11 @@ def empty_recycle_bin() -> bool:
 
 def _trash_put(path: str) -> bool:
     trash_put = which("gio")
-    if trash_put:
-        result = subprocess.run([trash_put, "trash", path], capture_output=True, text=True)
-        if result.returncode == 0:
-            return True
+    if trash_put and run_command([trash_put, "trash", path], timeout=20.0).ok:
+        return True
     trash_cli = which("trash-put")
-    if trash_cli:
-        result = subprocess.run([trash_cli, path], capture_output=True, text=True)
-        if result.returncode == 0:
-            return True
+    if trash_cli and run_command([trash_cli, path], timeout=20.0).ok:
+        return True
     return _freedesktop_trash_put(path)
 
 

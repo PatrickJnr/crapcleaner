@@ -281,7 +281,7 @@ _INSTALL_COMMANDS = {
 
 
 def _elevated(command: list[str], timeout: float):
-    if os.geteuid() == 0:
+    if getattr(os, "geteuid", lambda: 1)() == 0:
         return run_command(command, timeout=timeout)
     if shutil.which("pkexec"):
         return run_command(["pkexec"] + command, timeout=timeout)

@@ -171,6 +171,13 @@ class FileTypeSummary:
         }
 
 
+@dataclass
+class _GroupStats:
+    size: int = 0
+    count: int = 0
+    extensions: set[str] = field(default_factory=set)
+
+
 def analyze_file_types(
     root: str,
     stop_event: threading.Event | None = None,
@@ -180,7 +187,7 @@ def analyze_file_types(
     if not root or not os.path.isdir(root):
         return []
 
-    groups: dict[str, dict[str, int | set[str]]] = {}
+    groups: dict[str, _GroupStats] = {}
     total_bytes = 0
     visited_files = 0
 
@@ -205,13 +212,13 @@ def analyze_file_types(
 
             group = groups.get(category)
             if group is None:
-                group = {"size": 0, "count": 0, "extensions": set()}
+                group = _GroupStats()
                 groups[category] = group
 
-            group["size"] += sz
-            group["count"] += 1
+            group.size += sz
+            group.count += 1
             if ext:
-                group["extensions"].add(ext)
+                group.extensions.add(ext)
             total_bytes += sz
 
             if progress_cb is not None and visited_files % 1500 == 0:
@@ -219,9 +226,9 @@ def analyze_file_types(
 
     summaries: list[FileTypeSummary] = []
     for cat_name, data in groups.items():
-        sz = int(data["size"])
-        cnt = int(data["count"])
-        exts = sorted(list(data["extensions"]))
+        sz = data.size
+        cnt = data.count
+        exts = sorted(list(data.extensions))
         pct = (sz / total_bytes * 100.0) if total_bytes > 0 else 0.0
         summaries.append(
             FileTypeSummary(

@@ -20,9 +20,11 @@ from PySide6.QtGui import (
     QPixmap,
 )
 
-_ASSETS = Path(__file__).resolve().parent.parent / "assets"
-_FONT_PATH = _ASSETS / "MaterialIcons-Regular.ttf"
-_CODEPOINTS_PATH = _ASSETS / "MaterialIcons-Regular.codepoints"
+#: Anchored to the crapcleaner package, not to this module's own location, so
+#: moving a module that needs an asset cannot silently break the path.
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+_FONT_PATH = ASSETS_DIR / "MaterialIcons-Regular.ttf"
+_CODEPOINTS_PATH = ASSETS_DIR / "MaterialIcons-Regular.codepoints"
 
 _LOGICAL_SIZE = 18
 _DEVICE_SCALE = 2

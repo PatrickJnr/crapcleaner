@@ -54,30 +54,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 2. DirectX & GPU Shader Caches
-    dx_targets = [
-        CacheTarget(path=os.path.join(local, "D3DSCache")),
-        CacheTarget(path=os.path.join(local, "DirectXShaderCache")),
-        CacheTarget(path=os.path.join(local, "NVIDIA", "DXCache")),
-        CacheTarget(path=os.path.join(local, "NVIDIA", "GLCache")),
-        CacheTarget(path=os.path.join(local, "AMD", "DxCache")),
-    ]
-    categories.append(
-        CleanupCategory(
-            id="directx_shader_cache",
-            name="DirectX & GPU shader caches",
-            group="Gaming",
-            description="Compiled graphics and DirectX shader caches. Rebuilt automatically during gameplay.",
-            safety_level=SafetyLevel.SAFE,
-            what_it_contains="Compiled binary GPU shader caches generated during 3D gameplay.",
-            why_it_grows="Every played game compiles shaders to reduce runtime stuttering.",
-            why_safe_to_delete="Cleans old shaders from uninstalled games; active games recompile seamlessly.",
-            regeneration_behavior="Graphics drivers recompile shaders during gameplay.",
-            reversible=True,
-            targets=dx_targets,
-        )
-    )
-
     # 3. Epic Games Launcher Caches
     epic_targets = [
         CacheTarget(path=os.path.join(local, "Epic Games Launcher", "Saved", "webcache")),

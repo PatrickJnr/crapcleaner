@@ -95,6 +95,10 @@ def _export_csv(data: Any, report_type: str) -> str:
 
         if isinstance(plain, dict):
             _write_node(plain)
+        elif isinstance(plain, list):
+            for item in plain:
+                if isinstance(item, dict):
+                    _write_node(item)
 
     elif report_type == "disk_health":
         writer.writerow(

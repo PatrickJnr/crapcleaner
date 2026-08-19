@@ -6,7 +6,6 @@ way to search, download, and install updates without going through the Settings 
 
 import json
 import os
-import subprocess
 from typing import TYPE_CHECKING
 
 from crapcleaner.utils.platform import is_admin, run_command
@@ -236,14 +235,14 @@ def install(update_ids: list[str] | None = None) -> tuple[bool, str]:
     if stdout.startswith("ERROR:"):
         # The orchestrator can still make progress when the COM session is refused.
         try:
-            subprocess.run(["usoclient.exe", "StartInteractiveScan"], check=False)
-            subprocess.run(["usoclient.exe", "StartDownload"], check=False)
+            run_command(["usoclient.exe", "StartInteractiveScan"], timeout=30.0)
+            run_command(["usoclient.exe", "StartDownload"], timeout=30.0)
             return True, "Triggered Windows Update background download and installation."
         except Exception:
             return False, explain_windows_error(f"Update installation failed: {stdout[6:].strip()}")
 
     try:
-        subprocess.run(["usoclient.exe", "StartInteractiveScan"], check=False)
+        run_command(["usoclient.exe", "StartInteractiveScan"], timeout=30.0)
         return True, "Initiated Windows Update scan and download."
     except Exception as exc:
         return False, explain_windows_error(f"Failed to start update client: {exc}")
@@ -255,7 +254,7 @@ def open_settings() -> tuple[bool, str]:
         return True, "Opened Windows Update settings."
     except Exception:
         try:
-            subprocess.run(["cmd", "/c", "start", "ms-settings:windowsupdate"], check=False)
+            run_command(["cmd", "/c", "start", "ms-settings:windowsupdate"], timeout=15.0)
             return True, "Opened Windows Update settings."
         except Exception as exc:
             return False, f"Could not open Windows Update settings: {exc}"

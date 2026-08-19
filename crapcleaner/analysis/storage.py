@@ -11,9 +11,9 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from crapcleaner.utils.files import is_link_like
 from crapcleaner.utils.platform import is_linux
 
-_REPARSE_POINT = 0x400
 _IS_WINDOWS = sys.platform == "win32"
 
 
@@ -39,31 +39,7 @@ class StorageNode:
         }
 
 
-def _is_link_like(entry: os.DirEntry) -> bool:
-    """True for symlinks and Windows junctions/reparse points.
-
-    On Windows the reparse flag comes from the directory listing itself, so this
-    costs nothing, while resolving a real path costs a syscall.
-    """
-    try:
-        if entry.is_symlink():
-            return True
-    except OSError:
-        return False
-    if not _IS_WINDOWS:
-        return False
-    try:
-        return bool(entry.stat(follow_symlinks=False).st_file_attributes & _REPARSE_POINT)
-    except (OSError, AttributeError):
-        return False
-
-
 def _child_real_path(entry: os.DirEntry, parent_real: str) -> str:
-    if _is_link_like(entry):
-        try:
-            return os.path.realpath(entry.path)
-        except OSError:
-            return entry.path
     return os.path.join(parent_real, entry.name)
 
 
@@ -182,7 +158,9 @@ def analyze_storage_hierarchy(
                 return node
             try:
                 if child.is_dir(follow_symlinks=False):
-                    if _should_skip_linux_subtree(child.path):
+                    # A junction or symlink points at data that lives elsewhere;
+                    # descending would bill another drive's bytes to this one.
+                    if is_link_like(child) or _should_skip_linux_subtree(child.path):
                         continue
                     subdirs.append(child)
                     node.dir_count += 1

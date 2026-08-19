@@ -1,11 +1,10 @@
 """Read-only RAM, swap/pagefile, and graphics memory reporting."""
 
 import os
-import subprocess
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from crapcleaner.utils.platform import is_linux, is_windows, which
+from crapcleaner.utils.platform import is_linux, is_windows, run_command, which
 
 _UNKNOWN = -1
 
@@ -253,11 +252,8 @@ def _run_smi(args: list[str]) -> list[str]:
     smi = _nvidia_smi_path()
     if not smi:
         return []
-    try:
-        out = subprocess.run([smi, *args], capture_output=True, text=True, timeout=6)
-    except Exception:
-        return []
-    if out.returncode != 0:
+    out = run_command([smi, *args], timeout=6.0)
+    if not out.ok:
         return []
     return [line for line in out.stdout.splitlines() if line.strip()]
 

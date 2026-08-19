@@ -15,6 +15,7 @@ from crapcleaner.analysis.installers import scan_installers
 from crapcleaner.analysis.large_files import scan_large_files
 from crapcleaner.analysis.recycle_bin import empty_trash, get_recycle_bin_info
 from crapcleaner.analysis.storage import analyze_storage_hierarchy
+from crapcleaner.categories.browsers import running_browser_names
 from crapcleaner.config import load_settings
 from crapcleaner.core.actions import run_action
 from crapcleaner.core.cleaner import clean_categories
@@ -48,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gui", action="store_true", help="Launch the graphical interface.")
     parser.add_argument("--scan", action="store_true", help="Scan for reclaimable space.")
     parser.add_argument("--json", action="store_true", help="Machine-readable JSON output.")
+    parser.add_argument(
+        "--progress-jsonl",
+        action="store_true",
+        help="Stream scan/cleanup progress as one JSON object per line (JSONL/NDJSON).",
+    )
     parser.add_argument(
         "--list-categories",
         action="store_true",
@@ -239,6 +245,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class JsonlProgress:
+    """Streams one standalone JSON object per line, for CI and external frontends.
+
+    Nothing human-readable is written to stdout while this is active, so a consumer
+    can parse the stream line by line without filtering.
+    """
+
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+
+    def emit(self, event: str, **fields: Any) -> None:
+        if not self.enabled:
+            return
+        payload: dict[str, Any] = {"event": event, "time": round(time.time(), 3)}
+        payload.update(fields)
+        print(json.dumps(payload, default=str), flush=True)
+
+    def scan_progress(self, name: str, position: str, phase: int):
+        self.emit(
+            "scan_progress",
+            category=name,
+            position=position,
+            phase="finished" if phase else "started",
+        )
+
+    def report_warnings(self, category: str, messages: list[str], kind: str = "warning") -> None:
+        for message in messages:
+            self.emit(kind, category=category, message=message)
+
+
 def _select_clean_categories(names: list[str]) -> list[CleanupCategory]:
     selected: list[CleanupCategory] = []
     for name in names:
@@ -335,6 +371,10 @@ def _print_cleanup(report: CleanupReport, json_output: bool = False) -> None:
         f"Total: {report.total_files_deleted} files, {format_size(report.total_space_recovered)} "
         f"recovered, {report.total_skipped} skipped"
     )
+    if report.total_skipped and not report.dry_run:
+        print(
+            f"Cleanup was partial: {report.total_skipped} item(s) were locked, in use, or protected."
+        )
     if report.permission_errors:
         print(f"Permission denied on {len(report.permission_errors)} item(s).")
 
@@ -616,9 +656,9 @@ def run(argv: list[str] | None = None) -> int:
             print(f"Found {len(installs)} potentially removable installer(s):")
             print(f"{'Size':>10}  {'Modified':<16} Path")
             print("-" * 80)
-            for item in installs[:100]:
+            for installer in installs[:100]:
                 print(
-                    f"{format_size(item.size):>10}  {format_datetime(item.modified_at)}  {item.path}"
+                    f"{format_size(installer.size):>10}  {format_datetime(installer.modified_at)}  {installer.path}"
                 )
         return 0
 
@@ -628,7 +668,9 @@ def run(argv: list[str] | None = None) -> int:
             for c in get_all_categories()
             if c.selected_by_default and c.safety_level in (SafetyLevel.SAFE, SafetyLevel.LOW_RISK)
         ]
-        preview = generate_cleanup_preview(categories)
+        # No scan has run in this process, so the finder categories must resolve
+        # their own targets or they would preview as empty.
+        preview = generate_cleanup_preview(categories, resolve_finders=True)
         if args.export:
             export_report(
                 preview, report_type="scan", export_format=args.export, output_path=args.output
@@ -653,8 +695,8 @@ def run(argv: list[str] | None = None) -> int:
                 print(
                     f"\n[Category] {c.category_name} - {format_size(c.estimated_size)} ({c.item_count} items){admin_str}{rev_str}"
                 )
-                for item in c.items[:10]:
-                    print(f"    • {item.path} ({format_size(item.size)})")
+                for preview_item in c.items[:10]:
+                    print(f"    • {preview_item.path} ({format_size(preview_item.size)})")
             print("\n" + "=" * 80)
         return 0
 
@@ -690,9 +732,9 @@ def run(argv: list[str] | None = None) -> int:
             print("Recent Cleanup History:")
             print(f"{'Date':<19} {'Kind':<10} {'Files':>8} {'Recovered':>12}")
             print("-" * 55)
-            for r in records[-50:]:
+            for record in records[-50:]:
                 print(
-                    f"{format_datetime(r.started):<19} {r.kind:<10} {r.files_removed:>8} {format_size(r.space_recovered):>12}"
+                    f"{format_datetime(record.started):<19} {record.kind:<10} {record.files_removed:>8} {format_size(record.space_recovered):>12}"
                 )
         return 0
 
@@ -710,10 +752,10 @@ def run(argv: list[str] | None = None) -> int:
         total_free: int = 0
         for drive_letter in drives:
             try:
-                info = get_drive_info(drive_letter)
-                total_cap = int(info["total"])
-                free_space = int(info["free"])
-                used_space = int(info["used"])
+                drive_info = get_drive_info(drive_letter)
+                total_cap = int(drive_info["total"])
+                free_space = int(drive_info["free"])
+                used_space = int(drive_info["used"])
                 total_capacity += total_cap
                 total_free += free_space
                 pct = int(used_space / total_cap * 100) if total_cap else 0
@@ -829,8 +871,39 @@ def run(argv: list[str] | None = None) -> int:
         categories = get_all_categories()
         cache = ScanCache(ttl=float(settings.get("scan_cache_ttl", 300)))
         engine = ScanEngine(categories, cache=cache)
-        report = engine.run(max_files=settings.get("max_scan_files", 200000))
+        stream = JsonlProgress(args.progress_jsonl)
+        stream.emit("scan_start", categories=len(categories))
+        try:
+            report = engine.run(
+                progress_cb=stream.scan_progress if stream.enabled else None,
+                max_files=settings.get("max_scan_files", 200000),
+            )
+        except KeyboardInterrupt:
+            engine.request_stop()
+            stream.emit("cancelled", stage="scan")
+            print("Scan cancelled.", file=sys.stderr)
+            return 1
         cache.save()
+        if stream.enabled:
+            for scan_result in report.results:
+                stream.emit(
+                    "category_result",
+                    category=scan_result.name,
+                    category_id=scan_result.category_id,
+                    group=scan_result.group,
+                    size=scan_result.size,
+                    items=scan_result.item_count,
+                    skipped=scan_result.skipped,
+                )
+                stream.report_warnings(scan_result.name, scan_result.errors)
+            stream.emit(
+                "scan_complete",
+                total_size=report.total_size,
+                total_files=report.total_files,
+                cancelled=report.cancelled,
+                duration=round(report.duration, 3),
+            )
+            return 0
         if args.export:
             export_report(
                 report, report_type="scan", export_format=args.export, output_path=args.output
@@ -850,10 +923,10 @@ def run(argv: list[str] | None = None) -> int:
         else:
             print(f"{'Size':>10}  {'Modified':<16} {'Type':<16} Path")
             print("-" * 90)
-            for item in files[:200]:
+            for large_file in files[:200]:
                 print(
-                    f"{format_size(item.size):>10}  {item.last_modified:%Y-%m-%d %H:%M}  "
-                    f"{item.file_type:<16} {item.path}"
+                    f"{format_size(large_file.size):>10}  {large_file.last_modified:%Y-%m-%d %H:%M}  "
+                    f"{large_file.file_type:<16} {large_file.path}"
                 )
             print(f"Found {len(files)} files.")
         return 0
@@ -885,9 +958,9 @@ def run(argv: list[str] | None = None) -> int:
         if not dry_run and not args.yes and not _confirm_execute():
             print("Cancelled.")
             return 1
-        result = run_action("docker_system_prune", dry_run=dry_run, is_admin=is_admin())
-        if result and result.errors:
-            print(f"error: {result.errors[0]}", file=sys.stderr)
+        docker_result = run_action("docker_system_prune", dry_run=dry_run, is_admin=is_admin())
+        if docker_result and docker_result.errors:
+            print(f"error: {docker_result.errors[0]}", file=sys.stderr)
             return 1
         print(
             "Docker prune completed successfully."
@@ -917,13 +990,62 @@ def run(argv: list[str] | None = None) -> int:
             print("Cancelled.")
             return 1
 
+        stream = JsonlProgress(args.progress_jsonl)
+        locked_by = running_browser_names([c.id for c in categories])
+        if locked_by and not dry_run:
+            stream.emit("warning", reason="browsers_running", browsers=locked_by)
+            if not stream.enabled:
+                print(
+                    f"warning: {', '.join(locked_by)} running - locked cache files will be skipped.",
+                    file=sys.stderr,
+                )
+
         use_recycle_bin = not args.permanent_delete and settings.get("use_recycle_bin", True)
-        cleanup_report = clean_categories(
-            categories,
-            dry_run=dry_run,
-            use_recycle_bin=use_recycle_bin,
-        )
-        _print_cleanup(cleanup_report, json_output=args.json)
+        stream.emit("cleanup_start", categories=len(categories), dry_run=dry_run)
+        try:
+            cleanup_report = clean_categories(
+                categories,
+                dry_run=dry_run,
+                use_recycle_bin=use_recycle_bin,
+                progress_cb=(
+                    (
+                        lambda name, index, total: stream.emit(
+                            "cleanup_progress", category=name, position=f"{index + 1}/{total}"
+                        )
+                    )
+                    if stream.enabled
+                    else None
+                ),
+            )
+        except KeyboardInterrupt:
+            stream.emit("cancelled", stage="cleanup")
+            print("Cleanup cancelled.", file=sys.stderr)
+            return 1
+        if stream.enabled:
+            for clean_result in cleanup_report.results:
+                stream.emit(
+                    "cleanup_result",
+                    category=clean_result.category_name,
+                    category_id=clean_result.category_id,
+                    files_deleted=clean_result.files_deleted,
+                    space_recovered=clean_result.space_recovered,
+                    skipped=clean_result.skipped,
+                )
+                stream.report_warnings(
+                    clean_result.category_name, clean_result.errors, kind="error"
+                )
+                stream.report_warnings(clean_result.category_name, clean_result.permission_errors)
+                stream.report_warnings(clean_result.category_name, clean_result.skip_reasons)
+            stream.emit(
+                "cleanup_complete",
+                dry_run=cleanup_report.dry_run,
+                total_files_deleted=cleanup_report.total_files_deleted,
+                total_space_recovered=cleanup_report.total_space_recovered,
+                total_skipped=cleanup_report.total_skipped,
+                partial=bool(cleanup_report.total_skipped) and not cleanup_report.dry_run,
+            )
+        else:
+            _print_cleanup(cleanup_report, json_output=args.json)
         if not dry_run:
             from crapcleaner.history import append
             from crapcleaner.models.history import HistoryEntry
