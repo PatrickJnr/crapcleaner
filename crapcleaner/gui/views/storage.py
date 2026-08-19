@@ -721,6 +721,7 @@ class StorageBreakdownView(QWidget):
         worker = StorageAnalysisWorker(target_path, depth, parent=self)
         self._analysis_worker = worker
         worker.tree_done.connect(self._on_tree_done)
+        worker.tree_partial.connect(self._on_tree_partial)
         worker.types_done.connect(self._on_types_done)
         worker.old_done.connect(self._on_old_done)
         worker.vms_done.connect(self._on_vms_done)
@@ -748,6 +749,18 @@ class StorageBreakdownView(QWidget):
     def _on_tree_done(self, root_node):
         self._current_node = root_node
         self._populate_tree(root_node)
+
+    def _on_tree_partial(self, root_node):
+        """Show the tree as it stands, so a large volume is not a blank wait.
+
+        Skipped once the user has navigated into a folder: replacing the view they are
+        reading, every second, would be worse than showing them nothing.
+        """
+        if self._grid_stack:
+            return
+        self._current_node = root_node
+        self.storage_grid.set_node(root_node)
+        self._update_grid_header()
 
     def _on_types_done(self, file_types):
         self._file_types_data = file_types

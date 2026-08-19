@@ -89,7 +89,6 @@ def get_ai_data(min_size: int = INSPECT_MIN_SIZE) -> list[AiDataItem]:
     items: list[AiDataItem] = []
     for app, root in _ai_roots():
         for dirpath, dirnames, filenames in walk_safe(root):
-            dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
             for name in filenames:
                 full = os.path.join(dirpath, name)
                 try:

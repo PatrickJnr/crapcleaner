@@ -5,6 +5,30 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.11.1] - 2026-08-19
+
+Storage analysis runs in parallel and streams results as it measures, scan progress reports the category actually running, and Linux app caches cover Flatpak and Snap installs.
+
+### Fixed
+- **Scan appeared to hang on a fast category**: every category was reported at queue time, and all 89 are queued within milliseconds, so a long-running directory walk was displayed under the name of whichever fast category happened to be queued in front of it - most visibly "Conda caches", which finishes in under a millisecond even when Conda is installed. Progress is now reported immediately before waiting on each category, so the name shown during a stall is the category doing the work. Categories whose targets do not exist were already skipped without any filesystem walk, and still are.
+
+- **Linux application caches missed for Flatpak and Snap installs** (#7): the Discord, Slack, and Spotify categories only knew the native XDG paths, so a sandboxed install - where the data lives under `~/.var/app/<app-id>/` or `~/snap/<name>/current/` - was scanned as if the app were not installed. All three install layouts are now covered for each app.
+- **"Recycle Bin" shown on Linux**: the trash entry lived in the Windows provider, so a Linux install listed "Recycle Bin" under a Windows group with a description citing the Windows API. It now has its own provider and is presented as "Trash" under System on Linux, keeping the `recycle_bin` id so existing settings still apply. Emptying already worked on both platforms.
+
+### Changed
+- **Storage analysis is parallel and streams results as it measures**: enumeration fanned out only at the top level, so one oversized subtree - `AppData` is routinely two thirds of a user profile - was measured by a single thread while the rest of the pool sat idle. Every directory is now its own unit of work pulled from a shared queue by 24 workers, which on a cold cache raised throughput from 16k to 52k files/s (3.2x), measured on two interleaved halves of the same tree so both started uncached. Totals are aggregated as results arrive instead of summed at the end, so the view fills in about half a second and keeps growing while the scan runs rather than staying blank until the whole tree is measured. Drilling into a folder stops the live updates, so the view being read is never replaced underneath.
+- **A tag push now runs the test suite before anything is published**: CI only triggers on branch pushes, so tagging a release built and published without any test gate - which is how v1.0.11 was first published from a commit whose Linux tests were failing. The release workflow now runs the suite on Windows and Linux first, and the build jobs depend on it.
+- **Linux release binaries build on Ubuntu 22.04**: a PyInstaller binary links against the build machine's glibc, so building on ubuntu-latest produced a binary that refuses to start on any older distribution.
+- **mypy runs in CI**: it was a project gate enforced only locally, so a type error could land on master with a green tick.
+- **Broken Discussions link**: the issue chooser pointed at `PatrickJr/crapcleaner` (missing the "n"), a 404 for anyone who clicked it.
+- **Stale workflow_dispatch default**: manually running the release workflow defaulted to rebuilding `v1.0.8`; it now defaults to the tag the run was triggered from.
+- **Issue templates cover Linux**: the bug report asks for the distribution, how CrapCleaner was installed, and how the affected application was installed (distro package, Flatpak, Snap, AppImage) - the last being the usual cause of "category not detected". The category request asks for paths per platform and install method.
+- **CI hygiene**: superseded runs are cancelled instead of finishing alongside the run that matters, pip downloads are cached, the frozen-build step asserts a binary was actually produced, GitHub Actions are current (no more Node 20 deprecation warnings), and Dependabot keeps them that way.
+- **PR checklist**: covers mypy, Linux, and the safety expectations for new cleanup targets.
+- **Faster directory traversal**: the duplicate finder, installer scan, large-file scan, AI data scan, and the Python artifact finders each re-checked every directory for being a symlink, which `walk_safe` already guarantees it never yields. Removing that redundant `lstat` per directory cuts roughly a quarter off the traversal time (32,500 directories: 7.4s to 5.6s), with link, junction, and loop protection unchanged.
+
+---
+
 ## [1.0.11] - 2026-08-19
 
 Engineering audit implementation: correctness and safety fixes, a modular GUI views package, faster duplicate hashing and storage analysis, wider cleanup coverage, and machine-readable CLI progress.

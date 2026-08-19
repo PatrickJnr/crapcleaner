@@ -16,15 +16,50 @@ body:
   - type: dropdown
     id: os
     attributes:
-      label: Windows OS Version
+      label: Operating System
       options:
         - Windows 11 (23H2 / 24H2)
         - Windows 11 (22H2 or older)
         - Windows 10 (22H2 / 21H2)
         - Windows Server
+        - Linux - Debian / Ubuntu / Mint / Pop!_OS
+        - Linux - Fedora / RHEL / Nobara
+        - Linux - Arch / Manjaro / EndeavourOS / CachyOS
+        - Linux - openSUSE
+        - Linux - Other
         - Other
     validations:
       required: true
+  - type: input
+    id: os_detail
+    attributes:
+      label: OS Version / Distribution Details
+      description: Linux users, the output of `cat /etc/os-release | head -2` plus your desktop (GNOME, KDE, …) helps a lot.
+      placeholder: e.g. Fedora 41, KDE Plasma 6.2 (Wayland)
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How did you install CrapCleaner?
+      options:
+        - Downloaded release binary (CrapCleaner.exe / crapcleaner-linux-x86_64)
+        - pip / uv install from source
+        - Ran from a git clone
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: affected_app_install
+    attributes:
+      label: If the report is about a specific application's cache, how is that application installed?
+      description: Cache paths differ per install method, which is the usual cause of "category not detected" reports.
+      options:
+        - Not applicable
+        - Windows installer / Microsoft Store
+        - Distro package (apt, dnf, pacman, zypper)
+        - Flatpak
+        - Snap
+        - AppImage
+        - Built from source / other
   - type: textarea
     id: description
     attributes:

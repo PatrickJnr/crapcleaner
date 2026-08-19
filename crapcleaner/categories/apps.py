@@ -129,6 +129,34 @@ def _get_windows_categories(
     return categories
 
 
+#: Electron cache folders. Identical whatever way the app was installed.
+_ELECTRON_CACHE_SUBS = ("Cache", "GPUCache", "Code Cache", "Service Worker", "Partitions")
+
+
+def _linux_config_roots(user: str, appdata: str, config_dir: str, flatpak_id: str, snap: str):
+    """Every per-user config root a Linux desktop app can have.
+
+    The same application lands in a different place depending on how it was
+    installed - a distro package writes to XDG config, Flatpak sandboxes it under
+    ~/.var/app, and Snap under ~/snap - so a scan that only knows the native path
+    finds nothing for most users.
+    """
+    return [
+        os.path.join(appdata, config_dir),
+        os.path.join(user, ".var", "app", flatpak_id, "config", config_dir),
+        os.path.join(user, "snap", snap, "current", ".config", config_dir),
+    ]
+
+
+def _linux_cache_roots(user: str, local: str, cache_dir: str, flatpak_id: str, snap: str):
+    """The cache-side equivalent of :func:`_linux_config_roots`."""
+    return [
+        os.path.join(local, cache_dir),
+        os.path.join(user, ".var", "app", flatpak_id, "cache", cache_dir),
+        os.path.join(user, "snap", snap, "current", ".cache", cache_dir),
+    ]
+
+
 def _get_linux_categories(
     appdata: str, local: str, user: str, program_data: str
 ) -> list[CleanupCategory]:
@@ -141,11 +169,13 @@ def _get_linux_categories(
             group="Applications",
             description="Cached media, avatars, and Electron runtime data for Discord. Re-downloaded as needed.",
             safety_level=SafetyLevel.LOW_RISK,
-            targets=_electron_subtargets(
-                os.path.join(appdata, "discord"),
-                ("Cache", "GPUCache", "Code Cache", "Service Worker", "Partitions"),
-                existing_only=False,
-            ),
+            targets=[
+                target
+                for root in _linux_config_roots(
+                    user, appdata, "discord", "com.discordapp.Discord", "discord"
+                )
+                for target in _electron_subtargets(root, _ELECTRON_CACHE_SUBS, existing_only=False)
+            ],
         )
     )
 
@@ -156,11 +186,13 @@ def _get_linux_categories(
             group="Applications",
             description="Cached web resources and logs for Slack desktop.",
             safety_level=SafetyLevel.LOW_RISK,
-            targets=_electron_subtargets(
-                os.path.join(appdata, "Slack"),
-                ("Cache", "GPUCache", "Code Cache", "Service Worker"),
-                existing_only=False,
-            ),
+            targets=[
+                target
+                for root in _linux_config_roots(user, appdata, "Slack", "com.slack.Slack", "slack")
+                for target in _electron_subtargets(
+                    root, ("Cache", "GPUCache", "Code Cache", "Service Worker"), existing_only=False
+                )
+            ],
         )
     )
 
@@ -173,9 +205,16 @@ def _get_linux_categories(
             safety_level=SafetyLevel.LOW_RISK,
             targets=_targets(
                 [
-                    os.path.join(appdata, "spotify", "Storage"),
-                    os.path.join(local, "spotify", "Data"),
-                    os.path.join(local, "spotify", "Storage"),
+                    os.path.join(root, sub)
+                    for root in (
+                        _linux_config_roots(
+                            user, appdata, "spotify", "com.spotify.Client", "spotify"
+                        )
+                        + _linux_cache_roots(
+                            user, local, "spotify", "com.spotify.Client", "spotify"
+                        )
+                    )
+                    for sub in ("Data", "Storage")
                 ],
                 existing_only=False,
             ),

@@ -283,6 +283,7 @@ class StorageAnalysisWorker(QThread):
     """
 
     tree_done = Signal(object)  # StorageNode root
+    tree_partial = Signal(object)  # StorageNode root, as measured so far
     types_done = Signal(list)  # list[FileTypeSummary]
     old_done = Signal(list)  # list[OldFileInfo]
     vms_done = Signal(list)  # list[VmStorageInfo]
@@ -321,6 +322,7 @@ class StorageAnalysisWorker(QThread):
                 max_depth=self._depth,
                 stop_event=self._stop_event,
                 progress_cb=self._emit_progress("Measuring directories"),
+                partial_cb=self.tree_partial.emit,
             )
             if self._stop_event.is_set():
                 self.cancelled.emit()

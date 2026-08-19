@@ -5,6 +5,7 @@ import os
 from unittest.mock import patch
 
 from crapcleaner.categories import apps as apps_module
+from crapcleaner.categories import trash as trash_module
 from crapcleaner.categories import windows as windows_module
 from crapcleaner.categories.apps import get_categories as get_apps_categories
 from crapcleaner.categories.developer import get_categories as get_dev_categories
@@ -60,10 +61,22 @@ def test_windows_categories_expansion():
 
 
 def test_windows_only_categories_are_absent_off_windows():
-    """Only the trash action survives; a Linux user cannot be offered Prefetch."""
+    """A Linux user cannot be offered Prefetch, CBS logs, or Windows TEMP."""
     with patch.object(windows_module, "is_windows", return_value=False):
-        ids = {c.id for c in get_win_categories()}
-    assert ids == {"recycle_bin"}
+        assert get_win_categories() == []
+
+
+def test_trash_is_named_for_the_host_platform():
+    """Same id either way, so a disabled_categories setting survives the platform."""
+    with patch.object(trash_module, "is_windows", return_value=True):
+        windows_entry = trash_module.get_categories()[0]
+    with patch.object(trash_module, "is_windows", return_value=False):
+        linux_entry = trash_module.get_categories()[0]
+
+    assert windows_entry.id == linux_entry.id == "recycle_bin"
+    assert (windows_entry.name, windows_entry.group) == ("Recycle Bin", "Windows")
+    assert (linux_entry.name, linux_entry.group) == ("Trash", "System")
+    assert "Windows" not in linux_entry.description
 
 
 def test_registry_has_expanded_categories():
