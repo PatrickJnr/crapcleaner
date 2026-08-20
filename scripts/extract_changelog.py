@@ -75,20 +75,40 @@ def extract_release_title(
     if not notes:
         return tag_label
 
-    # Find the summary sentence preceding the first markdown sub-heading
+    # The summary paragraph preceding the first markdown sub-heading. Joined
+    # before it is cut: taking the first physical line means a hard-wrapped
+    # paragraph is truncated at the wrap, mid-sentence.
     first_block = notes.split("###")[0].strip()
-    first_line = ""
-    for line in first_block.splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and not line.startswith("---"):
-            first_line = line
-            break
+    paragraph = " ".join(
+        line.strip()
+        for line in first_block.splitlines()
+        if line.strip() and not line.startswith("#") and not line.startswith("---")
+    ).strip()
 
-    if not first_line:
+    if not paragraph:
         return tag_label
 
-    title_summary = first_line.rstrip(".")
-    return f"{tag_label}: {title_summary}"
+    return f"{tag_label}: {summarise(paragraph)}"
+
+
+#: Every release from v1.0.0 to v1.1.0 has a title of 38 to 63 characters. This
+#: keeps a generated one in that range: a summary longer than this is a sign the
+#: CHANGELOG's opening sentence is doing too much, and the ellipsis says so.
+TITLE_LIMIT = 64
+
+
+def summarise(paragraph: str, limit: int = TITLE_LIMIT) -> str:
+    """The first sentence of a paragraph, cut on a word boundary if still too long."""
+    match = re.search(r"(?<=[.!?])\s", paragraph)
+    sentence = paragraph[: match.start()] if match else paragraph
+    sentence = sentence.strip().rstrip(".")
+
+    if len(sentence) <= limit:
+        return sentence
+
+    cut = sentence[: limit + 1]
+    boundary = cut.rfind(" ")
+    return (cut[:boundary] if boundary > 0 else sentence[:limit]).rstrip(",;:") + "\u2026"
 
 
 def main() -> int:

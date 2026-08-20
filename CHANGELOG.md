@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0] - 2026-08-20
 
-The 2026-08-19 codebase audit, implemented, and the features it recommended. Deletion
-outside the cleanup engine now goes through the same protected-path layer; the shipped
+Codebase audit, self-update and live theme editing.
+
+The 2026-08-19 audit, implemented, and the features it recommended.
+
+Deletion outside the cleanup engine now goes through the same protected-path layer; the shipped
 executable honours command-line arguments and carries an icon and version metadata; the
 Storage view measures the tree once instead of three times; Linux gets real gaming and
 GPU cache coverage. Crash dumps, storage snapshots, scheduled scans, verified in-place
