@@ -5,6 +5,16 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-08-20
+
+Self-update could not replace the application.
+
+### Fixed
+
+- **The updater downloaded and verified the new build, then left the old one in place**: the installer script waits for the application to close by polling `tasklist` and piping it through `find`, and Git for Windows ships a GNU `find` earlier in PATH. GNU find reads the process id as a filename, fails, and returns the same exit status the loop uses to mean "it has closed" - so the wait ended immediately and the swap raced the still-running application. The download and its SHA-256 check had already succeeded; only the swap failed, which is why the new build was left sitting beside the old one as a hidden file. `find` and `tasklist` are now called by absolute path, so nothing on PATH can stand in for them.
+- **A locked executable no longer abandons the update**: a one-file build keeps a second process alive briefly after the application exits, so the file can still be held at the moment the script tries to move it. The move is now retried for up to a minute rather than being given up on at the first refusal, and if it never succeeds the installed version is left running and the reason is written to the log.
+- **The installer script no longer prints "The batch file cannot be found."** when it deletes itself.
+
 ## [1.2.0] - 2026-08-20
 
 Safety audit, cleanup manifests, and offline mode.

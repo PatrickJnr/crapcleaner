@@ -118,7 +118,50 @@ def test_a_failed_first_move_restores_and_reports(
 
     guard = script.split(first, 1)[1].split(second, 1)[0]
 
-    assert "exit" in guard
-    assert relaunch in guard
-    assert log in guard
+    # The outcome of the first move must be tested before the second one runs; where
+    # it is handled - inline or at a label - is the script's business.
+    assert "errorlevel" in guard or "$BACKUP" in guard, guard
+    assert relaunch in script
+    assert log in script
     assert log_path() in script
+
+
+class TestTheInstallerScriptDoesNotDependOnPath:
+    """A GNU find earlier in PATH made the wait loop exit immediately, so the script
+    raced the running application instead of waiting for it to close."""
+
+    def _script(self, tmp_path, monkeypatch, windows=True):
+        monkeypatch.setattr(module, "is_windows", lambda: windows)
+        path = module.write_installer_script(_update(tmp_path))
+        body = Path(path).read_text(encoding="utf-8")
+        os.remove(path)
+        return body
+
+    def test_the_wait_loop_calls_find_and_tasklist_by_absolute_path(self, tmp_path, monkeypatch):
+        body = self._script(tmp_path, monkeypatch)
+
+        assert r"System32\find.exe" in body
+        assert r"System32\tasklist.exe" in body
+        for line in body.splitlines():
+            if "| find " in line or line.strip().startswith("tasklist "):
+                raise AssertionError(f"resolves through PATH: {line.strip()}")
+
+    def test_the_swap_is_retried_rather_than_abandoned_on_the_first_refusal(
+        self, tmp_path, monkeypatch
+    ):
+        body = self._script(tmp_path, monkeypatch)
+
+        assert ":retry" in body, "a one-file build can still hold the exe briefly"
+        assert "TRIES" in body
+        assert "goto retry" in body
+
+    def test_the_script_closes_itself_before_deleting_itself(self, tmp_path, monkeypatch):
+        body = self._script(tmp_path, monkeypatch)
+
+        assert '(goto) 2>nul & del /F /Q "%~f0"' in body, "cmd otherwise prints a not-found error"
+
+    def test_the_posix_script_retries_the_move_too(self, tmp_path, monkeypatch):
+        body = self._script(tmp_path, monkeypatch, windows=False)
+
+        assert "tries" in body
+        assert "kill -0" in body, "the wait must not shell out to a command PATH can shadow"

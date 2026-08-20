@@ -259,39 +259,56 @@ set "TARGET={target}"
 set "NEW={new}"
 set "BACKUP={target}.bak"
 set "LOG={log}"
+rem Absolute paths: a GNU find or tasklist earlier in PATH - Git for Windows ships one -
+rem reads the pid as a filename, fails, and the wait below would end immediately.
+set "FIND=%SystemRoot%\\System32\\find.exe"
+set "TASKLIST=%SystemRoot%\\System32\\tasklist.exe"
 
-rem Wait for the running application to exit, then swap the file.
+set /a WAITED=0
 :wait
-tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul
-if not errorlevel 1 (
-    ping -n 2 127.0.0.1 >nul
-    goto wait
-)
+"%TASKLIST%" /FI "PID eq {pid}" 2>nul | "%FIND%" "{pid}" >nul
+if errorlevel 1 goto swap
+set /a WAITED+=1
+if %WAITED% GEQ 60 goto swap
+ping -n 2 127.0.0.1 >nul
+goto wait
 
-if exist "%BACKUP%" del /F /Q "%BACKUP%"
-move /Y "%TARGET%" "%BACKUP%" >nul
-if errorlevel 1 (
-    rem The application is still where it was; say so instead of failing silently.
-    >>"%LOG%" echo Update abandoned: "%TARGET%" could not be moved aside. The installed version was left in place.
-    start "" "%TARGET%"
-    del /F /Q "%NEW%"
-    del /F /Q "%~f0"
-    exit /b 1
-)
-move /Y "%NEW%" "%TARGET%" >nul
-if errorlevel 1 (
-    rem Put the working version back rather than leaving nothing behind.
-    move /Y "%BACKUP%" "%TARGET%" >nul
-    >>"%LOG%" echo Update abandoned: the new build could not be moved into place. The installed version was restored.
-    start "" "%TARGET%"
-    del /F /Q "%~f0"
-    exit /b 1
-)
+:swap
+rem A one-file build keeps a second process alive briefly after the application exits,
+rem so the executable can still be locked here. Retry rather than abandoning the update
+rem on the first refusal.
+set /a TRIES=0
+:retry
+if exist "%BACKUP%" del /F /Q "%BACKUP%" >nul 2>&1
+move /Y "%TARGET%" "%BACKUP%" >nul 2>&1
+if not errorlevel 1 goto moved
+set /a TRIES+=1
+if %TRIES% GEQ 30 goto abandoned
+ping -n 2 127.0.0.1 >nul
+goto retry
 
+:moved
+move /Y "%NEW%" "%TARGET%" >nul 2>&1
+if errorlevel 1 goto restore
 start "" "%TARGET%" {relaunch_args}
 ping -n 3 127.0.0.1 >nul
-del /F /Q "%BACKUP%"
-del /F /Q "%~f0"
+del /F /Q "%BACKUP%" >nul 2>&1
+goto done
+
+:restore
+move /Y "%BACKUP%" "%TARGET%" >nul 2>&1
+>>"%LOG%" echo Update abandoned: the new build could not be moved into place. The installed version was restored.
+start "" "%TARGET%"
+goto done
+
+:abandoned
+>>"%LOG%" echo Update abandoned: "%TARGET%" was still in use after 60 seconds. The installed version was left in place.
+start "" "%TARGET%"
+del /F /Q "%NEW%" >nul 2>&1
+
+:done
+rem Close the script before deleting it, or cmd reports that it cannot be found.
+(goto) 2>nul & del /F /Q "%~f0"
 """
 
 _POSIX_SCRIPT = """#!/bin/sh
@@ -301,22 +318,28 @@ NEW='{new}'
 BACKUP='{target}.bak'
 LOG='{log}'
 
-# Wait for the running application to exit.
-while kill -0 {pid} 2>/dev/null; do
+waited=0
+while [ $waited -lt 120 ] && kill -0 {pid} 2>/dev/null; do
     sleep 0.5
+    waited=$((waited + 1))
 done
 
 rm -f "$BACKUP"
-if ! mv "$TARGET" "$BACKUP"; then
-    # The application is still where it was; say so instead of failing silently.
-    echo "Update abandoned: $TARGET could not be moved aside. The installed version was left in place." >>"$LOG"
+# A one-file build keeps a second process alive briefly, and a running binary can still
+# refuse to be replaced, so retry rather than abandoning on the first failure.
+tries=0
+while [ $tries -lt 30 ] && ! mv "$TARGET" "$BACKUP" 2>/dev/null; do
+    sleep 1
+    tries=$((tries + 1))
+done
+if [ ! -f "$BACKUP" ]; then
+    echo "Update abandoned: $TARGET was still in use. The installed version was left in place." >>"$LOG"
     "$TARGET" &
     rm -f "$NEW"
     rm -f "$0"
     exit 1
 fi
 if ! mv "$NEW" "$TARGET"; then
-    # Put the working version back rather than leaving nothing behind.
     mv "$BACKUP" "$TARGET"
     echo "Update abandoned: the new build could not be moved into place. The installed version was restored." >>"$LOG"
     "$TARGET" &
