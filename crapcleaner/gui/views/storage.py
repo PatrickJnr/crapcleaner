@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -40,6 +41,7 @@ from crapcleaner.gui.icons import icon as material_icon
 from crapcleaner.gui.views.common import CrapTable, NumericItem, _c, page_header
 from crapcleaner.reports import export_report
 from crapcleaner.utils.format import (
+    format_datetime,
     format_size,
 )
 from crapcleaner.utils.platform import (
@@ -88,6 +90,7 @@ class StorageGrid(QWidget):
         self.setMinimumHeight(260)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setAccessibleName("Storage usage grid")
+        self.setAccessibleDescription("Folder sizes, largest first")
 
     def set_node(self, node):
         self._node = node
@@ -432,6 +435,17 @@ class StorageBreakdownView(QWidget):
         self.depth_spin.setValue(3)
         toolbar.addWidget(self.depth_spin)
 
+        # Logical size is what a file claims to contain; allocated size is what it
+        # occupies, which is what the drive free space reflects. Off by default
+        # because on Windows it costs a call per file.
+        self.allocated_check = QCheckBox("On-disk size")
+        self.allocated_check.setToolTip(
+            "Measure what files occupy on disk rather than their length. Accounts for "
+            "cluster slack, NTFS compression, and sparse files."
+        )
+        self.allocated_check.setAccessibleName("Measure on-disk size")
+        toolbar.addWidget(self.allocated_check)
+
         self.analyze_btn = QPushButton("Analyze Storage")
         self.analyze_btn.setProperty("primary", "true")
         self.analyze_btn.setIcon(material_icon("search", "#ffffff"))
@@ -492,6 +506,7 @@ class StorageBreakdownView(QWidget):
             ("TYPES", "Functional File Types"),
             ("OLD", "Old Files (>90d)"),
             ("VMS", "Virtual Machines && Containers"),
+            ("CHANGES", "Changes Since Last Scan"),
         ]
         for key, title in sections:
             btn = QPushButton(title)
@@ -583,6 +598,24 @@ class StorageBreakdownView(QWidget):
         vm_lay.addWidget(self.vm_table)
         self.content_stack.addWidget(vm_card)
 
+        # 5. What changed since the last scan of this path
+        changes_card = QFrame()
+        changes_card.setProperty("card", "true")
+        changes_lay = QVBoxLayout(changes_card)
+        changes_lay.setContentsMargins(8, 8, 8, 8)
+        self.changes_summary = QLabel("Run an analysis to compare it with the previous one.")
+        self.changes_summary.setWordWrap(True)
+        self.changes_summary.setProperty("subtle", "true")
+        changes_lay.addWidget(self.changes_summary)
+        self.changes_table = CrapTable(0, 4)
+        self.changes_table.setHorizontalHeaderLabels(["Change", "Was", "Now", "Folder"])
+        self.changes_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Stretch
+        )
+        self.changes_table.set_empty_text(self._theme, "No folder changed by more than a megabyte.")
+        changes_lay.addWidget(self.changes_table)
+        self.content_stack.addWidget(changes_card)
+
         root_lay.addWidget(self.content_stack, 1)
         self.refresh_health()
 
@@ -641,7 +674,7 @@ class StorageBreakdownView(QWidget):
             btn.setProperty("active", "true" if key == section_key else "false")
             btn.style().unpolish(btn)
             btn.style().polish(btn)
-        idx_map = {"TREE": 0, "TYPES": 1, "OLD": 2, "VMS": 3}
+        idx_map = {"TREE": 0, "TYPES": 1, "OLD": 2, "VMS": 3, "CHANGES": 4}
         self.content_stack.setCurrentIndex(idx_map.get(section_key, 0))
 
     def refresh_health(self, force: bool = False):
@@ -716,15 +749,19 @@ class StorageBreakdownView(QWidget):
         self.progress_label.setText("Starting analysis...")
 
         stop_worker(getattr(self, "_analysis_worker", None))
+        self._storage_index = None
 
         depth = self.depth_spin.value()
-        worker = StorageAnalysisWorker(target_path, depth, parent=self)
+        size_mode = "allocated" if self.allocated_check.isChecked() else "logical"
+        worker = StorageAnalysisWorker(target_path, depth, parent=self, size_mode=size_mode)
         self._analysis_worker = worker
         worker.tree_done.connect(self._on_tree_done)
         worker.tree_partial.connect(self._on_tree_partial)
+        worker.index_done.connect(self._on_index_done)
         worker.types_done.connect(self._on_types_done)
         worker.old_done.connect(self._on_old_done)
         worker.vms_done.connect(self._on_vms_done)
+        worker.changes_done.connect(self._on_changes_done)
         worker.progress.connect(self._on_analysis_progress)
         worker.finished_all.connect(self._on_analysis_done)
         worker.cancelled.connect(self._on_analysis_cancelled)
@@ -750,6 +787,10 @@ class StorageBreakdownView(QWidget):
         self._current_node = root_node
         self._populate_tree(root_node)
 
+    def _on_index_done(self, index):
+        """Keep the measured directories so drilling in does not re-walk them."""
+        self._storage_index = index
+
     def _on_tree_partial(self, root_node):
         """Show the tree as it stands, so a large volume is not a blank wait.
 
@@ -773,6 +814,43 @@ class StorageBreakdownView(QWidget):
     def _on_vms_done(self, vms):
         self._vm_data = vms
         self._populate_vms(vms)
+
+    def _on_changes_done(self, comparison):
+        """Fill in what grew or shrank since the previous scan of this path."""
+        self._changes_data = comparison
+        self.changes_table.setRowCount(0)
+        if comparison is None:
+            self.changes_summary.setText(
+                "This is the first analysis of this path. The next one will report what changed."
+            )
+            return
+
+        from datetime import datetime
+
+        since = datetime.fromtimestamp(comparison.previous_taken_at)
+        delta = comparison.total_delta
+        direction = "grew by" if delta >= 0 else "shrank by"
+        self.changes_summary.setText(
+            f"Compared with {format_datetime(since)}: this path {direction} "
+            f"{format_size(abs(delta))}."
+        )
+
+        for change in comparison.changes[:200]:
+            row = self.changes_table.rowCount()
+            self.changes_table.insertRow(row)
+            sign = "+" if change.delta >= 0 else "-"
+            self.changes_table.setItem(
+                row,
+                0,
+                NumericItem(f"{sign}{format_size(abs(change.delta))}", abs(change.delta)),
+            )
+            self.changes_table.setItem(
+                row, 1, NumericItem(format_size(change.previous_size), change.previous_size)
+            )
+            self.changes_table.setItem(
+                row, 2, NumericItem(format_size(change.current_size), change.current_size)
+            )
+            self.changes_table.setItem(row, 3, QTableWidgetItem(change.path))
 
     def _cancel_analysis(self):
         worker = getattr(self, "_analysis_worker", None)
@@ -839,6 +917,16 @@ class StorageBreakdownView(QWidget):
                 self, "No deeper detail", f"{node.name} has no sub-folders to show."
             )
             return
+
+        # The scan measured the whole tree and kept only the shallow levels; the rest
+        # is still in the index, so this is a lookup rather than another walk.
+        index = getattr(self, "_storage_index", None)
+        if index is not None and index.has(node.path):
+            measured = index.subtree(node.path, max_depth=2)
+            if measured is not None and measured.children:
+                self._on_expanded(node, measured)
+                return
+
         if self._expand_worker is not None:
             return
 

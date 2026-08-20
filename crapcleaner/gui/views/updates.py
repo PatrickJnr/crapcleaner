@@ -625,6 +625,8 @@ class AppUpdatesView(QWidget):
         result_lay.addWidget(self.result_icon)
         result_lay.addWidget(self.result_label, 1)
         dismiss_btn = QPushButton()
+        dismiss_btn.setAccessibleName("Dismiss")
+        dismiss_btn.setToolTip("Dismiss this message")
         dismiss_btn.setIcon(material_icon("close", _c(self._theme, "muted")))
         dismiss_btn.setFlat(True)
         dismiss_btn.setFixedSize(22, 22)

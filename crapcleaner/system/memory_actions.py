@@ -36,7 +36,12 @@ class MemoryActionResult:
     success: bool = False
     message: str = ""
     dry_run: bool = False
-    reclaimed_bytes: int = 0
+    #: Change in system-wide available memory across the action. Everything else on
+    #: the machine allocated and freed during the same window, so this is not a
+    #: measure of what the action itself released and it is not clamped at zero -
+    #: available memory genuinely falls sometimes, and hiding that would be the same
+    #: trick every "RAM optimiser" plays.
+    available_delta_bytes: int = 0
     measurable: bool = True
     before: MemoryStats = field(default_factory=MemoryStats)
     after: MemoryStats = field(default_factory=MemoryStats)
@@ -72,8 +77,9 @@ def _process_working_sets_action() -> MemoryAction:
             "are closed, terminated, or disrupted."
         ),
         effect=_platform_text(
-            "EmptyWorkingSet across all accessible processes.",
-            "Heap trim and page release.",
+            "EmptyWorkingSet then SetProcessWorkingSetSize on every process this "
+            "account may open, twice.",
+            "malloc_trim on this process's own heap, then a garbage collection.",
         ),
         requires_admin=False,
     )
@@ -123,12 +129,18 @@ def _standby_action() -> MemoryAction:
         name="Purge the standby list",
         kind=RAM,
         description=(
-            "Discards cached file data the system is holding in the standby list. "
-            "That memory is already available to applications on demand, so this "
-            "mainly changes how memory is reported. Files re-read from disk afterwards "
-            "will be slower until the cache warms up again."
+            "Discards cached file data the system is holding in the standby list, and "
+            "empties system working sets along the way. That memory is already "
+            "available to applications on demand, so this mainly changes how memory is "
+            "reported - and everything running has to fault its pages back in, so the "
+            "machine is slower for a while afterwards, not faster."
         ),
-        effect="NtSetSystemInformation(SystemMemoryListInformation, MemoryPurgeStandbyList).",
+        effect=(
+            "NtSetSystemInformation(SystemMemoryListInformation) with, in order: "
+            "MemoryFlushModifiedList, MemoryEmptyWorkingSets, MemoryPurgeStandbyList, "
+            "MemoryPurgeLowPriorityStandbyList; then SetSystemFileCacheSize(-1, -1) to "
+            "release the system file cache working set."
+        ),
         requires_admin=True,
         supported=supported,
         unsupported_reason="" if supported else "The standby list only exists on Windows.",
@@ -215,14 +227,10 @@ def _trim_process_working_sets() -> tuple[bool, str]:
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
             psapi = ctypes.WinDLL("psapi", use_last_error=True)
 
-            # Flush modified page list so pending pages can be freed
-            try:
-                cmd_flush_mod = ctypes.c_int(3)
-                ctypes.windll.ntdll.NtSetSystemInformation(
-                    80, ctypes.byref(cmd_flush_mod), ctypes.sizeof(cmd_flush_mod)
-                )
-            except Exception:
-                pass
+            # A system-wide modified-page-list flush used to run here. It is not what
+            # this action says it does, it needs a privilege this path does not
+            # request, and its result was discarded - so it is gone rather than
+            # documented. "Flush all available memory" is where system-wide work goes.
 
             PROCESS_QUERY_INFORMATION = 0x0400
             PROCESS_SET_QUOTA = 0x0100
@@ -291,23 +299,44 @@ def _trim_process_working_sets() -> tuple[bool, str]:
 
 
 def _flush_all() -> tuple[bool, str]:
-    msgs = []
-    ok_ws, msg_ws = _trim_process_working_sets()
-    if ok_ws:
-        msgs.append(msg_ws)
-    ok_self, msg_self = _trim_working_set()
-    if ok_self:
-        msgs.append(msg_self)
-    if is_windows() and is_admin():
-        ok_st, msg_st = _purge_standby_list()
-        if ok_st:
-            msgs.append(msg_st)
-    elif is_linux() and is_admin():
-        ok_fc, msg_fc = _drop_caches()
-        if ok_fc:
-            msgs.append("Filesystem cache dropped.")
+    """Run every applicable step, and report success only if one of them worked.
 
-    return True, " · ".join(msgs) if msgs else "Memory flush completed."
+    This used to return True unconditionally, so a run in which every step failed
+    still reported "Memory flush completed." Steps that are skipped for lack of
+    elevation are reported as skipped rather than counted either way.
+    """
+    done: list[str] = []
+    failed: list[str] = []
+
+    for step, (ok, message) in (
+        ("working sets", _trim_process_working_sets()),
+        ("own heap", _trim_working_set()),
+    ):
+        (done if ok else failed).append(message if ok else f"{step}: {message}")
+
+    if is_windows():
+        if is_admin():
+            ok_st, msg_st = _purge_standby_list()
+            (done if ok_st else failed).append(msg_st if ok_st else f"standby list: {msg_st}")
+        else:
+            failed.append("standby list: skipped, needs elevation")
+    elif is_linux():
+        if is_admin():
+            ok_fc, msg_fc = _drop_caches()
+            (done if ok_fc else failed).append(
+                "Filesystem cache dropped." if ok_fc else f"filesystem cache: {msg_fc}"
+            )
+        else:
+            failed.append("filesystem cache: skipped, needs root")
+
+    message = " · ".join(done)
+    if failed:
+        message = (
+            f"{message} · Not done: {'; '.join(failed)}"
+            if done
+            else (f"Nothing was done. {'; '.join(failed)}")
+        )
+    return bool(done), message or "Nothing to do on this platform."
 
 
 def _trim_working_set() -> tuple[bool, str]:
@@ -588,5 +617,5 @@ def run_action(action_id: str, dry_run: bool = False) -> MemoryActionResult:
     result.success = ok
     result.message = message
     result.after = after
-    result.reclaimed_bytes = max(0, after.available_bytes - before.available_bytes)
+    result.available_delta_bytes = after.available_bytes - before.available_bytes
     return result

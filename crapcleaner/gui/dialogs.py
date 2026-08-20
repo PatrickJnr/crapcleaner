@@ -89,15 +89,53 @@ class DuplicateFilesDialog(QDialog):
             self.file_list.addItem(item)
         layout.addWidget(self.file_list, 1)
 
+        self.keep_warning = QLabel(
+            "Keep at least one copy - a group is only listed because these files are identical, "
+            "so recycling every one of them removes the content itself."
+        )
+        self.keep_warning.setWordWrap(True)
+        self.keep_warning.setProperty("danger", "true")
+        self.keep_warning.setVisible(False)
+        layout.addWidget(self.keep_warning)
+
         buttons = QDialogButtonBox()
         cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
         cancel.setText("Cancel")
-        recycle = buttons.addButton(QDialogButtonBox.StandardButton.Ok)
-        recycle.setText("Move Selected to Recycle Bin")
-        recycle.setProperty("danger", "true")
+        self.recycle_button = buttons.addButton(QDialogButtonBox.StandardButton.Ok)
+        self.recycle_button.setText("Move Selected to Recycle Bin")
+        self.recycle_button.setProperty("danger", "true")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        # The dialog used to only advise keeping a copy. Nothing enforced it, so
+        # "Select All" followed by confirming removed every copy of the content.
+        self.file_list.itemChanged.connect(lambda _item: self._sync_keep_state())
+        self._sync_keep_state()
+
+    def _keeps_a_copy(self) -> bool:
+        """Whether at least one copy in this group is left unchecked."""
+        count = self.file_list.count()
+        if count == 0:
+            return True
+        for i in range(count):
+            item = self.file_list.item(i)
+            if item is not None and item.checkState() != Qt.CheckState.Checked:
+                return True
+        return False
+
+    def _sync_keep_state(self) -> None:
+        keeps = self._keeps_a_copy()
+        self.keep_warning.setVisible(not keeps)
+        self.recycle_button.setEnabled(keeps)
+
+    def accept(self) -> None:
+        # Belt and braces: the button is disabled, but a programmatic accept must not
+        # be able to take the last copy either.
+        if not self._keeps_a_copy():
+            self._sync_keep_state()
+            return
+        super().accept()
 
     def _set_all_checked(self, checked: bool):
         for i in range(self.file_list.count()):
@@ -176,12 +214,208 @@ class DuplicateFilesDialog(QDialog):
                 )
 
     def targets(self) -> list[str]:
+        """Checked copies, or nothing at all if that would leave no copy behind."""
+        if not self._keeps_a_copy():
+            return []
         result = []
         for i in range(self.file_list.count()):
             item = self.file_list.item(i)
             if item is not None and item.checkState() == Qt.CheckState.Checked:
                 result.append(item.text())
         return result
+
+
+class CleanupPreviewDialog(QDialog):
+    """Every file a cleanup would remove, with each one deselectable.
+
+    `core/preview.py` has produced this manifest all along and only the CLI could
+    see it. Unticking a file here excludes that exact path from the cleanup, which
+    is the difference between a listing and a preview.
+    """
+
+    def __init__(self, categories, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Review Files to Clean")
+        self.resize(880, 600)
+        self._preview = None
+        self._worker = None
+        self._excluded: set[str] = set()
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(18, 16, 18, 16)
+
+        header = QFrame()
+        header.setProperty("card", "true")
+        head_lay = QVBoxLayout(header)
+        head_lay.setContentsMargins(14, 12, 14, 12)
+        title = QLabel("Files that will be removed")
+        title.setStyleSheet("font-size: 15px; font-weight: 700;")
+        head_lay.addWidget(title)
+        self.summary = QLabel("Building the manifest…")
+        self.summary.setWordWrap(True)
+        head_lay.addWidget(self.summary)
+        layout.addWidget(header)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Item", "Size"])
+        self.tree.setAccessibleName("Files that will be removed")
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self.tree, 1)
+
+        buttons = QDialogButtonBox()
+        cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        cancel.setText("Cancel")
+        self.ok_button = buttons.addButton(QDialogButtonBox.StandardButton.Ok)
+        self.ok_button.setText("Clean Selected Files")
+        self.ok_button.setProperty("danger", "true")
+        self.ok_button.setEnabled(False)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._start(categories)
+
+    # -- building ---------------------------------------------------------
+    def _start(self, categories):
+        from crapcleaner.gui.workers import PreviewWorker
+
+        worker = PreviewWorker(categories, parent=self)
+        self._worker = worker
+        worker.progress.connect(
+            lambda name, index, total: self.summary.setText(
+                f"Scanning {name} ({index + 1}/{total})…"
+            )
+        )
+        worker.done.connect(self._show_preview)
+        worker.failed.connect(self._show_failure)
+        worker.finished.connect(lambda: setattr(self, "_worker", None))
+        worker.start()
+
+    def _show_failure(self, message: str):
+        self.summary.setText(f"Could not build the preview: {message}")
+
+    def _show_preview(self, preview):
+        self._preview = preview
+        self.tree.blockSignals(True)
+        self.tree.clear()
+
+        for category in preview.categories:
+            parent = QTreeWidgetItem(self.tree)
+            parent.setText(0, category.category_name)
+            parent.setText(1, format_size(category.estimated_size))
+            parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            parent.setCheckState(0, Qt.CheckState.Checked)
+            parent.setData(0, Qt.ItemDataRole.UserRole, None)
+
+            if category.action:
+                child = QTreeWidgetItem(parent)
+                child.setText(0, f"Runs: {category.action}")
+                child.setFlags(child.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+                continue
+
+            for item in category.items:
+                child = QTreeWidgetItem(parent)
+                child.setText(0, item.path)
+                child.setText(1, format_size(item.size))
+                child.setToolTip(0, item.path)
+                child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                child.setCheckState(0, Qt.CheckState.Checked)
+                child.setData(0, Qt.ItemDataRole.UserRole, item.path)
+
+            if category.items_truncated:
+                note = QTreeWidgetItem(parent)
+                shown = len(category.items)
+                note.setText(
+                    0,
+                    f"… and {category.item_count - shown:,} more files, not listed individually. "
+                    "They are included in the cleanup.",
+                )
+                note.setFlags(note.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+
+        self.tree.blockSignals(False)
+        self.ok_button.setEnabled(True)
+        self._update_summary()
+
+    # -- selection --------------------------------------------------------
+    def _on_item_changed(self, item, _column):
+        self.tree.blockSignals(True)
+        if item.childCount():
+            state = item.checkState(0)
+            if state != Qt.CheckState.PartiallyChecked:
+                for index in range(item.childCount()):
+                    child = item.child(index)
+                    if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                        child.setCheckState(0, state)
+        parent = item.parent()
+        if parent is not None:
+            checked = sum(
+                1
+                for index in range(parent.childCount())
+                if parent.child(index).checkState(0) == Qt.CheckState.Checked
+            )
+            checkable = sum(
+                1
+                for index in range(parent.childCount())
+                if parent.child(index).flags() & Qt.ItemFlag.ItemIsUserCheckable
+            )
+            if checked == 0:
+                parent.setCheckState(0, Qt.CheckState.Unchecked)
+            elif checked == checkable:
+                parent.setCheckState(0, Qt.CheckState.Checked)
+            else:
+                parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+        self.tree.blockSignals(False)
+        self._update_summary()
+
+    def _walk_items(self):
+        for index in range(self.tree.topLevelItemCount()):
+            parent = self.tree.topLevelItem(index)
+            if parent is None:
+                continue
+            for child_index in range(parent.childCount()):
+                child = parent.child(child_index)
+                if child is not None:
+                    yield parent, child
+
+    def excluded_paths(self) -> set[str]:
+        """Paths the user unticked, which the cleanup must leave alone."""
+        excluded = set()
+        for _parent, child in self._walk_items():
+            path = child.data(0, Qt.ItemDataRole.UserRole)
+            if path and child.checkState(0) != Qt.CheckState.Checked:
+                excluded.add(str(path))
+        return excluded
+
+    def selected_size(self) -> int:
+        if self._preview is None:
+            return 0
+        excluded = self.excluded_paths()
+        total = 0
+        for category in self._preview.categories:
+            total += category.estimated_size
+            for item in category.items:
+                if item.path in excluded:
+                    total -= item.size
+        return max(0, total)
+
+    def _update_summary(self):
+        if self._preview is None:
+            return
+        excluded = self.excluded_paths()
+        listed = sum(len(c.items) for c in self._preview.categories)
+        total_files = sum(c.item_count for c in self._preview.categories)
+        note = ""
+        if excluded:
+            note = f" {len(excluded)} file(s) deselected and will be left alone."
+        self.summary.setText(
+            f"{total_files:,} files, {format_size(self.selected_size())} to remove. "
+            f"{listed:,} listed individually.{note}"
+        )
 
 
 class ConfirmCleanupDialog(QDialog):
@@ -196,6 +430,8 @@ class ConfirmCleanupDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Confirm Cleanup Operation")
         self.resize(620, 520)
+        self._categories = categories
+        self._excluded_paths: set[str] = set()
 
         total = sum(c.size for c in categories)
         layout = QVBoxLayout(self)
@@ -276,6 +512,11 @@ class ConfirmCleanupDialog(QDialog):
         opt_lay.addWidget(self.recycle_check)
         layout.addWidget(opt_card)
 
+        # The manifest has existed since 1.0.3 and only the CLI could see it.
+        self.review_button = QPushButton("Review files…")
+        self.review_button.setToolTip("List every file this cleanup would remove")
+        self.review_button.clicked.connect(self._review_files)
+
         buttons = QDialogButtonBox()
         cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
         cancel.setText("Cancel")
@@ -283,6 +524,7 @@ class ConfirmCleanupDialog(QDialog):
         clean.setText("Run Dry Run Preview" if dry_run_default else "Execute Cleanup")
         clean.setProperty("danger", not dry_run_default)
         clean.setProperty("primary", dry_run_default)
+        buttons.addButton(self.review_button, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -310,6 +552,18 @@ class ConfirmCleanupDialog(QDialog):
 
     def use_recycle_bin(self) -> bool:
         return self.recycle_check.isChecked()
+
+    def _review_files(self):
+        """Open the manifest, and remember anything the user unticked."""
+        dialog = CleanupPreviewDialog(self._categories, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._excluded_paths = dialog.excluded_paths()
+            if self._excluded_paths:
+                self.review_button.setText(f"Review files… ({len(self._excluded_paths)} excluded)")
+
+    def excluded_paths(self) -> set[str]:
+        """Files the user deselected while reviewing. Empty unless they reviewed."""
+        return set(getattr(self, "_excluded_paths", set()))
 
 
 class ReportDialog(QDialog):

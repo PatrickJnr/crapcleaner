@@ -5,6 +5,7 @@ from collections.abc import Callable
 from crapcleaner.categories.ai import get_categories as ai_categories
 from crapcleaner.categories.apps import get_categories as apps_categories
 from crapcleaner.categories.browsers import get_categories as browser_categories
+from crapcleaner.categories.crash_dumps import get_categories as crash_dump_categories
 from crapcleaner.categories.developer import get_categories as developer_categories
 from crapcleaner.categories.docker import get_categories as docker_categories
 from crapcleaner.categories.dotnet import get_categories as dotnet_categories
@@ -15,6 +16,9 @@ from crapcleaner.categories.python import get_categories as python_categories
 from crapcleaner.categories.trash import get_categories as trash_categories
 from crapcleaner.categories.windows import get_categories as windows_categories
 from crapcleaner.models.category import CleanupCategory
+from crapcleaner.utils.logs import get_logger
+
+logger = get_logger("registry")
 
 SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = [
     ("Windows", windows_categories),
@@ -28,6 +32,7 @@ SIMPLE_PROVIDERS: list[tuple[str, Callable[[], list[CleanupCategory]]]] = [
     ("AI", ai_categories),
     ("Docker", docker_categories),
     ("System", trash_categories),
+    ("Crash dumps", crash_dump_categories),
 ]
 
 
@@ -39,10 +44,13 @@ def get_all_categories() -> list[CleanupCategory]:
     include_all_drives = bool(settings.get("scan_all_drives", True))
 
     categories: list[CleanupCategory] = []
-    for _group, provider in SIMPLE_PROVIDERS:
+    for group, provider in SIMPLE_PROVIDERS:
         try:
             categories.extend(provider())
         except Exception:
+            # One broken provider must not remove every other category, but it used
+            # to vanish without a word - so a missing section had no explanation.
+            logger.warning("Category provider %r failed to load", group, exc_info=True)
             continue
 
     try:
@@ -50,21 +58,33 @@ def get_all_categories() -> list[CleanupCategory]:
             python_categories(scan_roots=scan_roots, include_all_drives=include_all_drives)
         )
     except Exception:
-        pass
+        logger.warning("Category provider 'Python' failed to load", exc_info=True)
 
     return categories
 
 
-def get_category_by_name(name: str) -> CleanupCategory:
-    for category in get_all_categories():
+def get_category_by_name(
+    name: str, categories: list[CleanupCategory] | None = None
+) -> CleanupCategory:
+    for category in categories if categories is not None else get_all_categories():
         if category.name.lower() == name.lower():
             return category
     raise KeyError(f"No category named {name!r}")
 
 
-def find_categories(name_substring: str) -> list[CleanupCategory]:
+def find_categories(
+    name_substring: str, categories: list[CleanupCategory] | None = None
+) -> list[CleanupCategory]:
+    """Categories whose name or id contains `name_substring`.
+
+    Pass `categories` when resolving several names in a row. Building the registry
+    runs every provider and probes hundreds of paths (one of them parses Steam's
+    library index), so doing it once per name made resolving a handful of names cost
+    as many full enumerations.
+    """
     needle = name_substring.lower()
-    return [c for c in get_all_categories() if needle in c.name.lower() or needle in c.id.lower()]
+    pool = categories if categories is not None else get_all_categories()
+    return [c for c in pool if needle in c.name.lower() or needle in c.id.lower()]
 
 
 def group_categories(categories: list[CleanupCategory]) -> dict[str, list[CleanupCategory]]:

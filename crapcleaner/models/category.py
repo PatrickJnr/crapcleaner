@@ -37,7 +37,6 @@ SAFETY_DESCRIPTIONS = {
 class CacheTarget:
     path: str
     patterns: tuple[str, ...] = ()
-    subdirs: tuple[str, ...] = ()
     recurse: bool = True
     only_files: bool = False
 

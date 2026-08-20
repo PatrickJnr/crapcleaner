@@ -45,16 +45,60 @@ def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+#: Set when a damaged settings file was moved aside, so the UI can say so once.
+#: `excluded_paths` is a safety setting, and losing it silently is the part that
+#: matters - the user has to know their exclusions are no longer in force.
+_recovery_notice: str | None = None
+
+
+def take_recovery_notice() -> str | None:
+    """Return and clear the message about a settings file that had to be recovered."""
+    global _recovery_notice
+    notice, _recovery_notice = _recovery_notice, None
+    return notice
+
+
+def _quarantine_unreadable_config(path: str, reason: str) -> None:
+    """Move a damaged settings file aside instead of overwriting it.
+
+    The next save merges onto whatever load_settings returned, so without this a
+    single bad parse replaced every stored preference - including the user's
+    exclusion list - with defaults, permanently and without a word.
+    """
+    global _recovery_notice
+    backup = f"{path}.corrupt"
+    try:
+        index = 1
+        while os.path.exists(backup):
+            backup = f"{path}.corrupt.{index}"
+            index += 1
+        os.replace(path, backup)
+    except OSError:
+        _recovery_notice = (
+            f"Settings could not be read ({reason}) and could not be backed up. "
+            "Defaults are in use; your excluded paths are not in force."
+        )
+        return
+    _recovery_notice = (
+        f"Settings could not be read ({reason}). The file was kept as "
+        f"{os.path.basename(backup)} and defaults are in use - check your excluded paths."
+    )
+
+
 def load_settings() -> dict[str, Any]:
     path = config_path()
     settings = dict(DEFAULT_CONFIG)
     try:
         with open(path, encoding="utf-8") as fh:
             loaded = json.load(fh)
-    except (OSError, ValueError):
+    except OSError:
+        return settings
+    except ValueError as exc:
+        _quarantine_unreadable_config(path, str(exc).split("\n")[0][:120])
         return settings
 
     if not isinstance(loaded, dict):
+        _quarantine_unreadable_config(path, "file does not contain a settings object")
         return settings
 
     loaded = migrate_settings(loaded)
@@ -114,7 +158,13 @@ def save_settings(settings: dict[str, Any]) -> None:
 
         refresh_protection_cache()
     except Exception:  # pragma: no cover - a cache drop must never fail a save
-        pass
+        from crapcleaner.utils.logs import get_logger
+
+        get_logger("config").warning(
+            "Saved settings but could not refresh the protection cache; "
+            "exclusion changes apply on next start",
+            exc_info=True,
+        )
 
 
 def update_settings(**updates) -> dict[str, Any]:

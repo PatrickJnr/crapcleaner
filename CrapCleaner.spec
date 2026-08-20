@@ -9,10 +9,27 @@ import sys
 import os
 from PyInstaller.utils.hooks import collect_all
 
-block_cipher = None
-
 # Base repository directory
 ROOT_DIR = os.path.abspath(SPECPATH)
+
+sys.path.insert(0, ROOT_DIR)
+from crapcleaner.constants import VERSION  # noqa: E402
+from scripts.version_info import write as write_version_info  # noqa: E402
+
+IS_WINDOWS = sys.platform.startswith('win')
+
+# The icon is committed rather than rendered here, so a build needs no Qt and the
+# icon in a release is the one that was reviewed. Regenerate with scripts/make_icon.py.
+ICON_PATH = os.path.join(ROOT_DIR, 'crapcleaner', 'assets', 'crapcleaner.ico')
+ICON = ICON_PATH if IS_WINDOWS and os.path.isfile(ICON_PATH) else None
+
+# Version metadata is generated from crapcleaner.constants so it cannot drift from
+# the version the application reports.
+VERSION_FILE = None
+if IS_WINDOWS:
+    VERSION_FILE = write_version_info(
+        os.path.join(ROOT_DIR, 'build', 'file_version_info.txt'), VERSION
+    )
 
 # Collect all crapcleaner modules, categories, analyzers, and package data
 crap_datas, crap_binaries, crap_hiddenimports = collect_all('crapcleaner')
@@ -20,6 +37,8 @@ crap_datas, crap_binaries, crap_hiddenimports = collect_all('crapcleaner')
 datas = [
     (os.path.join(ROOT_DIR, 'crapcleaner', 'assets'), 'crapcleaner/assets'),
 ] + crap_datas
+
+# scripts/ is a build-time helper, not application code: it must not be bundled.
 
 binaries = crap_binaries
 
@@ -98,13 +117,10 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=excludes,
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe_name = 'CrapCleaner' if sys.platform.startswith('win') else 'crapcleaner-linux-x86_64'
 
@@ -122,13 +138,15 @@ if ONEDIR:
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
-        upx=True,
+        upx=False,
         console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
+        icon=ICON,
+        version=VERSION_FILE,
     )
     coll = COLLECT(
         exe,
@@ -136,8 +154,7 @@ if ONEDIR:
         a.zipfiles,
         a.datas,
         strip=False,
-        upx=True,
-        upx_exclude=[],
+        upx=False,
         name=exe_name,
     )
 else:
@@ -152,8 +169,7 @@ else:
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
-        upx=True,
-        upx_exclude=[],
+        upx=False,
         runtime_tmpdir=None,
         console=False,
         disable_windowed_traceback=False,
@@ -161,4 +177,6 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
+        icon=ICON,
+        version=VERSION_FILE,
     )

@@ -73,12 +73,29 @@ jobs:
           cd dist
           tar -czvf crapcleaner-linux-x86_64.tar.gz crapcleaner-linux-x86_64
 
+      # Replacing a release's binaries without replacing its checksums leaves the
+      # published sums describing files that are no longer there - a user who follows
+      # the project's own verification advice concludes the download was tampered with.
+      - name: Recompute Checksums for the Rebuilt Assets
+        shell: bash
+        working-directory: repo-tag/dist
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            sha256sum CrapCleaner.exe > checksums-windows.txt
+            cat checksums-windows.txt
+          else
+            sha256sum crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums-linux.txt
+            cat checksums-linux.txt
+          fi
+
       - name: Update Windows Binary on Release
         if: runner.os == 'Windows'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ matrix.tag }}
-          files: repo-tag/dist/CrapCleaner.exe
+          files: |
+            repo-tag/dist/CrapCleaner.exe
+            repo-tag/dist/checksums-windows.txt
 
       - name: Update Linux Binaries on Release
         if: runner.os == 'Linux'
@@ -88,3 +105,4 @@ jobs:
           files: |
             repo-tag/dist/crapcleaner-linux-x86_64
             repo-tag/dist/crapcleaner-linux-x86_64.tar.gz
+            repo-tag/dist/checksums-linux.txt

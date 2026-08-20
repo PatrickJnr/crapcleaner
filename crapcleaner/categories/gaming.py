@@ -12,10 +12,108 @@ from crapcleaner.utils.platform import (
     get_local_appdata,
     get_program_data,
     get_program_files_x86,
+    get_user_profile,
+    is_linux,
+    is_windows,
 )
 
 
+def _linux_steam_roots(home: str) -> list[str]:
+    """Where a Linux Steam install actually lives.
+
+    On Linux `get_local_appdata()` maps to ~/.cache, so the Windows paths this module
+    builds resolve to ~/.cache/Steam - which does not exist. The result was a Gaming
+    section that always reported zero while the real caches, routinely several GB,
+    were invisible.
+    """
+    return [
+        os.path.join(home, ".local", "share", "Steam"),
+        os.path.join(home, ".steam", "steam"),
+        os.path.join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
+    ]
+
+
+def _linux_categories() -> list[CleanupCategory]:
+    home = get_user_profile()
+    cache = get_local_appdata()  # ~/.cache, or $XDG_CACHE_HOME
+    config = os.path.join(home, ".config")
+    flatpak = os.path.join(home, ".var", "app")
+
+    categories: list[CleanupCategory] = []
+
+    steam_targets: list[CacheTarget] = []
+    for root in _linux_steam_roots(home):
+        for sub in ("appcache", "logs", "depotcache", "steamapps/downloading", "steamapps/temp"):
+            steam_targets.append(CacheTarget(path=os.path.join(root, *sub.split("/"))))
+    steam_targets.append(CacheTarget(path=os.path.join(cache, "Steam")))
+    categories.append(
+        CleanupCategory(
+            id="steam_caches_linux",
+            name="Steam caches & temp downloads",
+            group="Gaming",
+            description="Client caches, logs, and incomplete download staging for Steam on Linux.",
+            safety_level=SafetyLevel.LOW_RISK,
+            what_it_contains="Client web caches, depot metadata, download staging chunks, and logs.",
+            why_it_grows="Steam caches store assets and stages game downloads before installing them.",
+            why_safe_to_delete="Game installs, Proton prefixes, cloud saves, and screenshots are untouched.",
+            regeneration_behavior="Rebuilt on next launch; interrupted downloads resume.",
+            reversible=True,
+            targets=steam_targets,
+        )
+    )
+
+    heroic_targets = [
+        CacheTarget(path=os.path.join(cache, "heroic")),
+        CacheTarget(path=os.path.join(config, "heroic", "Cache")),
+        CacheTarget(path=os.path.join(config, "heroic", "logs")),
+        CacheTarget(path=os.path.join(flatpak, "com.heroicgameslauncher.hgl", "cache")),
+    ]
+    categories.append(
+        CleanupCategory(
+            id="heroic_cache_linux",
+            name="Heroic Games Launcher caches",
+            group="Gaming",
+            description="Web caches and logs for the Heroic launcher (Epic, GOG, Amazon).",
+            safety_level=SafetyLevel.LOW_RISK,
+            what_it_contains="Electron web cache, store metadata, and client logs.",
+            why_it_grows="Store pages and library artwork are cached locally.",
+            why_safe_to_delete="Installed games, Wine prefixes, and login sessions are untouched.",
+            regeneration_behavior="Rebuilt on next launch.",
+            reversible=True,
+            targets=heroic_targets,
+        )
+    )
+
+    lutris_targets = [
+        CacheTarget(path=os.path.join(cache, "lutris")),
+        CacheTarget(path=os.path.join(cache, "bottles")),
+        CacheTarget(path=os.path.join(flatpak, "net.lutris.Lutris", "cache")),
+        CacheTarget(path=os.path.join(flatpak, "com.usebottles.bottles", "cache")),
+    ]
+    categories.append(
+        CleanupCategory(
+            id="lutris_bottles_cache_linux",
+            name="Lutris & Bottles caches",
+            group="Gaming",
+            description="Banner art, installer downloads, and logs for Lutris and Bottles.",
+            safety_level=SafetyLevel.LOW_RISK,
+            what_it_contains="Cached artwork, downloaded runners and installers, and logs.",
+            why_it_grows="Every installed game adds artwork, and runner downloads are kept after use.",
+            why_safe_to_delete="Wine prefixes, game data, and saves live elsewhere and are untouched.",
+            regeneration_behavior="Artwork is re-fetched; runners re-download only if reinstalled.",
+            reversible=True,
+            targets=lutris_targets,
+        )
+    )
+    return categories
+
+
 def get_categories() -> list[CleanupCategory]:
+    if is_linux():
+        return _linux_categories()
+    if not is_windows():
+        return []
+
     local = get_local_appdata()
     program_data = get_program_data()
     prog_x86 = get_program_files_x86()

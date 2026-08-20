@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -23,7 +24,6 @@ from PySide6.QtWidgets import (
 from crapcleaner.gui.icons import ASSETS_DIR
 from crapcleaner.gui.icons import icon as material_icon
 from crapcleaner.gui.views.common import ContributorCard, SquircleAvatarWidget, _c, badge
-from crapcleaner.utils.contributors import fetch_avatar_file, fetch_contributors
 
 
 class AboutView(QWidget):
@@ -148,15 +148,7 @@ class AboutView(QWidget):
         app_title.setStyleSheet("font-size: 15px; font-weight: 700;")
         app_lay.addWidget(app_title)
 
-        from crapcleaner import __version__
-
-        app_items = [
-            ("Version", f"v{__version__} (Stable)"),
-            ("License", "MIT License (100% Free & Open Source)"),
-            ("Platform", "Windows 10 / 11 / Linux (64-bit)"),
-            ("GUI Framework", "PySide6 (Qt 6) & Fluent 2 Dark Theme"),
-            ("Python Core", "Python 3.12 (Strict Type Safe)"),
-        ]
+        app_items = self._application_facts()
         for label, val in app_items:
             row = QHBoxLayout()
             l_lbl = QLabel(label)
@@ -192,7 +184,20 @@ class AboutView(QWidget):
                 "Read-only inspection for GGUF & Safetensor weights.",
             ),
             ("Junction Safe", "Loop prevention avoids circular directory recursion."),
-            ("Zero Telemetry", "100% local, no network tracking, no advertisements."),
+            (
+                "Scheduled Scans Only Scan",
+                "A scan that runs on a schedule reports what it found and deletes nothing.",
+            ),
+            (
+                "Updates Are Verified",
+                "A download is checked against the published SHA-256 before it replaces "
+                "anything, and the version you are running is kept until the new one starts.",
+            ),
+            (
+                "Nothing Is Reported About You",
+                "No telemetry, no tracking, no advertisements. GitHub is contacted only "
+                "for the contributor list and update checks.",
+            ),
         ]
         for title_str, desc_str in safety_items:
             item_box = QVBoxLayout()
@@ -323,7 +328,65 @@ class AboutView(QWidget):
         root_lay.addWidget(scroll, 1)
         self._populate_contributors()
 
+    def _application_facts(self) -> list[tuple[str, str]]:
+        """What is actually running, asked at the moment the page is built.
+
+        These were string literals, so the page said Python 3.12 on 3.10 and
+        named Windows on Linux.
+        """
+        import platform
+        import sys
+
+        from crapcleaner import __version__
+        from crapcleaner.gui.theme import BUILTIN_THEME_IDS
+        from crapcleaner.system.hardware import os_label
+
+        try:
+            import PySide6
+            from PySide6.QtCore import qVersion
+
+            toolkit = f"PySide6 {PySide6.__version__} (Qt {qVersion()})"
+        except Exception:  # pragma: no cover - PySide6 is how we are drawing this
+            toolkit = "PySide6 (Qt 6)"
+
+        running = platform.python_version()
+        return [
+            ("Version", f"v{__version__}"),
+            ("License", "MIT License (100% free and open source)"),
+            ("Platform", os_label()),
+            ("GUI Framework", toolkit),
+            ("Themes", f"{len(BUILTIN_THEME_IDS)} built in, plus your own"),
+            (
+                "Python",
+                f"{running} ({'frozen build' if getattr(sys, 'frozen', False) else 'source'})",
+            ),
+        ]
+
     def _populate_contributors(self, force_refresh: bool = False):
+        """Start the fetch. The grid is filled in when it returns.
+
+        This used to call the network inline - a 3 s request for the list, then a
+        blocking avatar download per contributor - from the page constructor, so
+        opening About froze the whole window until every request finished or timed out.
+        """
+        from crapcleaner.gui.workers import ContributorsWorker, is_worker_running
+
+        if is_worker_running(getattr(self, "_contrib_worker", None)):
+            return
+
+        self._clear_contributor_grid()
+        loading = QLabel("Loading contributors…")
+        loading.setProperty("subtle", "true")
+        self.contrib_grid.addWidget(loading, 0, 0)
+
+        worker = ContributorsWorker(force_refresh=force_refresh, parent=self)
+        self._contrib_worker = worker
+        worker.done.connect(self._show_contributors)
+        worker.failed.connect(self._show_contributor_error)
+        worker.finished.connect(lambda: setattr(self, "_contrib_worker", None))
+        worker.start()
+
+    def _clear_contributor_grid(self):
         while self.contrib_grid.count():
             item = self.contrib_grid.takeAt(0)
             if item is not None:
@@ -343,48 +406,63 @@ class AboutView(QWidget):
         self.contrib_grid.setColumnStretch(0, 1)
         self.contrib_grid.setColumnStretch(1, 1)
 
-        try:
-            contributors = fetch_contributors(timeout_seconds=3.0, force_refresh=force_refresh)
-            # Filter out project creator/maintainer since they have the primary creator hero card
-            community = [
-                c for c in contributors if c.login.lower() not in ("patrickjnr", "patrickjr")
-            ]
-            if hasattr(self, "contrib_count_badge"):
-                self.contrib_count_badge.setText(
-                    f"{len(community)} {'Contributor' if len(community) == 1 else 'Contributors'}"
-                )
-                self.contrib_count_badge.setVisible(len(community) > 0)
+    def _show_contributor_error(self, message: str):
+        self._clear_contributor_grid()
+        err_lbl = QLabel(f"Could not load contributors: {message}")
+        err_lbl.setProperty("subtle", "true")
+        self.contrib_grid.addWidget(err_lbl, 0, 0)
 
-            if not community:
-                empty_lbl = QLabel(
-                    "No community contributors cached yet. Contributions welcome on GitHub!"
-                )
-                empty_lbl.setProperty("subtle", "true")
-                self.contrib_grid.addWidget(empty_lbl, 0, 0)
-                return
+    def _show_contributors(self, fetched: list):
+        """Render the fetched contributors. Widgets are built on the GUI thread."""
+        self._clear_contributor_grid()
 
-            for idx, c in enumerate(community):
-                avatar_file = fetch_avatar_file(c.avatar_url, c.login, timeout_seconds=1.5)
-                card = ContributorCard(c, avatar_file, self._theme, self)
-                row = idx // 2
-                col = idx % 2
-                self.contrib_grid.addWidget(card, row, col)
+        # Filter out the project creator, who has the hero card above.
+        community = [
+            (c, avatar)
+            for c, avatar in fetched
+            if c.login.lower() not in ("patrickjnr", "patrickjr")
+        ]
 
-            if len(community) % 2 != 0:
-                # Add empty spacer widget to keep the 2-column grid balanced when odd count
-                spacer = QWidget()
-                spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-                self.contrib_grid.addWidget(spacer, len(community) // 2, 1)
-        except Exception as exc:
-            err_lbl = QLabel(f"Could not load contributors: {exc}")
-            err_lbl.setProperty("subtle", "true")
-            self.contrib_grid.addWidget(err_lbl, 0, 0)
+        if hasattr(self, "contrib_count_badge"):
+            self.contrib_count_badge.setText(
+                f"{len(community)} {'Contributor' if len(community) == 1 else 'Contributors'}"
+            )
+            self.contrib_count_badge.setVisible(len(community) > 0)
+
+        if not community:
+            empty_lbl = QLabel(
+                "No community contributors cached yet. Contributions welcome on GitHub!"
+            )
+            empty_lbl.setProperty("subtle", "true")
+            self.contrib_grid.addWidget(empty_lbl, 0, 0)
+            return
+
+        for idx, (contributor, avatar_file) in enumerate(community):
+            card = ContributorCard(contributor, avatar_file or None, self._theme, self)
+            self.contrib_grid.addWidget(card, idx // 2, idx % 2)
+
+        if len(community) % 2 != 0:
+            # Keep the two-column grid balanced when the count is odd.
+            spacer = QWidget()
+            spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            self.contrib_grid.addWidget(spacer, len(community) // 2, 1)
 
     def _check_updates(self):
-        from crapcleaner import __version__
-        from crapcleaner.utils.updater import check_for_updates
+        """Ask GitHub for the latest release without blocking the window."""
+        from crapcleaner.gui.workers import UpdateCheckWorker, is_worker_running
 
-        info = check_for_updates(timeout_seconds=5.0)
+        if is_worker_running(getattr(self, "_update_worker", None)):
+            return
+        worker = UpdateCheckWorker(parent=self)
+        self._update_worker = worker
+        worker.done.connect(self._show_update_result)
+        worker.failed.connect(lambda _message: self._show_update_result(None))
+        worker.finished.connect(lambda: setattr(self, "_update_worker", None))
+        worker.start()
+
+    def _show_update_result(self, info):
+        from crapcleaner import __version__
+
         if info is None:
             QMessageBox.information(
                 self,
@@ -393,22 +471,126 @@ class AboutView(QWidget):
             )
             return
         if info.is_newer:
-            ans = QMessageBox.information(
-                self,
-                "Update Available!",
-                f"A new version of CrapCleaner is available: v{info.latest_version}\n"
-                f"Current installed version: v{info.current_version}\n\n"
-                f"Would you like to open the GitHub release page to download it?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if ans == QMessageBox.StandardButton.Yes:
-                QDesktopServices.openUrl(QUrl(info.html_url))
+            self._offer_update(info)
         else:
             QMessageBox.information(
                 self,
                 "Up to Date!",
                 f"CrapCleaner v{info.current_version} is up to date.\nYou have the latest release installed.",
             )
+
+    def _offer_update(self, info):
+        """Offer to install the new release, or to open the page if we cannot."""
+        from crapcleaner.utils.self_update import can_self_update
+
+        allowed, reason = can_self_update()
+        if not allowed:
+            answer = QMessageBox.information(
+                self,
+                "Update Available",
+                f"CrapCleaner v{info.latest_version} is available "
+                f"(you have v{info.current_version}).\n\n{reason}\n\n"
+                "Open the release page?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl(info.html_url))
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Update Available",
+            f"CrapCleaner v{info.latest_version} is available "
+            f"(you have v{info.current_version}).\n\n"
+            "It will be downloaded and checked against the published checksum, then "
+            "CrapCleaner will close and reopen on the new version.\n\n"
+            "Download and install it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._start_update_download(info.latest_version)
+
+    def _start_update_download(self, version: str):
+        from crapcleaner.gui.workers import UpdateDownloadWorker
+
+        self._update_progress = QProgressDialog(
+            f"Downloading CrapCleaner v{version}…", "Cancel", 0, 100, self
+        )
+        self._update_progress.setWindowTitle("Updating")
+        self._update_progress.setAutoClose(False)
+        self._update_progress.setValue(0)
+        self._update_progress.show()
+
+        worker = UpdateDownloadWorker(version, parent=self)
+        self._download_worker = worker
+        worker.progress.connect(self._on_update_progress)
+        worker.done.connect(self._on_update_downloaded)
+        worker.failed.connect(self._on_update_failed)
+        self._update_progress.canceled.connect(worker.terminate)
+        worker.finished.connect(lambda: setattr(self, "_download_worker", None))
+        worker.start()
+
+    def _on_update_progress(self, received: int, total: int):
+        from crapcleaner.utils.format import format_size
+
+        dialog = getattr(self, "_update_progress", None)
+        if dialog is None:
+            return
+        if total > 0:
+            dialog.setValue(int(received / total * 100))
+        else:
+            dialog.setLabelText(f"Downloading… {format_size(received)}")
+
+    def _on_update_failed(self, message: str):
+        from crapcleaner import __version__
+
+        dialog = getattr(self, "_update_progress", None)
+        if dialog is not None:
+            dialog.close()
+        QMessageBox.warning(
+            self,
+            "Update Failed",
+            f"{message}\n\nNothing was changed - you are still running v{__version__}.",
+        )
+
+    def _on_update_downloaded(self, update):
+        """Verified. Ask once more, then hand over to the installer and quit."""
+        dialog = getattr(self, "_update_progress", None)
+        if dialog is not None:
+            dialog.close()
+
+        answer = QMessageBox.question(
+            self,
+            "Restart to finish",
+            f"CrapCleaner v{update.version} has been downloaded and its checksum "
+            "verified.\n\nCrapCleaner will now close and reopen on the new version. "
+            "The current version is kept until the new one starts.\n\nRestart now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(
+                self,
+                "Update Ready",
+                "The update is downloaded and will be applied the next time you "
+                "choose Check for Updates.",
+            )
+            return
+
+        from crapcleaner.utils.self_update import UpdateError, apply_update
+
+        try:
+            apply_update(update)
+        except UpdateError as exc:
+            QMessageBox.warning(self, "Update Failed", str(exc))
+            return
+
+        # The installer is waiting on this process to exit before it swaps anything.
+        from PySide6.QtWidgets import QApplication
+
+        application = QApplication.instance()
+        if application is not None:
+            application.quit()
 
     def apply_theme(self, theme: str):
         self._theme = theme

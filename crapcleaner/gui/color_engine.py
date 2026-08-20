@@ -12,12 +12,14 @@ import json
 import math
 import random
 import re
+from functools import lru_cache
 
 # ---------------------------------------------------------------------------
 # Conversions & Math
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=4096)
 def normalize_hex(hex_str: str | None) -> str:
     """Normalize 3-digit or 6-digit hex color to standard lowercase #rrggbb."""
     if not isinstance(hex_str, str):
@@ -30,6 +32,7 @@ def normalize_hex(hex_str: str | None) -> str:
     return f"#{s.lower()}"
 
 
+@lru_cache(maxsize=4096)
 def hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
     """Convert hex string to (r, g, b) with values in 0..255."""
     clean = normalize_hex(hex_str).lstrip("#")
@@ -44,6 +47,7 @@ def rgb_to_hex(r: int | float, g: int | float, b: int | float) -> str:
     return f"#{r_c:02x}{g_c:02x}{b_c:02x}"
 
 
+@lru_cache(maxsize=4096)
 def hex_to_hsl(hex_str: str) -> tuple[float, float, float]:
     """Convert hex to HSL (H in 0..360, S in 0..1, L in 0..1)."""
     r, g, b = hex_to_rgb(hex_str)
@@ -52,6 +56,7 @@ def hex_to_hsl(hex_str: str) -> tuple[float, float, float]:
     return h_f * 360.0, s_f, l_f
 
 
+@lru_cache(maxsize=8192)
 def hsl_to_hex(h: float, s: float, lightness: float) -> str:
     """Convert HSL (H in 0..360, S in 0..1, L in 0..1) to #rrggbb."""
     h_norm = (h % 360.0) / 360.0
@@ -66,6 +71,7 @@ def hsl_to_hex(h: float, s: float, lightness: float) -> str:
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=4096)
 def relative_luminance(hex_str: str) -> float:
     """Calculate WCAG 2.1 relative luminance for a color (0.0 to 1.0)."""
     r, g, b = hex_to_rgb(hex_str)
@@ -77,6 +83,32 @@ def relative_luminance(hex_str: str) -> float:
     return 0.2126 * channel_lum(r) + 0.7152 * channel_lum(g) + 0.0722 * channel_lum(b)
 
 
+_RGBA_RE = re.compile(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)")
+
+
+@lru_cache(maxsize=2048)
+def flatten_alpha(color: str, backdrop: str) -> str:
+    """An ``rgba()`` colour as it actually renders over an opaque backdrop.
+
+    The soft badge tints are translucent, so measuring them as if they were
+    solid colours compares a colour against a near-copy of itself and reports
+    a contrast of about 1:1 whatever the theme does. Composite first.
+    """
+    match = _RGBA_RE.fullmatch(color.strip())
+    if not match:
+        return normalize_hex(color)
+    r, g, b = (int(match.group(i)) for i in (1, 2, 3))
+    alpha = float(match.group(4)) if match.group(4) else 1.0
+    alpha = min(max(alpha, 0.0), 1.0)
+    br, bg_, bb = hex_to_rgb(normalize_hex(backdrop))
+    return rgb_to_hex(
+        r * alpha + br * (1 - alpha),
+        g * alpha + bg_ * (1 - alpha),
+        b * alpha + bb * (1 - alpha),
+    )
+
+
+@lru_cache(maxsize=8192)
 def contrast_ratio(color1: str, color2: str) -> float:
     """Calculate WCAG contrast ratio between two hex colors (1.0 to 21.0)."""
     l1 = relative_luminance(color1)
@@ -86,6 +118,7 @@ def contrast_ratio(color1: str, color2: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+@lru_cache(maxsize=4096)
 def ensure_contrast(
     fg_hex: str,
     bg_hex: str,
@@ -100,13 +133,24 @@ def ensure_contrast(
     dark_bg = bg_lum < 0.25 if is_dark_bg is None else is_dark_bg
     h, s, lum = hex_to_hsl(fg_hex)
 
-    step = 0.04 if dark_bg else -0.04
-    cur_l = lum
-    for _ in range(25):
-        cur_l = max(0.02, min(0.98, cur_l + step))
-        candidate = hsl_to_hex(h, s, cur_l)
-        if contrast_ratio(candidate, bg_hex) >= min_ratio:
-            return candidate
+    # Try the direction the background suggests first, then the other one. A
+    # mid-tone background - #3b82f6 sits at 0.22 luminance, just inside "dark" -
+    # cannot be fixed by lightening a foreground that is already white, and
+    # giving up there returned white unchanged: still 3.68:1, still failing.
+    preferred = 0.04 if dark_bg else -0.04
+    best: tuple[float, str] | None = None
+    for step in (preferred, -preferred):
+        cur_l = lum
+        for _ in range(25):
+            cur_l = max(0.02, min(0.98, cur_l + step))
+            candidate = hsl_to_hex(h, s, cur_l)
+            if contrast_ratio(candidate, bg_hex) >= min_ratio:
+                distance = abs(cur_l - lum)
+                if best is None or distance < best[0]:
+                    best = (distance, candidate)
+                break
+    if best is not None:
+        return best[1]
 
     return "#ffffff" if dark_bg else "#0f172a"
 
@@ -313,6 +357,21 @@ def generate_custom_palette(
         "accent_pressed": accent_pressed,
         "accent_soft": accent_soft,
         "success": success,
+        # Labels the interface draws on a colour rather than on a surface: the
+        # text on a coloured button, and the text on a soft badge. Derived from
+        # what they sit on, because nothing else sets them.
+        "on_accent": ensure_contrast("#ffffff", accent, min_ratio=4.5),
+        "on_danger": ensure_contrast("#ffffff", danger, min_ratio=4.5),
+        "on_accent_soft": ensure_contrast(accent, flatten_alpha(accent_soft, surface), 4.5),
+        "on_success_soft": ensure_contrast(
+            success, flatten_alpha(soft_rgba(success), surface), 4.5
+        ),
+        "on_warning_soft": ensure_contrast(
+            warning, flatten_alpha(soft_rgba(warning), surface), 4.5
+        ),
+        "on_danger_soft": ensure_contrast(danger, flatten_alpha(soft_rgba(danger), surface), 4.5),
+        "on_info_soft": ensure_contrast(info, flatten_alpha(soft_rgba(info), surface), 4.5),
+        "on_review_soft": ensure_contrast(review, flatten_alpha(soft_rgba(review), surface), 4.5),
         "success_soft": soft_rgba(success),
         "warning": warning,
         "warning_soft": soft_rgba(warning),

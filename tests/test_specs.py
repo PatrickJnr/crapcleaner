@@ -174,11 +174,15 @@ def test_gui_about_and_specs_views():
     if hasattr(specs_view, "_worker") and specs_view._worker:
         specs_view._worker.wait(5000)
 
-    with patch("crapcleaner.gui.views.about.fetch_contributors", return_value=[sample_contrib]):
+    # Contributors are fetched on a worker now, so the view is built without one
+    # running and then handed the data it would have received.
+    from crapcleaner.gui.workers import ContributorsWorker
+
+    with patch.object(ContributorsWorker, "start", lambda self: None):
         about_view = AboutView(dummy)
         assert about_view is not None
-        if hasattr(about_view, "contrib_worker") and about_view.contrib_worker:
-            about_view.contrib_worker.wait(5000)
+        about_view._show_contributors([(sample_contrib, "")])
+        assert about_view.contrib_grid.count() >= 1
 
     specs_view.close()
     specs_view.deleteLater()

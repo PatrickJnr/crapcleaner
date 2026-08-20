@@ -1,0 +1,279 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070b13" />
+      <stop offset="50%" stop-color="#0b111e" />
+      <stop offset="100%" stop-color="#05080f" />
+    </linearGradient>
+
+    <!-- Ambient Backlights -->
+    <radialGradient id="glowLeft" cx="15%" cy="30%" r="50%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.28" />
+      <stop offset="100%" stop-color="#070b13" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowRight" cx="80%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#070b13" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowCyan" cx="65%" cy="20%" r="45%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#070b13" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Brand Icon Gradient -->
+    <linearGradient id="iconGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#60a5fa" />
+    </linearGradient>
+
+    <!-- Window Background Gradient -->
+    <linearGradient id="windowBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10182b" />
+      <stop offset="100%" stop-color="#0b111f" />
+    </linearGradient>
+
+    <!-- Card Fill -->
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#152037" />
+      <stop offset="100%" stop-color="#0e1627" />
+    </linearGradient>
+
+    <!-- Drop Shadows -->
+    <filter id="windowShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#000000" flood-opacity="0.75" />
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#2563eb" flood-opacity="0.28" />
+    </filter>
+    <filter id="iconGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#3b82f6" flood-opacity="0.4" />
+    </filter>
+
+    <!-- Dot Texture Pattern -->
+    <pattern id="dotGrid" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#ffffff" fill-opacity="0.04" />
+    </pattern>
+  </defs>
+
+  <!-- Base Canvas & Background Glows -->
+  <rect width="1280" height="640" fill="url(#bg)" />
+  <rect width="1280" height="640" fill="url(#dotGrid)" />
+  <rect width="1280" height="640" fill="url(#glowLeft)" />
+  <rect width="1280" height="640" fill="url(#glowRight)" />
+  <rect width="1280" height="640" fill="url(#glowCyan)" />
+
+  <!-- Outer Glass Frame -->
+  <rect x="24" y="24" width="1232" height="592" rx="20" fill="none" stroke="#334155" stroke-opacity="0.35" stroke-width="1.2" />
+
+  <!-- ==================== LEFT COLUMN: BRAND & VALUE PROPOSITIONS ==================== -->
+
+  <!-- Open Source Pill Badge -->
+  <g transform="translate(52, 48)">
+    <rect width="168" height="26" rx="13" fill="#1e293b" fill-opacity="0.8" stroke="#3b82f6" stroke-opacity="0.5" stroke-width="1" />
+    <circle cx="14" cy="13" r="3.5" fill="#60a5fa" />
+    <text x="92" y="13" text-anchor="middle" dominant-baseline="central" fill="#93c5fd" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="0.8">OPEN SOURCE &amp; MIT</text>
+  </g>
+
+  <!-- Main Hero Brand Row -->
+  <g transform="translate(52, 88)">
+    <!-- App Squircle with authentic cleaning_services glyph -->
+    <g filter="url(#iconGlow)">
+      <rect width="60" height="60" rx="15" fill="url(#iconGrad)" />
+      <rect width="60" height="60" rx="15" fill="none" stroke="#93c5fd" stroke-width="1.2" stroke-opacity="0.6" />
+      <g transform="translate(30, 30) scale(0.082, -0.082) translate(-256, -256)" fill="#ffffff">
+        <path d="M341 277H320V448Q320 466 307.5 478.5Q295 491 277 491H235Q217 491 204.5 478.5Q192 466 192 448V277H171Q141 277 117.0 263.0Q93 249 78.5 224.5Q64 200 64 171V21H448V171Q448 200 433.5 224.5Q419 249 395.0 263.0Q371 277 341 277ZM405 64H363V128Q363 137 356.5 143.0Q350 149 341 149Q333 149 326.5 143.0Q320 137 320 128V64H277V128Q277 137 271.0 143.0Q265 149 256 149Q247 149 241.0 143.0Q235 137 235 128V64H192V128Q192 137 185.5 143.0Q179 149 171 149Q162 149 155.5 143.0Q149 137 149 128V64H107V171Q107 188 115.5 202.5Q124 217 138.5 226.0Q153 235 171 235H341Q359 235 373.5 226.0Q388 217 396.5 202.5Q405 188 405 171Z" />
+      </g>
+    </g>
+    <text x="74" y="28" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="900" letter-spacing="-0.8">CrapCleaner</text>
+    <text x="74" y="48" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500">System Cleaner &amp; Developer Toolkit</text>
+  </g>
+
+  <!-- Tagline Paragraph -->
+  <text x="52" y="172" fill="#cbd5e1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="400">Fast, transparent, non-destructive cleaner</text>
+  <text x="52" y="190" fill="#cbd5e1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="400">engineered for developers &amp; power users.</text>
+  <text x="52" y="208" fill="#cbd5e1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="400">Reclaim gigabytes with zero registry risk.</text>
+
+  <!-- 3 Sleek Feature Cards (Stacked Vertically, 348px wide) -->
+  <!-- Feature 1: Safety Core -->
+  <g transform="translate(52, 252)">
+    <rect width="348" height="66" rx="12" fill="#121a2d" stroke="#10b981" stroke-opacity="0.3" stroke-width="1" />
+    <rect x="12" y="13" width="40" height="40" rx="10" fill="#10b981" fill-opacity="0.15" />
+    <path d="M32 23L24 26.5V32C24 37 27.5 41.5 32 43C36.5 41.5 40 37 40 32V26.5L32 23Z" fill="#10b981" />
+    <text x="62" y="25" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700">Safety-First Philosophy</text>
+    <text x="62" y="45" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11.5">Zero registry touching • Recycle Bin safe</text>
+  </g>
+
+  <!-- Feature 2: Developer Tooling -->
+  <g transform="translate(52, 330)">
+    <rect width="348" height="66" rx="12" fill="#121a2d" stroke="#8b5cf6" stroke-opacity="0.3" stroke-width="1" />
+    <rect x="12" y="13" width="40" height="40" rx="10" fill="#8b5cf6" fill-opacity="0.15" />
+    <path d="M23 27L28 32L23 37M30 37H37" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+    <text x="62" y="25" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700">Developer &amp; AI Caches</text>
+    <text x="62" y="45" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11.5">node_modules, pip, cargo, Docker, AI models</text>
+  </g>
+
+  <!-- Feature 3: Privacy & Themes -->
+  <g transform="translate(52, 408)">
+    <rect width="348" height="66" rx="12" fill="#121a2d" stroke="#06b6d4" stroke-opacity="0.3" stroke-width="1" />
+    <rect x="12" y="13" width="40" height="40" rx="10" fill="#06b6d4" fill-opacity="0.15" />
+    <path d="M32 24C29.8 24 28 25.8 28 28V31H27C26 31 25 32 25 33V40C25 41 26 42 27 42H37C38 42 39 41 39 40V33C39 32 38 31 37 31H36V28C36 25.8 34.2 24 32 24ZM32 26C33.1 26 34 26.9 34 28V31H30V28C30 26.9 30.9 26 32 26Z" fill="#22d3ee" />
+    <text x="62" y="25" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700">100% Local &amp; Zero Telemetry</text>
+    <text x="62" y="45" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11.5">No network tracking • 40+ Fluent themes</text>
+  </g>
+
+  <!-- Bottom Badges Row -->
+  <g transform="translate(52, 492)">
+    <rect width="154" height="30" rx="8" fill="#0e1526" stroke="#334155" stroke-opacity="0.5" />
+    <text x="77" y="15" text-anchor="middle" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="600">Windows (x64) &amp; Linux</text>
+
+    <rect x="164" y="0" width="102" height="30" rx="8" fill="#0e1526" stroke="#334155" stroke-opacity="0.5" />
+    <text x="215" y="15" text-anchor="middle" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="600">Python 3 &amp; Qt6</text>
+
+    <rect x="276" y="0" width="84" height="30" rx="8" fill="#0e1526" stroke="#334155" stroke-opacity="0.5" />
+    <text x="318" y="15" text-anchor="middle" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="600">MIT License</text>
+  </g>
+
+
+  <!-- ==================== RIGHT COLUMN: HIGH-FIDELITY APPLICATION WINDOW MOCKUP ==================== -->
+  
+  <g transform="translate(436, 48)" filter="url(#windowShadow)">
+    <!-- App Window Outer Shell -->
+    <rect width="784" height="544" rx="14" fill="url(#windowBg)" stroke="#3b82f6" stroke-opacity="0.4" stroke-width="1.5" />
+
+    <!-- Window Titlebar -->
+    <path d="M0 14C0 6.27 6.27 0 14 0H770C777.73 0 784 6.27 784 14V38H0V14Z" fill="#090f1d" />
+    <line x1="0" y1="38" x2="784" y2="38" stroke="#1e293b" stroke-width="1" />
+
+    <!-- Titlebar Window Controls -->
+    <circle cx="20" cy="19" r="5" fill="#ef4444" />
+    <circle cx="36" cy="19" r="5" fill="#f59e0b" />
+    <circle cx="52" cy="19" r="5" fill="#10b981" />
+
+    <!-- Titlebar App Title -->
+    <text x="392" y="19" text-anchor="middle" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="600">CrapCleaner — Storage Dashboard</text>
+
+    <!-- Window Body Layout -->
+    <!-- Mini Navigation Rail (Left Pane) -->
+    <rect x="0" y="38" width="148" height="506" fill="#070c18" />
+    <line x1="148" y1="38" x2="148" y2="544" stroke="#1e293b" stroke-width="1" />
+
+    <!-- Sidebar Section: OVERVIEW -->
+    <text x="16" y="58" fill="#475569" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="9" font-weight="800" letter-spacing="0.8">OVERVIEW</text>
+    
+    <!-- Active Nav Item: Dashboard -->
+    <rect x="8" y="70" width="132" height="30" rx="6" fill="#3b82f6" fill-opacity="0.2" stroke="#3b82f6" stroke-opacity="0.4" stroke-width="1" />
+    <rect x="8" y="76" width="3" height="18" rx="1.5" fill="#3b82f6" />
+    <text x="24" y="85" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700">Dashboard</text>
+
+    <!-- Inactive Nav Items -->
+    <text x="24" y="116" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">Cleanup</text>
+    <text x="24" y="144" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">Storage Breakdown</text>
+
+    <!-- Sidebar Section: DEEP SCAN -->
+    <text x="16" y="180" fill="#475569" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="9" font-weight="800" letter-spacing="0.8">DEEP SCAN</text>
+    <text x="24" y="202" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">Large Files</text>
+    <text x="24" y="230" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">Duplicates</text>
+    <text x="24" y="258" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">AI Data</text>
+    <text x="24" y="286" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">Docker</text>
+
+    <!-- Sidebar Section: SYSTEM -->
+    <text x="16" y="322" fill="#475569" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="9" font-weight="800" letter-spacing="0.8">SYSTEM</text>
+    <text x="24" y="344" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">PC Specs</text>
+    <text x="24" y="372" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">Memory Cleaner</text>
+    <text x="24" y="400" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">History</text>
+
+    <!-- Sidebar Section: PREFERENCES -->
+    <text x="16" y="436" fill="#475569" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="9" font-weight="800" letter-spacing="0.8">PREFERENCES</text>
+    <text x="24" y="458" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">Settings</text>
+    <text x="24" y="486" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11" font-weight="500">About</text>
+
+
+    <!-- Main Dashboard Viewport (Right Area) -->
+    <g transform="translate(164, 52)">
+
+      <!-- Storage Hero Card with Dynamic Theme Donut Gauge -->
+      <rect width="600" height="116" rx="10" fill="url(#cardGrad)" stroke="#334155" stroke-opacity="0.5" stroke-width="1" />
+      
+      <!-- Donut Gauge -->
+      <g transform="translate(68, 58)">
+        <!-- Background Track Ring -->
+        <circle cx="0" cy="0" r="42" fill="none" stroke="#1e293b" stroke-width="9" />
+        <!-- Progress Arc: ~76% around circumference (2 * pi * 42 = 263.9) -->
+        <circle cx="0" cy="0" r="42" fill="none" stroke="#3b82f6" stroke-width="9" stroke-linecap="round" stroke-dasharray="200 264" transform="rotate(-90)" />
+        <text x="0" y="2" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="900">76%</text>
+        <text x="0" y="17" text-anchor="middle" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="8" font-weight="600">USED</text>
+      </g>
+
+      <!-- Gauge Details Text -->
+      <g transform="translate(136, 28)">
+        <text x="0" y="0" dominant-baseline="central" fill="#60a5fa" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="800" letter-spacing="0.6">RECLAIMABLE SPACE DETECTED</text>
+        <text x="0" y="28" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="28" font-weight="900">48.2 GB</text>
+        <text x="0" y="52" dominant-baseline="central" fill="#94a3b8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="11.5">Across 4 target categories • Drive C: (1.2 TB Total)</text>
+      </g>
+
+      <!-- Section Title -->
+      <text x="2" y="142" dominant-baseline="central" fill="#cbd5e1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12" font-weight="700">Cleanup Targets &amp; Developer Modules</text>
+
+      <!-- 4 Module Detail Rows -->
+      <!-- Module 1: Node & Build -->
+      <g transform="translate(0, 158)">
+        <rect width="600" height="52" rx="8" fill="#131c30" stroke="#1e293b" stroke-width="1" />
+        <rect x="12" y="12" width="28" height="28" rx="6" fill="#06b6d4" fill-opacity="0.15" />
+        <circle cx="26" cy="26" r="4" fill="#22d3ee" />
+        <text x="50" y="20" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700">Developer Build Caches</text>
+        <text x="50" y="34" dominant-baseline="central" fill="#64748b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="10.5">node_modules, target, .venv, pip, cargo, &amp; go cache</text>
+        <!-- Bar & Size -->
+        <rect x="410" y="23" width="100" height="6" rx="3" fill="#1e293b" />
+        <rect x="410" y="23" width="80" height="6" rx="3" fill="#06b6d4" />
+        <text x="586" y="26" text-anchor="end" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="13" font-weight="800">24.6 GB</text>
+      </g>
+
+      <!-- Module 2: Docker -->
+      <g transform="translate(0, 218)">
+        <rect width="600" height="52" rx="8" fill="#131c30" stroke="#1e293b" stroke-width="1" />
+        <rect x="12" y="12" width="28" height="28" rx="6" fill="#8b5cf6" fill-opacity="0.15" />
+        <circle cx="26" cy="26" r="4" fill="#a78bfa" />
+        <text x="50" y="20" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700">Docker &amp; Container Images</text>
+        <text x="50" y="34" dominant-baseline="central" fill="#64748b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="10.5">Dangling image layers, buildkit caches, &amp; WSL virtual disks</text>
+        <!-- Bar & Size -->
+        <rect x="410" y="23" width="100" height="6" rx="3" fill="#1e293b" />
+        <rect x="410" y="23" width="55" height="6" rx="3" fill="#8b5cf6" />
+        <text x="586" y="26" text-anchor="end" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="13" font-weight="800">14.2 GB</text>
+      </g>
+
+      <!-- Module 3: System Temp -->
+      <g transform="translate(0, 278)">
+        <rect width="600" height="52" rx="8" fill="#131c30" stroke="#1e293b" stroke-width="1" />
+        <rect x="12" y="12" width="28" height="28" rx="6" fill="#3b82f6" fill-opacity="0.15" />
+        <circle cx="26" cy="26" r="4" fill="#60a5fa" />
+        <text x="50" y="20" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700">System &amp; Browser Temp Caches</text>
+        <text x="50" y="34" dominant-baseline="central" fill="#64748b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="10.5">DirectX shaders, crash dumps, log files, &amp; Chromium cache</text>
+        <!-- Bar & Size -->
+        <rect x="410" y="23" width="100" height="6" rx="3" fill="#1e293b" />
+        <rect x="410" y="23" width="32" height="6" rx="3" fill="#3b82f6" />
+        <text x="586" y="26" text-anchor="end" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="13" font-weight="800">6.8 GB</text>
+      </g>
+
+      <!-- Module 4: AI Weights -->
+      <g transform="translate(0, 338)">
+        <rect width="600" height="52" rx="8" fill="#131c30" stroke="#1e293b" stroke-width="1" />
+        <rect x="12" y="12" width="28" height="28" rx="6" fill="#10b981" fill-opacity="0.15" />
+        <circle cx="26" cy="26" r="4" fill="#34d399" />
+        <text x="50" y="20" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700">AI Model &amp; Ollama Weights</text>
+        <text x="50" y="34" dominant-baseline="central" fill="#64748b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="10.5">Read-only inspection for stale GGUF &amp; HuggingFace checkpoints</text>
+        <!-- Bar & Size -->
+        <rect x="410" y="23" width="100" height="6" rx="3" fill="#1e293b" />
+        <rect x="410" y="23" width="20" height="6" rx="3" fill="#10b981" />
+        <text x="586" y="26" text-anchor="end" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="13" font-weight="800">2.6 GB</text>
+      </g>
+
+      <!-- Bottom Action Bar Button -->
+      <g transform="translate(0, 402)">
+        <rect width="600" height="46" rx="8" fill="#2563eb" />
+        <text x="300" y="23" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Helvetica, Arial, sans-serif" font-size="14" font-weight="700">Clean Reclaimable Space (48.2 GB)</text>
+      </g>
+
+    </g>
+
+  </g>
+
+</svg>

@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from queue import Empty, SimpleQueue
 
+from crapcleaner.utils.disk_size import SIZE_LOGICAL, size_for
 from crapcleaner.utils.files import is_link_like
 from crapcleaner.utils.platform import is_linux
 
@@ -42,6 +43,64 @@ class StorageNode:
 
 def _child_real_path(entry: os.DirEntry, parent_real: str) -> str:
     return os.path.join(parent_real, entry.name)
+
+
+def _assemble_from(
+    nodes: dict[str, "StorageNode"],
+    children_of: dict[str, list[str]],
+    path: str,
+    depth: int,
+    max_depth: int,
+    max_children: int,
+) -> "StorageNode":
+    """Copy the shallow levels of a measured tree out of the flat maps.
+
+    Totals are already aggregated, so this only sorts, prunes and computes shares.
+    """
+    source = nodes.get(path)
+    node = StorageNode(
+        name=os.path.basename(path) or path,
+        path=path,
+        size=source.size if source is not None else 0,
+        file_count=source.file_count if source is not None else 0,
+        dir_count=source.dir_count if source is not None else 0,
+    )
+    if depth >= max_depth:
+        return node
+
+    child_nodes = [
+        _assemble_from(nodes, children_of, child, depth + 1, max_depth, max_children)
+        for child in children_of.get(path, ())
+    ]
+    child_nodes.sort(key=lambda c: c.size, reverse=True)
+    if node.size > 0:
+        for child in child_nodes:
+            child.percentage_of_parent = (child.size / node.size) * 100.0
+    node.children = child_nodes[:max_children]
+    return node
+
+
+@dataclass
+class StorageIndex:
+    """Every directory a scan measured, keyed by path.
+
+    `analyze_storage_hierarchy` measures the whole tree regardless of `max_depth` -
+    a folder's size includes everything beneath it - and then throws away everything
+    deeper than the tree it returns. Expanding a folder therefore re-walked a subtree
+    that had just been measured. Keeping the flat maps makes that expansion a lookup.
+    """
+
+    nodes: dict[str, StorageNode] = field(default_factory=dict)
+    children: dict[str, list[str]] = field(default_factory=dict)
+
+    def has(self, path: str) -> bool:
+        return path in self.nodes
+
+    def subtree(self, path: str, max_depth: int = 2, max_children: int = 20) -> StorageNode | None:
+        """The measured subtree at `path`, or None if this scan never reached it."""
+        if path not in self.nodes:
+            return None
+        return _assemble_from(self.nodes, self.children, path, 0, max_depth, max_children)
 
 
 def _should_skip_linux_subtree(path: str) -> bool:
@@ -85,6 +144,9 @@ def analyze_storage_hierarchy(
     max_workers: int = _MAX_SCAN_WORKERS,
     partial_cb: Callable[[StorageNode], None] | None = None,
     partial_interval: float = 1.0,
+    file_observer: Callable[[os.DirEntry, os.stat_result], None] | None = None,
+    index_out: StorageIndex | None = None,
+    size_mode: str = SIZE_LOGICAL,
 ) -> StorageNode | None:
     """Analyze directory structure starting at root and return a hierarchical StorageNode tree.
 
@@ -97,6 +159,20 @@ def analyze_storage_hierarchy(
     Pass `partial_cb` to receive the tree as it stands every `partial_interval` seconds
     while the scan runs, so a caller can show the largest directories immediately rather
     than waiting for a whole volume to be measured.
+
+    Pass `file_observer` to be handed every file entry and its stat result as they are
+    read. The Storage view used to run three independent traversals of the same tree -
+    the hierarchy, the file-type breakdown and the old-file list - paying the metadata
+    cost three times; they now share this one. The observer runs on the scan's worker
+    threads, so it must be cheap and thread-safe.
+
+    Pass `index_out` to keep every directory that was measured, which makes expanding
+    a folder a lookup rather than another walk.
+
+    `size_mode` selects what a file's size means: `logical` is the length of its
+    contents, which every listing already carries; `allocated` is what it occupies on
+    disk, which is what the drive's free space reflects for compressed, sparse, and
+    very small files. Allocated mode costs an extra call per file on Windows.
     """
     if not root or not os.path.isdir(root):
         return None
@@ -158,8 +234,15 @@ def analyze_storage_hierarchy(
                             subdirs.append(child)
                             node.dir_count += 1
                         elif child.is_file(follow_symlinks=False):
-                            node.size += child.stat(follow_symlinks=False).st_size
+                            st = child.stat(follow_symlinks=False)
+                            node.size += (
+                                st.st_size
+                                if size_mode == SIZE_LOGICAL
+                                else size_for(child.path, st, size_mode)
+                            )
                             node.file_count += 1
+                            if file_observer is not None:
+                                file_observer(child, st)
                     except OSError:
                         continue
         except OSError:
@@ -231,35 +314,33 @@ def analyze_storage_hierarchy(
                 _roll_up(path, node)
                 outstanding[0] -= 1
 
-    def _assemble(path: str, depth: int) -> StorageNode:
-        """Copy the shallow levels of the tree out of the scan's running state.
-
-        Totals are already aggregated, so this only sorts, prunes and computes shares,
-        and it never descends past `max_depth` - which is what makes it cheap enough to
-        run repeatedly while the scan is still going.
-        """
-        source = nodes.get(path)
-        node = StorageNode(
-            name=os.path.basename(path) or path,
-            path=path,
-            size=source.size if source is not None else 0,
-            file_count=source.file_count if source is not None else 0,
-            dir_count=source.dir_count if source is not None else 0,
-        )
-        if depth >= max_depth:
-            return node
-
-        child_nodes = [_assemble(child, depth + 1) for child in children_of.get(path, ())]
-        child_nodes.sort(key=lambda c: c.size, reverse=True)
-        if node.size > 0:
-            for child in child_nodes:
-                child.percentage_of_parent = (child.size / node.size) * 100.0
-        node.children = child_nodes[:max_children]
-        return node
-
     def _snapshot() -> StorageNode:
+        """A consistent view of the shallow levels, assembled outside the lock.
+
+        Holding the lock for the whole assembly stalled all 24 workers once a second;
+        copying the few maps the shallow levels need is far shorter.
+        """
         with state_lock:
-            return _assemble(root, 0)
+            shallow_nodes: dict[str, StorageNode] = {}
+            shallow_children: dict[str, list[str]] = {}
+            frontier = [(root, 0)]
+            while frontier:
+                path, depth = frontier.pop()
+                source = nodes.get(path)
+                if source is not None:
+                    shallow_nodes[path] = StorageNode(
+                        name=source.name,
+                        path=source.path,
+                        size=source.size,
+                        file_count=source.file_count,
+                        dir_count=source.dir_count,
+                    )
+                if depth >= max_depth:
+                    continue
+                children = list(children_of.get(path, ()))
+                shallow_children[path] = children
+                frontier.extend((child, depth + 1) for child in children)
+        return _assemble_from(shallow_nodes, shallow_children, root, 0, max_depth, max_children)
 
     try:
         root_real = os.path.realpath(root)
@@ -293,5 +374,10 @@ def analyze_storage_hierarchy(
         finished.set()
         if reporter is not None:
             reporter.join(timeout=1.0)
+
+    if index_out is not None:
+        with state_lock:
+            index_out.nodes = dict(nodes)
+            index_out.children = {path: list(kids) for path, kids in children_of.items()}
 
     return _snapshot()

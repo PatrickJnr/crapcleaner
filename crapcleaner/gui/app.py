@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -15,11 +16,12 @@ from PySide6.QtWidgets import (
 
 from crapcleaner import __version__
 from crapcleaner.categories.browsers import running_browser_names
-from crapcleaner.config import load_settings, update_settings
+from crapcleaner.config import load_settings, take_recovery_notice, update_settings
 from crapcleaner.core.cache import ScanCache
 from crapcleaner.gui.dialogs import ConfirmCleanupDialog, HelpSafetyDialog, ReportDialog
 from crapcleaner.gui.sidebar import Sidebar
-from crapcleaner.gui.theme import apply_theme, make_window_icon
+from crapcleaner.gui.theme import apply_theme, make_window_icon, theme_label
+from crapcleaner.gui.theme_watcher import ThemeWatcher
 from crapcleaner.gui.views import (
     AboutView,
     AiDataView,
@@ -89,8 +91,7 @@ class MainWindow(QMainWindow):
         self._PAGE_KEYS = self._build_page_keys()
         self.setWindowTitle(f"CrapCleaner v{__version__}")
         self.setWindowIcon(make_window_icon())
-        self.resize(1200, 780)
-        self.setMinimumSize(1000, 660)
+        self._set_default_geometry()
         self._settings = load_settings()
         disabled = set(self._settings.get("disabled_categories", []))
         self._categories = [c for c in get_all_categories() if c.id not in disabled]
@@ -126,6 +127,10 @@ class MainWindow(QMainWindow):
 
         self._theme = self._settings.get("theme", "dark")
 
+        # Themes are files now, so editing one should not mean restarting.
+        self._theme_watcher = ThemeWatcher(self)
+        self._theme_watcher.themes_changed.connect(self._on_themes_changed)
+
         self._setup_shortcuts()
         # The dashboard is the landing page, so it is the one view worth building now.
         self.dashboard.refresh()
@@ -133,7 +138,13 @@ class MainWindow(QMainWindow):
         self.sidebar.apply_theme(self._theme)
         self.stack.setCurrentIndex(self._PAGE_KEYS.index("dashboard"))
         self.sidebar.set_active("dashboard")
-        self.statusBar().showMessage("Ready", 3000)
+        # load_settings() ran during __init__; if it had to move a damaged file aside
+        # the user needs to hear about it rather than silently losing their exclusions.
+        notice = take_recovery_notice()
+        if notice:
+            self.statusBar().showMessage(notice, 20000)
+        else:
+            self.statusBar().showMessage("Ready", 3000)
 
     # ------------------------------------------------------------------
     # Lazy page construction
@@ -313,7 +324,45 @@ class MainWindow(QMainWindow):
         self.navigate("cleanup")
         self.cleanup_view.review_recommended()
 
+    def _on_themes_changed(self):
+        """A theme file changed on disk: restyle now, and refresh the gallery.
+
+        The theme that is on screen is the one to reapply. `self._settings` is the
+        snapshot taken at start-up and is not updated when the theme is switched, so
+        reading it here swapped the window to whatever was stored when it opened -
+        Custom, for anyone who had used the Studio - instead of the theme being
+        edited. `self._theme` is what is actually applied.
+        """
+        from crapcleaner.gui.theme import THEMES
+
+        theme = getattr(self, "_theme", None) or self._settings.get("theme", "dark")
+        if theme not in THEMES and theme != "custom":
+            # The active theme's file was deleted while it was in use.
+            self.statusBar().showMessage(
+                f"The theme {theme!r} is no longer available; using Dark.", 6000
+            )
+            theme = "dark"
+            update_settings(theme=theme)
+            self._settings["theme"] = theme
+
+        application = QApplication.instance()
+        if isinstance(application, QApplication):
+            apply_theme(application, theme, window=self)
+        self._apply_theme_to_views(theme)
+
+        settings_view = self._views.get("settings")
+        if settings_view is not None and hasattr(settings_view, "refresh_theme_gallery"):
+            settings_view.refresh_theme_gallery()
+            # Keep the gallery's idea of the active theme in step with the window's.
+            gallery = getattr(settings_view, "theme_gallery", None)
+            if gallery is not None and theme in THEMES:
+                gallery.select_theme(theme, emit_signal=False)
+
+        self.statusBar().showMessage(f"Themes reloaded - {theme_label(theme)} reapplied.", 4000)
+
     def _apply_theme_to_views(self, theme: str):
+        # `_settings` is a snapshot; keep its theme in step with what is applied.
+        self._settings["theme"] = theme
         # Only pages that exist are restyled. A page built later picks the theme up in
         # _build_view, so nothing is forced into existence just to be recoloured.
         self._theme = theme
@@ -322,6 +371,32 @@ class MainWindow(QMainWindow):
             apply = getattr(view, "apply_theme", None)
             if apply is not None:
                 apply(theme)
+
+    #: What the dashboard was laid out for: every row fits, nothing is clipped.
+    DEFAULT_SIZE = (1460, 1160)
+    #: The floor. Not the size above, which does not fit a 1080p screen once the
+    #: taskbar is taken off - a minimum that large would force the window taller
+    #: than the display. This is the largest that still fits a 1280x720 laptop,
+    #: which is the smallest screen worth supporting.
+    MINIMUM_SIZE = (1200, 660)
+
+    def _set_default_geometry(self):
+        """Open at the designed size, shrunk to fit the screen, and centred."""
+        self.setMinimumSize(*self.MINIMUM_SIZE)
+
+        width, height = self.DEFAULT_SIZE
+        minimum_width, minimum_height = self.MINIMUM_SIZE
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, available.width())
+            height = min(height, available.height())
+        self.resize(max(width, minimum_width), max(height, minimum_height))
+
+        if screen is not None:
+            frame = self.frameGeometry()
+            frame.moveCenter(screen.availableGeometry().center())
+            self.move(frame.topLeft())
 
     def _restore_geometry(self):
         hex_ = self._settings.get("window_geometry", "")
@@ -334,18 +409,24 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def switch_theme(self, theme: str):
-        """Cross-fade the whole window into the given theme."""
+    def switch_theme(self, theme: str, animate: bool = True):
+        """Cross-fade the whole window into the given theme.
+
+        `animate` is off while a theme is being edited in the Studio: a
+        cross-fade marks a change of theme, and every slider notch is not one.
+        """
         from crapcleaner.gui.theme import fade_theme_change
 
         def swap():
             app_inst = QApplication.instance()
             if isinstance(app_inst, QApplication):
-                apply_theme(app_inst, theme)
+                apply_theme(app_inst, theme, window=self)
             self._apply_theme_to_views(theme)
 
-        duration = 0 if self._settings.get("reduce_motion", False) else 180
-        fade_theme_change(self, swap, duration_ms=duration)
+        if not animate or self._settings.get("reduce_motion", False):
+            fade_theme_change(self, swap, duration_ms=0)
+            return
+        fade_theme_change(self, swap, duration_ms=180)
 
     def apply_settings(self):
         self._settings = load_settings()
@@ -467,6 +548,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"{', '.join(locked_by)} running - locked cache files will be skipped.", 8000
             )
+        excluded_paths: set[str] = set()
         if self._settings.get("confirm_cleanup", True):
             dialog = ConfirmCleanupDialog(
                 categories,
@@ -479,10 +561,17 @@ class MainWindow(QMainWindow):
                 return
             dry_run = dialog.is_dry_run()
             use_recycle_bin = dialog.use_recycle_bin()
+            excluded_paths = dialog.excluded_paths()
         else:
             dry_run = self._settings.get("dry_run_default", True)
+            excluded_paths = set()
 
-        worker = CleanWorker(categories, dry_run=dry_run, use_recycle_bin=use_recycle_bin)
+        worker = CleanWorker(
+            categories,
+            dry_run=dry_run,
+            use_recycle_bin=use_recycle_bin,
+            excluded_paths=excluded_paths,
+        )
         worker.progress.connect(self._on_clean_progress)
         worker.done.connect(lambda report: self._on_clean_done(report, categories))
         worker.failed.connect(lambda msg: QMessageBox.critical(self, "Cleanup Failed", msg))
@@ -610,10 +699,25 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def closeEvent(self, event):
-        for worker in self._workers:
+        # Ask everything to stop first, then wait once against a shared deadline.
+        # Stopping and waiting per worker meant closing took up to a second for each
+        # one in turn, with the window unresponsive throughout - and the list is
+        # mutated by each worker's finished handler, so it is iterated as a copy.
+        watcher = getattr(self, "_theme_watcher", None)
+        if watcher is not None:
+            watcher.stop()
+
+        workers = list(self._workers)
+        for worker in workers:
             if hasattr(worker, "request_stop"):
                 worker.request_stop()
-            worker.wait(1000)
+
+        deadline = time.monotonic() + 2.0
+        for worker in workers:
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            worker.wait(int(remaining * 1000))
         try:
             geometry = bytes(self.saveGeometry().toHex().data()).decode("ascii")
             if geometry:
@@ -623,7 +727,18 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+class NoDisplayError(RuntimeError):
+    """Raised when the GUI is asked for on a system with nowhere to draw it."""
+
+
 def _prepare_linux_qt_environment() -> None:
+    """Pick a Qt platform plugin, or say plainly that there is no display.
+
+    Falling back to `offscreen` meant that running the GUI over SSH started a full
+    Qt application that rendered to nowhere and never appeared - indistinguishable
+    from a hang. Anything that genuinely wants offscreen rendering (the test suite,
+    CI) sets QT_QPA_PLATFORM itself, which is honoured above.
+    """
     if not sys.platform.startswith("linux"):
         return
     if os.environ.get("QT_QPA_PLATFORM"):
@@ -634,11 +749,19 @@ def _prepare_linux_qt_environment() -> None:
     if os.environ.get("DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "xcb"
         return
-    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    raise NoDisplayError(
+        "No display was found (neither WAYLAND_DISPLAY nor DISPLAY is set).\n"
+        "Use the command line instead - run 'crapcleaner --help' - or set "
+        "QT_QPA_PLATFORM=offscreen to render with no display."
+    )
 
 
 def run_gui() -> int:
-    _prepare_linux_qt_environment()
+    try:
+        _prepare_linux_qt_environment()
+    except NoDisplayError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     from PySide6.QtWidgets import QApplication
 
@@ -651,12 +774,3 @@ def run_gui() -> int:
     window = MainWindow()
     window.show()
     return app.exec()
-
-
-def main(argv=None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in ("--gui",):
-        return run_gui()
-    from crapcleaner.cli import run as cli_run
-
-    return cli_run(argv)

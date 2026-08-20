@@ -1,11 +1,12 @@
 """Safe file operations: permission-aware deletion, Windows long-path normalization, and Recycle Bin access."""
 
 import ctypes
+import errno
 import os
 import shutil
 import stat
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from ctypes import wintypes
 from datetime import datetime
 from urllib.parse import quote
@@ -103,7 +104,7 @@ def walk_safe(top: str, topdown: bool = True):
         yield top, dirs, files
 
 
-def walk_safe_entries(top: str):
+def walk_safe_entries(top: str, skip_dir: Callable[[str], bool] | None = None):
     """Like :func:`walk_safe`, but yields `(dirpath, file_entries)` with the entries.
 
     A directory listing already carries each file's size, so a caller that needs sizes
@@ -112,7 +113,9 @@ def walk_safe_entries(top: str):
     taking a hundred seconds and taking ten.
 
     Symlinks and junctions are yielded as entries rather than descended into, exactly
-    as in :func:`walk_safe`.
+    as in :func:`walk_safe`. Pass `skip_dir` to prune a subtree by path - the callers
+    that used to prune `os.walk`'s `dirnames` list in place need it, and pruning here
+    means the skipped directory is never even listed.
     """
     try:
         entries = list(os.scandir(top))
@@ -126,6 +129,8 @@ def walk_safe_entries(top: str):
             if is_link_like(entry):
                 files.append(entry)
             elif entry.is_dir(follow_symlinks=False):
+                if skip_dir is not None and skip_dir(entry.path):
+                    continue
                 dirs.append(entry)
             else:
                 files.append(entry)
@@ -134,7 +139,7 @@ def walk_safe_entries(top: str):
 
     yield top, files
     for entry in dirs:
-        yield from walk_safe_entries(entry.path)
+        yield from walk_safe_entries(entry.path, skip_dir)
 
 
 def file_manager_name() -> str:
@@ -426,7 +431,12 @@ def _empty_linux_trash() -> bool:
 
 
 def path_is_locked(path: str) -> bool:
-    """Check if a file is currently opened with exclusive lock by another process."""
+    """Whether a file is held open by another process.
+
+    A read-only file, or one whose permissions deny writing, is not locked - it used
+    to be reported as such, which points the user at the wrong remedy. Only a sharing
+    violation counts.
+    """
     norm = normalize_long_path(path)
     if not os.path.exists(norm):
         return False
@@ -434,5 +444,9 @@ def path_is_locked(path: str) -> bool:
         handle = os.open(norm, os.O_RDWR)
         os.close(handle)
         return False
-    except OSError:
-        return True
+    except PermissionError as exc:
+        # ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33) both surface as
+        # PermissionError on Windows; plain access denial does not have a winerror.
+        return getattr(exc, "winerror", None) in (32, 33)
+    except OSError as exc:
+        return getattr(exc, "errno", None) in (errno.EBUSY, errno.ETXTBSY)

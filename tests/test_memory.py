@@ -207,7 +207,7 @@ def test_dry_run_changes_nothing(monkeypatch):
     assert result.success is True
     assert result.dry_run is True
     assert called == []
-    assert result.reclaimed_bytes == 0
+    assert result.available_delta_bytes == 0
     assert "Dry run" in result.message
 
 
@@ -238,7 +238,7 @@ def test_working_set_action_reports_before_and_after(monkeypatch):
     assert result.success is True
     assert result.before.total_bytes == 100
     assert result.after.total_bytes == 100
-    assert result.reclaimed_bytes == 0
+    assert result.available_delta_bytes == 0
 
 
 def test_vram_action_is_read_only(monkeypatch):
@@ -254,7 +254,7 @@ def test_vram_action_is_read_only(monkeypatch):
     result = run_action("vram_report")
     assert result.success is True
     assert result.measurable is False
-    assert result.reclaimed_bytes == 0
+    assert result.available_delta_bytes == 0
     assert "50.0%" in result.message
 
 

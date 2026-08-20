@@ -78,6 +78,8 @@ class NavButton(QPushButton):
         self._icon_name = icon_name
         self.setProperty("nav", "true")
         self.setProperty("active", "false")
+        self.setAccessibleName(clean_label.replace("&&", "&"))
+        self.setAccessibleDescription(f"Open the {clean_label.replace('&&', '&')} page")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(38)
         self.setIconSize(QSize(18, 18))

@@ -531,7 +531,8 @@ class MemoryView(QWidget):
             return
         before = format_size(result.before.available_bytes)
         after = format_size(result.after.available_bytes)
-        reclaimed = format_size(result.reclaimed_bytes)
+        delta = result.available_delta_bytes
+        change = f"{'+' if delta >= 0 else '-'}{format_size(abs(delta))}"
         extra_tip = ""
         if (
             not is_admin()
@@ -544,7 +545,8 @@ class MemoryView(QWidget):
                 f" (Tip: Relaunch as Administrator to also purge {cached_str} of Standby Cache)."
             )
         self.result_label.setText(
-            f"{result.message} Available memory increased from {before} to {after} (+{reclaimed} reclaimed).{extra_tip}"
+            f"{result.message} Available memory went from {before} to {after} ({change} "
+            f"system-wide, including everything else running).{extra_tip}"
         )
         self.result_icon.setPixmap(material_icon("check", _c(self._theme, "safe")).pixmap(18, 18))
         self.result_banner.setVisible(True)

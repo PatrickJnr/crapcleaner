@@ -322,7 +322,8 @@ class LargeFilesView(QWidget):
             self._recycle_path(file_path)
 
     def _recycle_path(self, path: str):
-        from crapcleaner.utils.files import move_to_recycle_bin
+        # Routed through the core helper so the protected-path rules apply here too.
+        from crapcleaner.core.cleaner import remove_selected_paths
 
         dialog = ConfirmDeleteDialog(
             "Move to Recycle Bin",
@@ -331,8 +332,8 @@ class LargeFilesView(QWidget):
         )
         if dialog.exec() != ConfirmDeleteDialog.DialogCode.Accepted:
             return
-        ok, _ = move_to_recycle_bin([path])
-        if ok:
+        outcome = remove_selected_paths([path], use_recycle_bin=True)[0]
+        if outcome.removed:
             self._files = [f for f in self._files if f.path != path]
             self.show_files(self._files)
             QMessageBox.information(self, "Recycle Bin", "File moved to the Recycle Bin.")
@@ -340,7 +341,7 @@ class LargeFilesView(QWidget):
             QMessageBox.warning(
                 self,
                 "Recycle Bin",
-                "Could not move the file (it may be locked or in use).",
+                f"The file was not moved.\n\n{outcome.reason}",
             )
 
     def apply_theme(self, theme: str):

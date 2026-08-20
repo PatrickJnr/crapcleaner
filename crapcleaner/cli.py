@@ -50,6 +50,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scan", action="store_true", help="Scan for reclaimable space.")
     parser.add_argument("--json", action="store_true", help="Machine-readable JSON output.")
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Write debug detail to the log file (see --log-path).",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress and decorative output; results are still printed.",
+    )
+    parser.add_argument(
+        "--log-path",
+        action="store_true",
+        help="Print where the application log is written and exit.",
+    )
+    parser.add_argument(
         "--progress-jsonl",
         action="store_true",
         help="Stream scan/cleanup progress as one JSON object per line (JSONL/NDJSON).",
@@ -242,6 +257,59 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report which platform features are available on this operating system.",
     )
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="With --storage, report what grew or shrank since the last scan of that path.",
+    )
+    parser.add_argument(
+        "--allocated",
+        action="store_true",
+        help=(
+            "Measure what files occupy on disk rather than their length, which is what "
+            "free space reflects for compressed, sparse, and very small files."
+        ),
+    )
+    parser.add_argument(
+        "--update",
+        nargs="?",
+        const="check",
+        choices=("check", "install"),
+        help="Check for a new release, or download, verify, and install it.",
+    )
+    parser.add_argument(
+        "--schedule",
+        nargs="?",
+        const="status",
+        choices=("status", "enable", "disable"),
+        help="Inspect or change the scheduled scan (Task Scheduler, or a systemd timer).",
+    )
+    parser.add_argument(
+        "--at",
+        metavar="HH:MM",
+        help="Time of day for --schedule enable (default 18:00).",
+    )
+    parser.add_argument(
+        "--frequency",
+        choices=("daily", "weekly"),
+        help="How often --schedule enable should run (default daily).",
+    )
+    parser.add_argument(
+        "--threshold-mb",
+        type=int,
+        metavar="MB",
+        help="Notify when at least this much is reclaimable (default 5120).",
+    )
+    parser.add_argument(
+        "--scheduled-scan",
+        action="store_true",
+        help="Run the unattended scan. This is what the scheduler invokes; it never deletes.",
+    )
+    parser.add_argument(
+        "--crash-dumps",
+        action="store_true",
+        help="List crash dumps and kernel memory dumps, grouped by application.",
+    )
     return parser
 
 
@@ -276,9 +344,11 @@ class JsonlProgress:
 
 
 def _select_clean_categories(names: list[str]) -> list[CleanupCategory]:
+    # One enumeration for every name, rather than one per name.
+    available = get_all_categories()
     selected: list[CleanupCategory] = []
     for name in names:
-        for category in find_categories(name):
+        for category in find_categories(name, available):
             if category not in selected:
                 selected.append(category)
     if not selected:
@@ -467,10 +537,12 @@ def _run_memory(args, settings: dict) -> int:
     else:
         print(result.message)
         if result.success and result.measurable and not result.dry_run:
+            delta = result.available_delta_bytes
+            sign = "+" if delta >= 0 else "-"
             print(
                 f"Available memory: {format_size(result.before.available_bytes)} -> "
                 f"{format_size(result.after.available_bytes)} "
-                f"(reclaimed {format_size(result.reclaimed_bytes)})"
+                f"({sign}{format_size(abs(delta))} system-wide, includes other activity)"
             )
         if dry_run and result.success:
             print("Nothing was changed. Re-run with --execute to perform this action.")
@@ -478,6 +550,21 @@ def _run_memory(args, settings: dict) -> int:
 
 
 def run(argv: list[str] | None = None) -> int:
+    import sys as _sys
+
+    argv = list(_sys.argv[1:] if argv is None else argv)
+    # `crapcleaner scan --json` and `crapcleaner --scan --json` are the same run:
+    # a leading word is a sub-command, anything else is the original flag surface.
+    if argv and not argv[0].startswith("-"):
+        from crapcleaner.commands import is_command, to_legacy_argv
+
+        if is_command(argv[0]):
+            argv = to_legacy_argv(argv)
+        else:
+            from crapcleaner.commands import build_command_parser
+
+            build_command_parser().error(f"unknown command: {argv[0]}")
+
     parser = build_parser()
     args = parser.parse_args(argv)
     settings = load_settings()
@@ -510,6 +597,11 @@ def run(argv: list[str] | None = None) -> int:
             args.services,
             args.system_updates,
             args.capabilities,
+            args.log_path,
+            args.crash_dumps,
+            args.schedule,
+            args.scheduled_scan,
+            args.update,
         )
     ):
         from crapcleaner.gui.app import run_gui
@@ -518,6 +610,171 @@ def run(argv: list[str] | None = None) -> int:
 
     if args.memory or args.memory_clean:
         return _run_memory(args, settings)
+
+    if args.update:
+        from crapcleaner.utils.self_update import (
+            UpdateError,
+            apply_update,
+            can_self_update,
+            download_update,
+        )
+        from crapcleaner.utils.updater import check_for_updates
+
+        release = check_for_updates(timeout_seconds=10.0)
+        if release is None:
+            print("Could not reach GitHub to check for updates.", file=sys.stderr)
+            return 1
+        if not release.is_newer:
+            print(f"CrapCleaner v{release.current_version} is the latest release.")
+            return 0
+
+        print(
+            f"CrapCleaner v{release.latest_version} is available (you have v{release.current_version})."
+        )
+        if args.update == "check":
+            print(f"Install it with: crapcleaner update install\n{release.html_url}")
+            return 0
+
+        allowed, reason = can_self_update()
+        if not allowed:
+            print(reason, file=sys.stderr)
+            return 1
+        if not args.yes and not _confirm_execute(
+            "Download, verify, and install it now? The application will restart. [y/N] "
+        ):
+            print("Update cancelled.")
+            return 1
+
+        def show(received: int, total: int) -> None:
+            if args.quiet:
+                return
+            if total:
+                print(f"\rDownloading… {received * 100 // total}%", end="", flush=True)
+
+        try:
+            update = download_update(release.latest_version, progress_cb=show)
+            if not args.quiet:
+                print(f"\rDownloaded and verified ({format_size(update.size)}).")
+            apply_update(update)
+        except UpdateError as exc:
+            print(f"\nerror: {exc}", file=sys.stderr)
+            return 1
+        print("Installing and restarting. This process will now exit.")
+        return 0
+
+    if args.scheduled_scan:
+        from crapcleaner.core.scheduler import run_scheduled_scan
+
+        result = run_scheduled_scan()
+        if args.json:
+            print(json.dumps(result, indent=2))
+        elif not args.quiet:
+            print(
+                f"Scheduled scan complete: {format_size(result['total_reclaimable'])} "
+                f"reclaimable across {result['total_files']:,} files."
+            )
+        return 0
+
+    if args.schedule:
+        from crapcleaner.core.scheduler import ScheduleConfig, disable, enable, last_result, status
+
+        if args.schedule == "status":
+            current = status()
+            if args.json:
+                payload = current.to_dict()
+                payload["last_result"] = last_result()
+                print(json.dumps(payload, indent=2))
+                return 0
+            print("=" * 70)
+            print("CrapCleaner Scheduled Scan")
+            print("=" * 70)
+            print(f"Supported here : {'yes' if current.supported else 'no'}")
+            print(f"Registered     : {'yes' if current.registered else 'no'}")
+            print(f"Detail         : {current.detail}")
+            if current.command:
+                print(f"Runs           : {current.command}")
+            config = current.config
+            print(f"Configured     : {config.frequency} at {config.at}")
+            print(f"Notify above   : {config.threshold_mb} MB")
+            previous = last_result()
+            if previous:
+                when = datetime.fromtimestamp(previous.get("finished_at", 0))
+                print(
+                    f"Last run       : {format_datetime(when)}, "
+                    f"{format_size(previous.get('total_reclaimable', 0))} reclaimable"
+                )
+            print("A scheduled run only scans. It never deletes anything.")
+            print("=" * 70)
+            return 0
+
+        if args.schedule == "disable":
+            ok, message = disable()
+            print(message)
+            return 0 if ok else 1
+
+        current_config = status().config
+        wanted = ScheduleConfig(
+            enabled=True,
+            at=args.at or current_config.at,
+            frequency=args.frequency or current_config.frequency,
+            threshold_mb=(
+                args.threshold_mb if args.threshold_mb is not None else current_config.threshold_mb
+            ),
+        )
+        try:
+            ok, message = enable(wanted)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(message)
+        return 0 if ok else 1
+
+    if args.crash_dumps:
+        from crapcleaner.analysis.crash_dumps import find_crash_dumps
+
+        dumps = find_crash_dumps()
+        if args.json:
+            print(json.dumps([d.to_dict() for d in dumps], indent=2))
+            return 0
+        if args.export:
+            written = export_report(
+                dumps,
+                report_type="crash_dumps",
+                export_format=args.export,
+                output_path=args.output,
+            )
+            if not args.output:
+                print(written)
+            return 0
+        print("=" * 80)
+        print("CrapCleaner Crash Dumps")
+        print("=" * 80)
+        if not dumps:
+            print("No crash dumps found.")
+            return 0
+        by_app: dict[str, list] = {}
+        for dump in dumps:
+            by_app.setdefault(dump.application, []).append(dump)
+        total = 0
+        for application in sorted(by_app, key=lambda a: -sum(d.size for d in by_app[a])):
+            items = by_app[application]
+            subtotal = sum(d.size for d in items)
+            total += subtotal
+            print(f"\n{application} - {len(items)} dump(s), {format_size(subtotal)}")
+            for dump in sorted(items, key=lambda d: -d.size):
+                stamp = dump.modified_at.strftime("%Y-%m-%d") if dump.modified_at else "--"
+                print(f"  {format_size(dump.size):>10}  {stamp}  {dump.dump_type}")
+                print(f"              {dump.path}")
+        print("-" * 80)
+        print(f"Total: {len(dumps)} dump(s), {format_size(total)} reclaimable.")
+        print("Remove them with: crapcleaner clean 'crash dumps' --execute")
+        return 0
+
+    if args.log_path:
+        from crapcleaner.utils.logs import log_path
+
+        print(log_path())
+        return 0
 
     if args.protected_paths:
         rules = get_protected_rules_summary()
@@ -606,7 +863,56 @@ def run(argv: list[str] | None = None) -> int:
             or settings.get("large_file_default_root")
             or get_user_profile()
         )
-        node = analyze_storage_hierarchy(target_path, max_depth=3)
+        from crapcleaner.analysis.snapshots import (
+            compare as compare_snapshots,
+        )
+        from crapcleaner.analysis.snapshots import (
+            save_snapshot,
+            sizes_from_index,
+        )
+        from crapcleaner.analysis.storage import StorageIndex
+        from crapcleaner.utils.disk_size import SIZE_ALLOCATED, SIZE_LOGICAL
+
+        size_mode = SIZE_ALLOCATED if args.allocated else SIZE_LOGICAL
+        storage_index = StorageIndex()
+        node = analyze_storage_hierarchy(
+            target_path,
+            max_depth=3,
+            size_mode=size_mode,
+            index_out=storage_index,
+        )
+        storage_sizes = sizes_from_index(storage_index)
+        comparison = compare_snapshots(target_path, storage_sizes) if args.compare else None
+        save_snapshot(target_path, storage_sizes, size_mode=size_mode)
+
+        if args.compare:
+            if comparison is None:
+                print("No previous scan of this path to compare with. This one is now stored.")
+            elif args.json:
+                print(json.dumps(comparison.to_dict(), indent=2))
+                return 0
+            else:
+                since = datetime.fromtimestamp(comparison.previous_taken_at)
+                print("=" * 80)
+                print(f"Changes since {format_datetime(since)}")
+                print("=" * 80)
+                total = comparison.total_delta
+                sign = "+" if total >= 0 else "-"
+                print(f"Total: {sign}{format_size(abs(total))}")
+                grew = comparison.growth()
+                shrank = comparison.shrinkage()
+                if grew:
+                    print("\nGrew:")
+                    for change in grew:
+                        print(f"  +{format_size(change.delta):>10}  {change.path}")
+                if shrank:
+                    print("\nShrank:")
+                    for change in shrank:
+                        print(f"  -{format_size(abs(change.delta)):>10}  {change.path}")
+                if not grew and not shrank:
+                    print("Nothing changed by more than a megabyte.")
+                print("=" * 80)
+                return 0
         if node is None:
             print(f"error: unable to inspect storage path {target_path!r}", file=sys.stderr)
             return 1

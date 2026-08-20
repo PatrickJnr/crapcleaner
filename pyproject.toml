@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crapcleaner"
-version = "1.0.11.1"
+version = "1.1.0"
 description = "Modern cleanup and disk-analysis utility"
 requires-python = ">=3.10"
 dependencies = ["PySide6>=6.5"]
@@ -16,7 +16,7 @@ crapcleaner = "crapcleaner.app:main"
 include = ["crapcleaner*"]
 
 [tool.setuptools.package-data]
-crapcleaner = ["assets/*"]
+crapcleaner = ["assets/*", "assets/themes/*.json"]
 
 [tool.ruff]
 target-version = "py310"
@@ -35,15 +35,3 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 check_untyped_defs = true
 exclude = ["build", "dist", "release"]
-
-[tool.black]
-line-length = 100
-target-version = ["py310", "py311", "py312"]
-extend-exclude = '''
-/(
-    build
-  | dist
-  | release
-  | \.venv
-)/
-'''

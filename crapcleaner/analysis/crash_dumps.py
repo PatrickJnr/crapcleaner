@@ -51,6 +51,21 @@ def _extract_app_name(filename: str) -> str:
     return "System / Unknown"
 
 
+def find_application_dump_paths() -> list[str]:
+    """User-mode dump files, which the owning account can delete unaided."""
+    return [d.path for d in find_crash_dumps() if d.dump_type == "User-mode crash dump"]
+
+
+def find_kernel_dump_paths() -> list[str]:
+    """Kernel and full-memory dumps. These need elevation and are worth reviewing:
+    a single MEMORY.DMP is routinely several gigabytes."""
+    return [d.path for d in find_crash_dumps() if d.dump_type != "User-mode crash dump"]
+
+
+def total_dump_size() -> int:
+    return sum(d.size for d in find_crash_dumps())
+
+
 def find_crash_dumps() -> list[CrashDumpItem]:
     """Scan platform crash dump and minidump locations and return structured items."""
     dumps: list[CrashDumpItem] = []

@@ -32,9 +32,15 @@ import time
 from typing import Any
 
 from crapcleaner.config import config_dir
+from crapcleaner.utils.logs import get_logger
+
+logger = get_logger("cache")
 
 DEFAULT_TTL = 300.0
 CACHE_FILE = "scan_cache.json"
+#: Upper bound on stored entries. A busy machine records a few thousand directories;
+#: beyond that the oldest are dropped rather than parsed on every start.
+MAX_CACHE_ENTRIES = 5000
 
 
 def _cache_path() -> str:
@@ -113,17 +119,41 @@ class ScanCache:
         except (OSError, ValueError):
             self._entries = {}
 
+    def _prune(self) -> dict[str, Any]:
+        """Entries worth keeping: recent enough to be reusable, and bounded in number.
+
+        Nothing used to remove an entry, so every directory ever scanned - including
+        ones since deleted and drives since unplugged - stayed in the file forever and
+        was parsed again on every scan.
+        """
+        now = time.time()
+        keep_age = max(self._ttl * 4, 3600.0)
+        fresh = {
+            key: entry
+            for key, entry in self._entries.items()
+            if now - float(entry.get("cached_at", 0)) <= keep_age
+        }
+        if len(fresh) <= MAX_CACHE_ENTRIES:
+            return fresh
+        newest = sorted(
+            fresh.items(), key=lambda kv: float(kv[1].get("cached_at", 0)), reverse=True
+        )
+        return dict(newest[:MAX_CACHE_ENTRIES])
+
     def save(self) -> None:
-        if not self._entries:
+        with self._lock:
+            entries = self._prune()
+            self._entries = entries
+        if not entries:
             return
         try:
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
             temp = self._path + ".tmp"
             with open(temp, "w", encoding="utf-8") as fh:
-                json.dump({"entries": self._entries}, fh)
+                json.dump({"entries": entries}, fh)
             os.replace(temp, self._path)
         except OSError:
-            pass
+            logger.debug("Could not write the scan cache to %s", self._path, exc_info=True)
 
     def clear(self) -> None:
         with self._lock:
@@ -132,7 +162,7 @@ class ScanCache:
             if os.path.exists(self._path):
                 os.remove(self._path)
         except OSError:
-            pass
+            logger.debug("Could not clear the scan cache at %s", self._path, exc_info=True)
 
     def _fresh(
         self, entry: dict[str, Any], probes: dict[str, list[int]], ttl: float | None = None

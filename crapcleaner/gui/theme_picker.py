@@ -80,6 +80,7 @@ class ThemeCard(QFrame):
     """Interactive card representing a single theme with swatches, title, and active badge."""
 
     clicked = Signal(str)
+    delete_requested = Signal(str)
 
     def __init__(self, theme_id: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -167,6 +168,28 @@ class ThemeCard(QFrame):
             self._is_active = active
             self.active_badge.setVisible(active)
             self._update_appearance()
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        """Saved themes can be reopened in the Studio or removed. Bundled ones cannot."""
+        from PySide6.QtWidgets import QMenu
+
+        from crapcleaner.gui.theme import is_user_theme, user_theme_path
+
+        if not is_user_theme(self.theme_id):
+            return
+
+        menu = QMenu(self)
+        # The theme file is the editor: it reloads as it is saved.
+        reveal = menu.addAction("Show the theme file")
+        menu.addSeparator()
+        remove = menu.addAction("Delete this theme")
+        chosen = menu.exec(event.globalPos())
+        if chosen == reveal:
+            from crapcleaner.utils.files import reveal_in_file_manager
+
+            reveal_in_file_manager(user_theme_path(self.theme_id))
+        elif chosen == remove:
+            self.delete_requested.emit(self.theme_id)
 
     def enterEvent(self, event) -> None:  # noqa: N802
         self._is_hovered = True
@@ -407,12 +430,88 @@ class ThemeGalleryWidget(QWidget):
         for theme_id in THEMES:
             card = ThemeCard(theme_id, grid_container)
             card.clicked.connect(self.select_theme)
+            card.delete_requested.connect(self._delete_theme)
             self._cards[theme_id] = card
 
         self._relayout_cards()
 
         scroll.setWidget(grid_container)
         main_layout.addWidget(scroll, 1)
+
+    def refresh_themes(self) -> None:
+        """Rebuild the gallery after the theme registry changed.
+
+        A theme saved in the Studio, or a file dropped into the theme directory,
+        appears here without restarting - so the cards, the chip counts and the
+        swatches all have to be rebuilt from the current registry.
+        """
+        container = self.grid_layout.parentWidget()
+
+        for theme_id in list(self._cards):
+            if theme_id not in THEMES:
+                card = self._cards.pop(theme_id)
+                self.grid_layout.removeWidget(card)
+                card.setParent(None)
+                card.deleteLater()
+
+        for theme_id in THEMES:
+            existing = self._cards.get(theme_id)
+            if existing is None:
+                fresh = ThemeCard(theme_id, container)
+                fresh.clicked.connect(self.select_theme)
+                fresh.delete_requested.connect(self._delete_theme)
+                self._cards[theme_id] = fresh
+            else:
+                existing.refresh_theme_data()
+
+        # The combo behind the gallery is addressed by index, so it has to be rebuilt
+        # rather than appended to.
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.clear()
+        for theme_id in THEMES:
+            self.theme_combo.addItem(theme_label(theme_id), theme_id)
+        self.theme_combo.blockSignals(False)
+
+        self._refresh_chip_counts()
+        self._relayout_cards()
+        if self._current_theme in THEMES:
+            self.select_theme(self._current_theme, emit_signal=False)
+        else:
+            self.select_theme("dark")
+
+    def _refresh_chip_counts(self) -> None:
+        """Keep the category chips' counts honest as themes come and go."""
+        counts = {
+            category_id: sum(1 for t in THEMES if get_theme_category(t) == category_id)
+            for category_id in THEME_CATEGORIES
+        }
+        for button in self.chip_group.buttons():
+            label = button.text().split(" (")[0].replace("&&", "&")
+            if label == "All":
+                button.setText(f"All ({len(THEMES)})")
+                continue
+            for category_id, category_label in THEME_CATEGORIES.items():
+                if category_label == label:
+                    button.setText(
+                        f"{category_label.replace('&', '&&')} ({counts.get(category_id, 0)})"
+                    )
+                    break
+
+    def _delete_theme(self, theme_id: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from crapcleaner.gui.theme import delete_user_theme, theme_label
+
+        answer = QMessageBox.question(
+            self,
+            "Delete theme",
+            f"Delete the saved theme {theme_label(theme_id)!r}? Its file will be removed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if delete_user_theme(theme_id):
+            self.refresh_themes()
 
     def _relayout_cards(self) -> None:
         """Re-arranges visible cards in a clean 3-column grid pinned to the top."""
@@ -498,10 +597,11 @@ class ThemeGalleryWidget(QWidget):
 
         # Update backward-compatibility combo box
         if self.theme_combo.currentData() != theme_id:
-            idx = THEMES.index(theme_id)
-            self.theme_combo.blockSignals(True)
-            self.theme_combo.setCurrentIndex(idx)
-            self.theme_combo.blockSignals(False)
+            index = self.theme_combo.findData(theme_id)
+            if index >= 0:
+                self.theme_combo.blockSignals(True)
+                self.theme_combo.setCurrentIndex(index)
+                self.theme_combo.blockSignals(False)
 
         # Update cards
         for t_id, card in self._cards.items():

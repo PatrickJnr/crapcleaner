@@ -232,24 +232,34 @@ class DuplicatesView(QWidget):
             return
         targets = dialog.targets()
         if not targets:
-            QMessageBox.information(self, "Duplicates", "No copies were selected for recycling.")
+            QMessageBox.information(
+                self,
+                "Duplicates",
+                "No copies were selected for recycling, or the selection would not have "
+                "left a copy behind.",
+            )
             return
-        from crapcleaner.utils.files import move_to_recycle_bin
+        # Every deletion in the application goes through the same validated helper, so
+        # a protected path cannot be removed from here either.
+        from crapcleaner.core.cleaner import remove_selected_paths
 
-        ok, failed = move_to_recycle_bin(targets)
+        outcomes = remove_selected_paths(targets, use_recycle_bin=True)
+        moved = [o for o in outcomes if o.removed]
+        refused = [o for o in outcomes if not o.removed]
         self._groups = [g for g in self._groups if g is not group]
         self.show_groups(self._groups)
-        if ok:
+        if not refused:
             QMessageBox.information(
                 self,
                 "Recycle Bin",
-                f"Moved {len(targets)} duplicate copy/copies to the Recycle Bin.",
+                f"Moved {len(moved)} duplicate copy/copies to the Recycle Bin.",
             )
         else:
+            detail = "\n".join(f"{o.path}\n    {o.reason}" for o in refused[:5])
             QMessageBox.warning(
                 self,
                 "Recycle Bin",
-                f"Some files could not be moved ({len(failed)} locked or in use).",
+                f"Moved {len(moved)} copy/copies. {len(refused)} were not removed:\n\n{detail}",
             )
 
     def _menu(self, pos):

@@ -52,6 +52,9 @@ class CategoryPreview:
     items: list[PreviewItem] = field(default_factory=list)
     selected: bool = True
     errors: list[str] = field(default_factory=list)
+    #: True when more files were found than the manifest keeps. The totals still
+    #: cover everything; only the listed sample is capped.
+    items_truncated: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -66,6 +69,7 @@ class CategoryPreview:
             "item_count": self.item_count,
             "selected": self.selected,
             "items": [item.to_dict() for item in self.items],
+            "items_truncated": self.items_truncated,
             "errors": self.errors,
         }
 
@@ -113,6 +117,10 @@ def generate_cleanup_preview(
     resolve_finders: bool = False,
 ) -> CleanupPreview:
     """Enumerate all files and directories targeted by categories and build a pre-cleanup manifest.
+
+    `max_items_per_category` caps the *listed* items only. Sizes and counts always
+    cover everything that would be deleted: capping them made the preview understate
+    exactly the categories where the number matters, and disagree with the scan.
 
     Categories that discover their targets through a finder normally reuse the
     numbers from the last scan, so opening the preview after a scan is instant.
@@ -238,13 +246,8 @@ def generate_cleanup_preview(
                     for root, dirs, files in walk_safe(target.path, topdown=True):
                         if stop_event is not None and stop_event.is_set():
                             break
-                        if total_cat_items >= max_items_per_category:
-                            break
-                        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
 
                         for name in files:
-                            if total_cat_items >= max_items_per_category:
-                                break
                             if target.patterns and not any(
                                 fnmatch.fnmatch(name.lower(), p.lower()) for p in target.patterns
                             ):
@@ -275,6 +278,7 @@ def generate_cleanup_preview(
         cat_prev.estimated_size = total_cat_size
         cat_prev.item_count = total_cat_items
         cat_prev.items = items
+        cat_prev.items_truncated = total_cat_items > len(items)
         preview.categories.append(cat_prev)
 
     return preview

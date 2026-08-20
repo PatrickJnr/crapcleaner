@@ -1,3 +1,9 @@
 -r requirements.txt
 pytest>=8
+pytest-cov>=5
 pyinstaller>=6
+# Pinned to a minor series: CI enforces these, so an unrelated release of either
+# must not be able to turn the build red, and a contributor running them locally
+# should see what CI sees.
+ruff~=0.16.0
+mypy~=2.3.0

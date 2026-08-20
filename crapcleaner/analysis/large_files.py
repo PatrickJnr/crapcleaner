@@ -7,17 +7,22 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from crapcleaner.utils.files import walk_safe
+from crapcleaner.core.protected_paths import DirectoryGuard
+from crapcleaner.utils.files import walk_safe_entries
+from crapcleaner.utils.platform import get_program_data, get_windows_dir, is_windows
 
-SKIP_DIR_NAMES = {
-    "$Recycle.Bin",
-    "System Volume Information",
-    "Windows",
-    "ProgramData",
-    "AppData\\Local\\Microsoft",
-    ".git",
-    "node_modules",
-}
+#: Directory names that are skipped wherever they appear. Matched against the
+#: directory's own name, never as a substring of the whole path: "Windows" as a
+#: substring test also skips `Games\MyGame\WindowsNoEditor`, which is where a
+#: large-file scan most needs to look.
+SKIP_DIR_NAMES = frozenset(
+    {
+        "$recycle.bin",
+        "system volume information",
+        ".git",
+        "node_modules",
+    }
+)
 
 FILE_TYPE_MAP = {
     ".exe": "Executable",
@@ -87,12 +92,36 @@ def _file_type(path: str) -> str:
     return FILE_TYPE_MAP.get(ext, "Other")
 
 
+def _system_scan_roots() -> tuple[str, ...]:
+    """Operating system trees a "find big files" scan should not offer up.
+
+    Resolved from the real locations rather than matched by name, so a user folder
+    that happens to be called `Windows` is scanned and `C:\\Windows` is not.
+    """
+    global _SYSTEM_ROOTS
+    if _SYSTEM_ROOTS is None:
+        roots: list[str] = []
+        if is_windows():
+            for candidate in (get_windows_dir(), get_program_data()):
+                if candidate:
+                    roots.append(os.path.normcase(os.path.abspath(candidate)))
+        else:
+            roots.extend(["/proc", "/sys", "/dev", "/run"])
+        _SYSTEM_ROOTS = tuple(roots)
+    return _SYSTEM_ROOTS
+
+
+_SYSTEM_ROOTS: tuple[str, ...] | None = None
+
+
 def _should_skip_dir(dirpath: str) -> bool:
-    lowered = dirpath.lower()
-    for skip in SKIP_DIR_NAMES:
-        if skip.lower() in lowered:
-            return True
-    return False
+    name = os.path.basename(dirpath.rstrip("\\/")).lower()
+    if name in SKIP_DIR_NAMES:
+        return True
+    normalized = os.path.normcase(os.path.abspath(dirpath))
+    return any(
+        normalized == root or normalized.startswith(root + os.sep) for root in _system_scan_roots()
+    )
 
 
 def scan_large_files(
@@ -104,21 +133,31 @@ def scan_large_files(
 ) -> list[LargeFile]:
     if not root or not os.path.isdir(root):
         return []
+    if _should_skip_dir(root):
+        return []
     heap: list[tuple[int, int, LargeFile]] = []
     results: list[LargeFile] = []
     visited = 0
 
-    for dirpath, dirnames, filenames in walk_safe(root, topdown=True):
+    # walk_safe_entries already keeps symlinks and junctions out of the traversal, and
+    # prunes skipped directories before listing them. Protected content is filtered
+    # here rather than at deletion time, so a credential file is never offered as a
+    # deletion candidate in the first place.
+    for dirpath, file_entries in walk_safe_entries(root, skip_dir=_should_skip_dir):
         if stop_event is not None and stop_event.is_set():
             break
-        # walk_safe already keeps symlinks and junctions out of dirnames.
-        dirnames[:] = [d for d in dirnames if not _should_skip_dir(os.path.join(dirpath, d))]
-        for name in filenames:
+        guard = DirectoryGuard(dirpath)
+        if not guard.directory_allowed:
+            continue
+        for entry in file_entries:
             if stop_event is not None and stop_event.is_set():
                 break
-            full = os.path.join(dirpath, name)
+            if not guard.allows_file(entry.name):
+                continue
+            name = entry.name
+            full = entry.path
             try:
-                st = os.stat(full)
+                st = entry.stat(follow_symlinks=False)
                 visited += 1
             except OSError:
                 continue

@@ -8,21 +8,26 @@ contrast and vibrancy, and preview live multi-tab UI mockups before saving.
 
 from __future__ import annotations
 
+import itertools
+
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QColorDialog,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSlider,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -32,10 +37,9 @@ from PySide6.QtWidgets import (
 from crapcleaner.gui.color_engine import (
     contrast_ratio,
     ensure_contrast,
-    export_custom_theme_json,
+    flatten_alpha,
     generate_custom_palette,
     generate_magic_palette,
-    import_custom_theme_json,
     normalize_hex,
 )
 from crapcleaner.gui.icons import icon as material_icon
@@ -62,6 +66,126 @@ PRESET_COLORS = [
 ]
 
 
+#: The colour pairs the running application actually draws, and what each one is.
+#: The soft badge tints are translucent, so they are composited over the card
+#: they sit on before being measured - comparing the raw ``rgba()`` string against
+#: its own accent reports about 1:1 for every theme ever made, which is nonsense.
+CONTRAST_PAIRS: tuple[tuple[str, str, str], ...] = (
+    ("text", "window", "Body text on the window"),
+    ("text", "surface", "Body text on a card"),
+    ("text", "elevated", "Body text on a raised panel"),
+    ("muted", "window", "Secondary text on the window"),
+    ("muted", "surface", "Secondary text on a card"),
+    ("muted", "elevated", "Secondary text on a raised panel"),
+    ("on_accent_soft", "accent_soft", "Accent badge label"),
+    ("on_success_soft", "success_soft", "Safe badge label"),
+    ("on_warning_soft", "warning_soft", "Warning badge label"),
+    ("on_danger_soft", "danger_soft", "Critical badge label"),
+    ("on_accent", "accent", "Primary button label"),
+    ("on_danger", "danger", "Danger button label"),
+)
+
+#: WCAG 2.1 AA for body text.
+MIN_PAIR_CONTRAST = 4.5
+
+
+def contrast_report(palette: dict[str, str]) -> list[tuple[str, float, str]]:
+    """Every pair the running application draws, as it actually renders.
+
+    The soft badge tints are translucent, so they are composited over the card
+    they sit on first. Measuring the raw ``rgba()`` string against its own accent
+    reports about 1:1 for every theme ever made, which says nothing.
+    """
+    if not palette:
+        return []
+    card = palette.get("surface", "#202020")
+    rows = []
+    for fg_key, bg_key, pair_label in CONTRAST_PAIRS:
+        foreground = palette.get(fg_key, "#888888")
+        background = flatten_alpha(palette.get(bg_key, "#888888"), card)
+        ratio = contrast_ratio(foreground, background)
+        grade = "AAA" if ratio >= 7.0 else "AA" if ratio >= MIN_PAIR_CONTRAST else "FAILS"
+        rows.append((pair_label, ratio, grade))
+    return rows
+
+
+def _failing_pairs(config: dict) -> int:
+    palette = generate_custom_palette(
+        primary_color=config["primary_color"],
+        mode=config["mode"],
+        mood=config["mood"],
+        surface_contrast=config["surface_contrast"],
+        accent_intensity=config["accent_intensity"],
+        bg_darkness=config["bg_darkness"],
+    )
+    return sum(1 for _, _, grade in contrast_report(palette) if grade == "FAILS")
+
+
+_SLIDERS: tuple[tuple[str, str, float, float], ...] = (
+    ("surface_contrast", "Surface Contrast", 0.60, 1.40),
+    ("accent_intensity", "Accent Vibrancy", 0.50, 1.50),
+    ("bg_darkness", "Background Depth", 0.50, 1.50),
+)
+
+
+def _sweep(config: dict, grids: list[list[float]]) -> tuple[dict, float] | None:
+    """The combination clearing every pair that moves the sliders least."""
+    best: tuple[float, dict] | None = None
+    for values in itertools.product(*grids):
+        candidate = dict(config)
+        moved = 0.0
+        for (knob, _label, _low, _high), value in zip(_SLIDERS, values):
+            candidate[knob] = value
+            moved += abs(value - config[knob])
+        if _failing_pairs(candidate) == 0 and (best is None or moved < best[0]):
+            best = (moved, candidate)
+    return (best[1], best[0]) if best else None
+
+
+def plan_readability_fix(config: dict) -> tuple[dict, list[str]]:
+    """Find settings that read, and say what changed to get there.
+
+    A sweep rather than a walk. The three sliders interact - raising Surface
+    Contrast lightens the raised panel that secondary text is drawn on, so more
+    of it can be the thing making text unreadable - and moving one at a time,
+    keeping only moves that help on their own, walks straight past combinations
+    that work. The result is the one nearest to what was set.
+    """
+    if _failing_pairs(config) == 0:
+        return dict(config), []
+
+    def grid(low: float, high: float, step: float) -> list[float]:
+        count = int(round((high - low) / step))
+        return [round(low + i * step, 3) for i in range(count + 1)]
+
+    coarse = _sweep(config, [grid(low, high, 0.1) for _knob, _l, low, high in _SLIDERS])
+    if coarse is None:
+        return dict(config), []
+
+    # Then again, finely, around what the coarse pass found.
+    found, _moved = coarse
+    fine = _sweep(
+        config,
+        [
+            grid(
+                max(low, found[knob] - 0.1),
+                min(high, found[knob] + 0.1),
+                0.025,
+            )
+            for knob, _label, low, high in _SLIDERS
+        ],
+    )
+    if fine is not None:
+        found = fine[0]
+
+    notes = [
+        f"set {label} to {int(round(found[knob] * 100))}%"
+        for knob, label, _low, _high in _SLIDERS
+        if abs(found[knob] - config[knob]) > 0.005
+    ]
+    return found, notes
+
+
 class LiveThemePreviewCard(QFrame):
     """Interactive visual preview with tabbed mockups (Overview, Table, Palette Matrix)."""
 
@@ -72,7 +196,6 @@ class LiveThemePreviewCard(QFrame):
         self._primary_color: str = "#3b82f6"
         self._mode: str = "dark"
         self._mood: str = "cohesive"
-        self._preview_tab_buttons: dict[str, QPushButton] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -85,6 +208,7 @@ class LiveThemePreviewCard(QFrame):
         header_row.setSpacing(6)
 
         self.preview_title = QLabel("Live Theme Preview")
+        self.preview_title.setObjectName("previewTitle")
         self.preview_title.setTextFormat(Qt.TextFormat.PlainText)
         t_font = self.preview_title.font()
         t_font.setBold(True)
@@ -93,6 +217,7 @@ class LiveThemePreviewCard(QFrame):
         header_row.addWidget(self.preview_title)
 
         self.mode_badge = QLabel("DARK MODE")
+        self.mode_badge.setObjectName("modeBadge")
         self.mode_badge.setTextFormat(Qt.TextFormat.PlainText)
         self.mode_badge.setStyleSheet(
             "font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;"
@@ -100,6 +225,7 @@ class LiveThemePreviewCard(QFrame):
         header_row.addWidget(self.mode_badge)
 
         self.cr_badge = QLabel("CONTRAST: AAA")
+        self.cr_badge.setObjectName("crBadge")
         self.cr_badge.setTextFormat(Qt.TextFormat.PlainText)
         self.cr_badge.setStyleSheet(
             "font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;"
@@ -108,175 +234,187 @@ class LiveThemePreviewCard(QFrame):
 
         header_row.addStretch(1)
 
-        # Sub-view switcher tabs inside preview
-        self.tab_group = QButtonGroup(self)
-        self.tab_group.setExclusive(True)
-
-        for tab_key, tab_label in [
-            ("overview", "Overview"),
-            ("table", "Table View"),
-            ("matrix", "Palette Matrix"),
-        ]:
-            btn = QPushButton(tab_label)
-            btn.setCheckable(True)
-            btn.setProperty("chip", "true")
-            btn.setChecked(tab_key == "overview")
-            btn.setFixedHeight(22)
-            btn.setStyleSheet("font-size: 9px; padding: 2px 8px;")
-            btn.clicked.connect(lambda _, k=tab_key: self._set_preview_view(k))
-            self.tab_group.addButton(btn)
-            self._preview_tab_buttons[tab_key] = btn
-            header_row.addWidget(btn)
-
         self.main_layout.addLayout(header_row)
 
-        # 2. Stacked Preview Views
-        self.preview_stack = QStackedWidget()
+        # 2. The preview itself. A miniature of the application, then every
+        # token it is built from - which is everything the three tabs used to
+        # show, without hiding two thirds of it behind a click.
+        self.mini_window = QFrame()
+        self.mini_window.setObjectName("miniWindow")
+        mini_lay = QHBoxLayout(self.mini_window)
+        mini_lay.setContentsMargins(1, 1, 1, 1)
+        mini_lay.setSpacing(0)
 
-        # VIEW A: Mockup Overview (Cards, Badges, Action Buttons)
-        page_overview = QWidget()
-        ov_lay = QVBoxLayout(page_overview)
-        ov_lay.setContentsMargins(0, 0, 0, 0)
-        ov_lay.setSpacing(8)
+        # --- sidebar ---
+        self.mini_nav = QFrame()
+        self.mini_nav.setObjectName("miniNav")
+        self.mini_nav.setFixedWidth(132)
+        nav_lay = QVBoxLayout(self.mini_nav)
+        nav_lay.setContentsMargins(8, 10, 8, 10)
+        nav_lay.setSpacing(2)
 
-        grid = QGridLayout()
-        grid.setSpacing(8)
+        self.mini_brand = QLabel("CrapCleaner")
+        self.mini_brand.setObjectName("miniBrand")
+        self.mini_brand.setTextFormat(Qt.TextFormat.PlainText)
+        nav_lay.addWidget(self.mini_brand)
+        nav_lay.addSpacing(8)
 
-        # Mock Stat Card
-        self.stat_box = QFrame()
-        stat_lay = QVBoxLayout(self.stat_box)
-        stat_lay.setContentsMargins(10, 8, 10, 8)
-        stat_lay.setSpacing(2)
+        self.mini_nav_items: list[tuple[QLabel, bool]] = []
+        for name, active in (
+            ("Dashboard", False),
+            ("Cleanup", False),
+            ("Storage Breakdown", True),
+            ("Large Files", False),
+            ("Duplicates", False),
+            ("Startup Apps", False),
+            ("Services", False),
+            ("History", False),
+        ):
+            item = QLabel(name)
+            item.setObjectName("navItemActive" if active else "navItem")
+            item.setTextFormat(Qt.TextFormat.PlainText)
+            item.setFixedHeight(22)
+            nav_lay.addWidget(item)
+            self.mini_nav_items.append((item, active))
+        nav_lay.addStretch(1)
 
-        self.stat_title = QLabel("CLEANUP CANDIDATES")
-        self.stat_title.setTextFormat(Qt.TextFormat.PlainText)
-        self.stat_title.setStyleSheet("font-size: 9px; font-weight: 700; letter-spacing: 0.5px;")
-        self.stat_val = QLabel("6.42 GB")
-        self.stat_val.setTextFormat(Qt.TextFormat.PlainText)
-        val_font = self.stat_val.font()
-        val_font.setBold(True)
-        val_font.setPointSize(13)
-        self.stat_val.setFont(val_font)
+        self.mini_nav_footer = QLabel("Scans never delete files.")
+        self.mini_nav_footer.setObjectName("miniNavFooter")
+        self.mini_nav_footer.setTextFormat(Qt.TextFormat.PlainText)
+        self.mini_nav_footer.setWordWrap(True)
+        nav_lay.addWidget(self.mini_nav_footer)
+        mini_lay.addWidget(self.mini_nav)
 
-        self.stat_sub = QLabel("5,280 items ready to purge safely")
-        self.stat_sub.setTextFormat(Qt.TextFormat.PlainText)
-        self.stat_sub.setStyleSheet("font-size: 10px;")
+        # --- content ---
+        content = QWidget()
+        content_lay = QVBoxLayout(content)
+        content_lay.setContentsMargins(12, 10, 12, 10)
+        content_lay.setSpacing(8)
 
-        stat_lay.addWidget(self.stat_title)
-        stat_lay.addWidget(self.stat_val)
-        stat_lay.addWidget(self.stat_sub)
-        grid.addWidget(self.stat_box, 0, 0, 1, 2)
-
-        # Mock System Status Badges Card
-        self.badges_box = QFrame()
-        badges_lay = QVBoxLayout(self.badges_box)
-        badges_lay.setContentsMargins(10, 8, 10, 8)
-        badges_lay.setSpacing(4)
-
-        b_title = QLabel("SYSTEM SAFETY RATINGS")
-        b_title.setTextFormat(Qt.TextFormat.PlainText)
-        b_title.setStyleSheet("font-size: 9px; font-weight: 700; letter-spacing: 0.5px;")
-        badges_lay.addWidget(b_title)
-
-        pills_row = QHBoxLayout()
-        pills_row.setSpacing(6)
-        self.badge_safe = QLabel("SAFE")
-        self.badge_safe.setTextFormat(Qt.TextFormat.PlainText)
-        self.badge_warn = QLabel("WARNING")
-        self.badge_warn.setTextFormat(Qt.TextFormat.PlainText)
-        self.badge_danger = QLabel("CRITICAL")
-        self.badge_danger.setTextFormat(Qt.TextFormat.PlainText)
-        for b in (self.badge_safe, self.badge_warn, self.badge_danger):
-            b.setStyleSheet(
-                "font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
-            )
-            pills_row.addWidget(b)
-        pills_row.addStretch(1)
-        badges_lay.addLayout(pills_row)
-
-        grid.addWidget(self.badges_box, 0, 2, 1, 2)
-        ov_lay.addLayout(grid)
-
-        # Mock Action Buttons
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
+        head_row = QHBoxLayout()
+        head_box = QVBoxLayout()
+        head_box.setSpacing(1)
+        self.mini_heading = QLabel("Storage Breakdown")
+        self.mini_heading.setObjectName("miniHeading")
+        self.mini_heading.setTextFormat(Qt.TextFormat.PlainText)
+        self.mini_subheading = QLabel("What is using the disk, and what is safe to remove.")
+        self.mini_subheading.setObjectName("miniSubheading")
+        self.mini_subheading.setTextFormat(Qt.TextFormat.PlainText)
+        head_box.addWidget(self.mini_heading)
+        head_box.addWidget(self.mini_subheading)
+        head_row.addLayout(head_box, 1)
 
         self.mock_primary_btn = QPushButton("Clean Junk")
+        self.mock_primary_btn.setObjectName("mockPrimary")
         self.mock_primary_btn.setFixedHeight(26)
         self.mock_primary_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        head_row.addWidget(self.mock_primary_btn)
+        content_lay.addLayout(head_row)
+
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(8)
+        self.mini_stats: list[tuple[QFrame, QLabel, QLabel]] = []
+        for caption, value in (
+            ("RECLAIMABLE", "6.42 GB"),
+            ("ITEMS FOUND", "5,280"),
+            ("DISK IN USE", "78%"),
+        ):
+            box = QFrame()
+            box.setObjectName("statBox")
+            box.setFixedHeight(52)
+            box_lay = QVBoxLayout(box)
+            box_lay.setContentsMargins(10, 6, 10, 6)
+            box_lay.setSpacing(1)
+            cap = QLabel(caption)
+            cap.setObjectName("statCaption")
+            cap.setTextFormat(Qt.TextFormat.PlainText)
+            figure = QLabel(value)
+            figure.setObjectName("statFigure")
+            figure.setTextFormat(Qt.TextFormat.PlainText)
+            box_lay.addWidget(cap)
+            box_lay.addWidget(figure)
+            stats_row.addWidget(box, 1)
+            self.mini_stats.append((box, cap, figure))
+        content_lay.addLayout(stats_row)
+
+        self.mini_list = QTableWidget(0, 3)
+        self.mini_list.setObjectName("miniList")
+        self.mini_list.setHorizontalHeaderLabels(["Location", "Size", "Risk"])
+        self.mini_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.mini_list.verticalHeader().setVisible(False)
+        self.mini_list.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.mini_list.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.mini_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.mini_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        mini_rows = [
+            ("Windows Update cache", "2.30 GB", "Safe"),
+            ("Crash dumps", "1.96 GB", "Review"),
+            ("Package manager caches", "1.14 GB", "Safe"),
+            ("Browser caches", "812 MB", "Safe"),
+            ("Old installers", "620 MB", "Review"),
+            ("Delivery Optimisation", "486 MB", "Safe"),
+            ("Windows error reports", "310 MB", "Safe"),
+            ("Thumbnail database", "184 MB", "Safe"),
+            ("Font cache", "96 MB", "Safe"),
+            ("Temporary internet files", "74 MB", "Safe"),
+            ("Recycle Bin", "62 MB", "Review"),
+            ("Log files", "48 MB", "Safe"),
+            ("Prefetch data", "31 MB", "Safe"),
+            ("Memory dumps", "18 MB", "Review"),
+            ("Clipboard history", "12 MB", "Safe"),
+            ("Search index fragments", "9 MB", "Safe"),
+        ]
+        self.mini_list.setRowCount(len(mini_rows))
+        for r, mini_row in enumerate(mini_rows):
+            for c, text in enumerate(mini_row):
+                cell = QTableWidgetItem(text)
+                if c:
+                    cell.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                    )
+                self.mini_list.setItem(r, c, cell)
+        content_lay.addWidget(self.mini_list, 1)
+
+        foot_row = QHBoxLayout()
+        foot_row.setSpacing(6)
+        self.badge_safe = QLabel("SAFE")
+        self.badge_warn = QLabel("REVIEW")
+        self.badge_danger = QLabel("CRITICAL")
+        for badge, role in (
+            (self.badge_safe, "success"),
+            (self.badge_warn, "warning"),
+            (self.badge_danger, "danger"),
+        ):
+            badge.setObjectName(f"badge_{role}")
+            badge.setTextFormat(Qt.TextFormat.PlainText)
+            badge.setFixedHeight(18)
+            foot_row.addWidget(badge)
+        foot_row.addStretch(1)
 
         self.mock_secondary_btn = QPushButton("Deep Scan")
+        self.mock_secondary_btn.setObjectName("mockSecondary")
         self.mock_secondary_btn.setFixedHeight(26)
-
         self.mock_danger_btn = QPushButton("Purge All")
+        self.mock_danger_btn.setObjectName("mockDanger")
         self.mock_danger_btn.setFixedHeight(26)
+        foot_row.addWidget(self.mock_secondary_btn)
+        foot_row.addWidget(self.mock_danger_btn)
+        content_lay.addLayout(foot_row)
 
-        btn_row.addWidget(self.mock_primary_btn)
-        btn_row.addWidget(self.mock_secondary_btn)
-        btn_row.addWidget(self.mock_danger_btn)
-        btn_row.addStretch(1)
-        ov_lay.addLayout(btn_row)
+        mini_lay.addWidget(content, 1)
+        self.main_layout.addWidget(self.mini_window, 1)
 
-        # Swatch Mini Bar
-        self.swatch_container = QFrame()
-        swatch_lay = QHBoxLayout(self.swatch_container)
-        swatch_lay.setContentsMargins(6, 4, 6, 4)
-        swatch_lay.setSpacing(4)
+        # --- every token, named and valued ---
+        tokens_lbl = QLabel("PALETTE")
+        tokens_lbl.setObjectName("tokensLabel")
+        tokens_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        tokens_lbl.setStyleSheet("font-size: 9px; font-weight: 700; letter-spacing: 0.5px;")
+        self.tokens_label = tokens_lbl
+        self.main_layout.addWidget(tokens_lbl)
 
-        self.swatch_labels: list[tuple[str, QLabel]] = []
-        tokens = [
-            ("Primary", "accent"),
-            ("Window", "window"),
-            ("Surface", "surface"),
-            ("Text", "text"),
-            ("Success", "success"),
-            ("Warning", "warning"),
-            ("Danger", "danger"),
-        ]
-        for name, key in tokens:
-            pill = QLabel(f"{name}")
-            pill.setTextFormat(Qt.TextFormat.PlainText)
-            pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            pill.setStyleSheet(
-                "font-size: 8px; font-weight: 700; padding: 2px 4px; border-radius: 3px;"
-            )
-            swatch_lay.addWidget(pill)
-            self.swatch_labels.append((key, pill))
-
-        ov_lay.addWidget(self.swatch_container)
-        self.preview_stack.addWidget(page_overview)
-
-        # VIEW B: Table & List View Mockup
-        page_table = QWidget()
-        tbl_lay = QVBoxLayout(page_table)
-        tbl_lay.setContentsMargins(0, 0, 0, 0)
-        self.mock_table = QTableWidget(3, 3)
-        self.mock_table.setHorizontalHeaderLabels(["Target Path", "Size", "Risk Level"])
-        self.mock_table.horizontalHeader().setStretchLastSection(True)
-        self.mock_table.verticalHeader().setVisible(False)
-        self.mock_table.setFixedHeight(120)
-        self.mock_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-
-        rows_data = [
-            ("C:/Windows/Temp/*", "1.82 GB", "Safe"),
-            ("~/.cache/pip/wheels", "640 MB", "Safe"),
-            ("~/AppData/Local/CrashDumps", "3.96 GB", "Review"),
-        ]
-        for r, (p_path, p_size, p_risk) in enumerate(rows_data):
-            self.mock_table.setItem(r, 0, QTableWidgetItem(p_path))
-            self.mock_table.setItem(r, 1, QTableWidgetItem(p_size))
-            self.mock_table.setItem(r, 2, QTableWidgetItem(p_risk))
-        tbl_lay.addWidget(self.mock_table)
-        self.preview_stack.addWidget(page_table)
-
-        # VIEW C: 27-Token Palette Matrix
-        page_matrix = QWidget()
-        mat_lay = QVBoxLayout(page_matrix)
-        mat_lay.setContentsMargins(0, 0, 0, 0)
         self.matrix_grid = QGridLayout()
         self.matrix_grid.setSpacing(4)
         self.matrix_chips: dict[str, tuple[QFrame, QLabel, QLabel]] = {}
-
         matrix_tokens = [
             "window",
             "panel",
@@ -286,6 +424,7 @@ class LiveThemePreviewCard(QFrame):
             "border",
             "text",
             "muted",
+            "faint",
             "accent",
             "accent_hover",
             "success",
@@ -295,43 +434,41 @@ class LiveThemePreviewCard(QFrame):
             "review",
         ]
         for idx, token_name in enumerate(matrix_tokens):
-            row, col = divmod(idx, 5)
+            grid_row, grid_col = divmod(idx, 4)
             chip_frame = QFrame()
+            chip_frame.setObjectName(f"chip_{token_name}")
             chip_frame.setFixedHeight(26)
             chip_lay = QHBoxLayout(chip_frame)
-            chip_lay.setContentsMargins(4, 2, 4, 2)
+            chip_lay.setContentsMargins(6, 2, 6, 2)
             chip_lay.setSpacing(4)
 
             t_name_lbl = QLabel(token_name)
+            t_name_lbl.setObjectName(f"chipName_{token_name}")
             t_name_lbl.setTextFormat(Qt.TextFormat.PlainText)
-            t_name_lbl.setStyleSheet("font-size: 8px; font-weight: 700;")
-
             hex_val_lbl = QLabel("#000000")
+            hex_val_lbl.setObjectName(f"chipHex_{token_name}")
             hex_val_lbl.setTextFormat(Qt.TextFormat.PlainText)
-            hex_val_lbl.setStyleSheet("font-size: 8px;")
 
             chip_lay.addWidget(t_name_lbl)
             chip_lay.addStretch(1)
             chip_lay.addWidget(hex_val_lbl)
 
-            self.matrix_grid.addWidget(chip_frame, row, col)
+            self.matrix_grid.addWidget(chip_frame, grid_row, grid_col)
             self.matrix_chips[token_name] = (chip_frame, t_name_lbl, hex_val_lbl)
-
-        mat_lay.addLayout(self.matrix_grid)
-        self.preview_stack.addWidget(page_matrix)
-
-        self.main_layout.addWidget(self.preview_stack)
-
-    def _set_preview_view(self, key: str) -> None:
-        idx = {"overview": 0, "table": 1, "matrix": 2}.get(key, 0)
-        self.preview_stack.setCurrentIndex(idx)
-        if hasattr(self, "_palette") and self._palette:
-            self._update_active_view()
+        self.main_layout.addLayout(self.matrix_grid)
 
     def update_palette(
         self, palette: dict[str, str], primary_hex: str, mode: str, mood: str = "cohesive"
     ) -> None:
-        """Apply generated colors to simulated mockup widgets."""
+        """Restyle the preview to a palette, in one pass."""
+        if (
+            palette == self._palette
+            and mode == self._mode
+            and mood == self._mood
+            and primary_hex == self._primary_color
+        ):
+            return
+
         self._palette = palette
         self._primary_color = primary_hex
         self._mode = mode
@@ -339,127 +476,147 @@ class LiveThemePreviewCard(QFrame):
         p = palette
         is_dark = mode.lower() != "light"
 
-        # Frame background & border
-        self.setStyleSheet(
-            f"LiveThemePreviewCard {{ background-color: {p['window']}; "
-            f"border: 1px solid {p['border']}; border-radius: 8px; }}"
-        )
-        self.preview_title.setStyleSheet(f"color: {p['text']}; font-size: 11px; font-weight: 700;")
-
-        # Mode Badge
-        mode_label = (
+        self.mode_badge.setText(
             f"OLED ({mood.upper()})"
             if mood == "oled" and is_dark
             else f"{mode.upper()} ({mood.upper()})"
         )
-        self.mode_badge.setText(mode_label)
-        self.mode_badge.setStyleSheet(
-            f"background-color: {p['accent_soft']}; color: {p['accent']}; "
-            f"font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;"
-        )
 
-        # Contrast Ratio Rating
-        cr = contrast_ratio(p["text"], p["window"])
-        if cr >= 7.0:
-            cr_text = f"CONTRAST: {cr:.2f} (AAA)"
-            cr_bg = p["success_soft"]
-            cr_fg = p["success"]
-        elif cr >= 4.5:
-            cr_text = f"CONTRAST: {cr:.2f} (AA)"
-            cr_bg = p["warning_soft"]
-            cr_fg = p["warning"]
+        ratio = contrast_ratio(p["text"], p["window"])
+        failures = self.contrast_failures()
+        if failures:
+            cr_text = f"{len(failures)} BELOW {MIN_PAIR_CONTRAST}:1"
+            cr_role = "danger"
+        elif ratio >= 7.0:
+            cr_text = f"CONTRAST: {ratio:.2f} (AAA)"
+            cr_role = "success"
         else:
-            cr_text = f"CONTRAST: {cr:.2f} (LOW)"
-            cr_bg = p["danger_soft"]
-            cr_fg = p["danger"]
-
+            cr_text = f"CONTRAST: {ratio:.2f} (AA)"
+            cr_role = "warning"
         self.cr_badge.setText(cr_text)
-        self.cr_badge.setStyleSheet(
-            f"background-color: {cr_bg}; color: {cr_fg}; "
-            f"font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;"
+        self.cr_badge.setToolTip(
+            "Every colour pair the interface draws is checked against WCAG AA. "
+            "The report beside the controls has the detail."
         )
 
-        self._update_active_view()
+        for token_name, (_chip, _name, hex_val) in self.matrix_chips.items():
+            hex_val.setText(flatten_alpha(p.get(token_name, "#888888"), p["surface"]))
 
-    def _update_active_view(self) -> None:
-        if not hasattr(self, "_palette") or not self._palette:
-            return
-        p = self._palette
-        is_dark = getattr(self, "_mode", "dark").lower() != "light"
-        idx = self.preview_stack.currentIndex()
+        self.setStyleSheet(self._stylesheet(p, cr_role))
 
-        if idx == 0:
-            # Overview Tab: update only visible overview elements
-            self.stat_box.setStyleSheet(
-                f"background-color: {p['surface']}; border: 1px solid {p['border2']}; border-radius: 6px;"
-            )
-            self.stat_title.setStyleSheet(
-                f"color: {p['muted']}; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;"
-            )
-            self.stat_val.setStyleSheet(f"color: {p['text']}; font-size: 14px; font-weight: 800;")
-            self.stat_sub.setStyleSheet(f"color: {p['faint']}; font-size: 10px;")
+    def _stylesheet(self, p: dict[str, str], cr_role: str) -> str:
+        """The whole preview as one sheet.
 
-            self.badges_box.setStyleSheet(
-                f"background-color: {p['surface']}; border: 1px solid {p['border2']}; border-radius: 6px;"
+        Styling each mock widget on its own meant ninety-nine `setStyleSheet`
+        calls per edit, and Qt recomputes a widget's style on every one. The
+        application styles itself with a single sheet; so does its preview.
+        """
+        chip_rules = []
+        for token in self.matrix_chips:
+            solid = flatten_alpha(p.get(token, "#888888"), p["surface"])
+            ink = ensure_contrast("#ffffff", solid, min_ratio=4.0)
+            chip_rules.append(
+                f"#chip_{token} {{ background-color: {solid}; "
+                f"border: 1px solid {p['border2']}; border-radius: 4px; }}"
+                f"#chipName_{token} {{ color: {ink}; font-size: 9px; font-weight: 700; }}"
+                f"#chipHex_{token} {{ color: {ink}; font-size: 9px; }}"
             )
-            self.badge_safe.setStyleSheet(
-                f"background-color: {p['success_soft']}; color: {p['success']}; "
-                f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
-            )
-            self.badge_warn.setStyleSheet(
-                f"background-color: {p['warning_soft']}; color: {p['warning']}; "
-                f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
-            )
-            self.badge_danger.setStyleSheet(
-                f"background-color: {p['danger_soft']}; color: {p['danger']}; "
-                f"font-size: 8px; font-weight: 700; padding: 2px 5px; border-radius: 4px;"
-            )
+        chips = "".join(chip_rules)
+        badges = "".join(
+            f"#badge_{role} {{ background-color: {p[role + '_soft']}; "
+            f"color: {p['on_' + role + '_soft']}; font-size: 8px; font-weight: 700; "
+            f"padding: 2px 8px; border-radius: 9px; }}"
+            for role in ("success", "warning", "danger")
+        )
+        return f"""
+        LiveThemePreviewCard {{
+            background-color: {p["window"]};
+            border: 1px solid {p["border"]};
+            border-radius: 8px;
+        }}
+        #previewTitle {{ color: {p["text"]}; font-size: 11px; font-weight: 700; }}
+        #modeBadge {{
+            background-color: {p["accent_soft"]}; color: {p["on_accent_soft"]};
+            font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+        }}
+        #crBadge {{
+            background-color: {p[cr_role + "_soft"]}; color: {p["on_" + cr_role + "_soft"]};
+            font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+        }}
+        #miniWindow {{
+            background-color: {p["window"]};
+            border: 1px solid {p["border"]};
+            border-radius: 6px;
+        }}
+        #miniNav {{
+            background-color: {p["panel"]};
+            border: none;
+            border-right: 1px solid {p["border"]};
+        }}
+        #miniBrand {{ color: {p["text"]}; font-size: 11px; font-weight: 800; }}
+        #navItem {{ color: {p["muted"]}; padding: 2px 6px; font-size: 9px; }}
+        #navItemActive {{
+            background-color: {p["accent_soft"]}; color: {p["on_accent_soft"]};
+            border-left: 2px solid {p["accent"]}; border-radius: 4px;
+            padding: 2px 6px; font-size: 9px; font-weight: 700;
+        }}
+        #miniNavFooter {{ color: {p["faint"]}; font-size: 8px; }}
+        #miniHeading {{ color: {p["text"]}; font-size: 13px; font-weight: 800; }}
+        #miniSubheading {{ color: {p["muted"]}; font-size: 9px; }}
+        #statBox {{
+            background-color: {p["surface"]};
+            border: 1px solid {p["border2"]};
+            border-radius: 6px;
+        }}
+        #statCaption {{
+            color: {p["muted"]}; font-size: 8px; font-weight: 700;
+            letter-spacing: 0.5px; border: none;
+        }}
+        #statFigure {{ color: {p["text"]}; font-size: 15px; font-weight: 800; border: none; }}
+        #miniList {{
+            background-color: {p["surface"]}; color: {p["text"]};
+            gridline-color: {p["border2"]}; border: 1px solid {p["border"]};
+            border-radius: 6px; font-size: 10px;
+        }}
+        #miniList::item {{ padding: 2px 6px; }}
+        #miniList QHeaderView::section {{
+            background-color: {p["surface2"]}; color: {p["muted"]};
+            font-weight: 700; font-size: 9px; border: none;
+            border-bottom: 1px solid {p["border"]}; padding: 4px 6px;
+        }}
+        #mockPrimary {{
+            background-color: {p["accent"]}; color: {p["on_accent"]};
+            font-weight: 700; border: none; border-radius: 5px;
+            padding: 3px 12px; font-size: 10px;
+        }}
+        #mockPrimary:hover {{ background-color: {p["accent_hover"]}; }}
+        #mockSecondary {{
+            background-color: {p["surface2"]}; color: {p["text"]};
+            font-weight: 600; border: 1px solid {p["border"]}; border-radius: 5px;
+            padding: 3px 12px; font-size: 10px;
+        }}
+        #mockDanger {{
+            background-color: {p["danger_soft"]}; color: {p["on_danger_soft"]};
+            font-weight: 600; border: 1px solid {p["danger"]}; border-radius: 5px;
+            padding: 3px 12px; font-size: 10px;
+        }}
+        #tokensLabel {{
+            color: {p["muted"]}; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+        }}
+        {badges}
+        {chips}
+        """
 
-            self.mock_primary_btn.setStyleSheet(
-                f"QPushButton {{ background-color: {p['accent']}; color: #ffffff; "
-                f"font-weight: 700; border: none; border-radius: 5px; padding: 3px 10px; font-size: 10px; }} "
-                f"QPushButton:hover {{ background-color: {p['accent_hover']}; }}"
-            )
-            self.mock_secondary_btn.setStyleSheet(
-                f"QPushButton {{ background-color: {p['surface2']}; color: {p['text']}; "
-                f"font-weight: 600; border: 1px solid {p['border']}; border-radius: 5px; padding: 3px 10px; font-size: 10px; }}"
-            )
-            self.mock_danger_btn.setStyleSheet(
-                f"QPushButton {{ background-color: {p['danger_soft']}; color: {p['danger']}; "
-                f"font-weight: 600; border: 1px solid {p['danger']}; border-radius: 5px; padding: 3px 10px; font-size: 10px; }}"
-            )
-
-            self.swatch_container.setStyleSheet(
-                f"background-color: {p['surface2']}; border: 1px solid {p['border']}; border-radius: 6px;"
-            )
-            for key, pill in self.swatch_labels:
-                col = p.get(key, "#888888")
-                fg = "#ffffff" if is_dark or key in ("accent", "danger", "success") else "#111827"
-                pill.setStyleSheet(
-                    f"background-color: {col}; color: {fg}; "
-                    f"border: 1px solid {p['border2']}; border-radius: 3px; font-size: 8px; font-weight: 700;"
-                )
-
-        elif idx == 1:
-            # Table Tab
-            self.mock_table.setStyleSheet(
-                f"QTableWidget {{ background-color: {p['surface']}; color: {p['text']}; "
-                f"gridline-color: {p['border2']}; border: 1px solid {p['border']}; border-radius: 4px; font-size: 10px; }} "
-                f"QHeaderView::section {{ background-color: {p['surface2']}; color: {p['muted']}; "
-                f"font-weight: 700; border: 1px solid {p['border']}; padding: 2px 4px; }}"
-            )
-
-        elif idx == 2:
-            # Matrix Tab: 27 token chips
-            for token_name, (chip, t_name, hex_val) in self.matrix_chips.items():
-                val = p.get(token_name, "#888888")
-                chip_fg = ensure_contrast("#ffffff", val, min_ratio=4.0)
-                chip.setStyleSheet(
-                    f"background-color: {val}; border: 1px solid {p['border2']}; border-radius: 4px;"
-                )
-                t_name.setStyleSheet(f"color: {chip_fg}; font-size: 8px; font-weight: 700;")
-                hex_val.setText(val)
-                hex_val.setStyleSheet(f"color: {chip_fg}; font-size: 8px;")
+    def contrast_failures(self) -> list[tuple[str, float]]:
+        """What a reader would struggle with, worst first."""
+        return sorted(
+            [
+                (label, ratio)
+                for label, ratio, grade in contrast_report(self._palette)
+                if grade == "FAILS"
+            ],
+            key=lambda item: item[1],
+        )
 
 
 class CustomThemeBuilderWidget(QWidget):
@@ -469,6 +626,8 @@ class CustomThemeBuilderWidget(QWidget):
     """
 
     theme_applied = Signal(dict)
+    #: A theme was saved to the gallery; carries its id.
+    theme_saved = Signal(str)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -482,8 +641,16 @@ class CustomThemeBuilderWidget(QWidget):
         self._mood_buttons: dict[str, QPushButton] = {}
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
-        self._debounce_timer.setInterval(220)
+        self._debounce_timer.setInterval(160)
         self._debounce_timer.timeout.connect(self._apply_debounced)
+        # Redrawing the preview costs about 12ms, so a drag that fires one per
+        # notch spends longer redrawing than moving. Leading edge, then at most
+        # one redraw per frame, and always a last one with the value it ended on.
+        self._preview_pending = False
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(30)
+        self._preview_timer.timeout.connect(self._preview_cooldown)
         self._load_saved_config()
         self._build_ui()
         self._update_preview(auto_apply=False)
@@ -544,20 +711,6 @@ class CustomThemeBuilderWidget(QWidget):
         self.magic_dice_btn.clicked.connect(self._on_magic_dice_clicked)
         header_row.addWidget(self.magic_dice_btn)
 
-        self.copy_json_btn = QPushButton("Copy JSON")
-        self.copy_json_btn.setIcon(material_icon("code", "#888888"))
-        self.copy_json_btn.setFixedHeight(30)
-        self.copy_json_btn.setToolTip("Copy custom theme palette configuration to clipboard")
-        self.copy_json_btn.clicked.connect(self._copy_theme_json)
-        header_row.addWidget(self.copy_json_btn)
-
-        self.import_json_btn = QPushButton("Import...")
-        self.import_json_btn.setIcon(material_icon("download", "#888888"))
-        self.import_json_btn.setFixedHeight(30)
-        self.import_json_btn.setToolTip("Import custom theme palette from JSON")
-        self.import_json_btn.clicked.connect(self._import_theme_json)
-        header_row.addWidget(self.import_json_btn)
-
         card_lay.addLayout(header_row)
 
         # 2. Main 2-Column Studio Layout
@@ -568,7 +721,33 @@ class CustomThemeBuilderWidget(QWidget):
         left_box = QVBoxLayout()
         left_box.setSpacing(10)
 
-        # A. Primary Color Picker & Hex Input
+        # A. Start from an existing theme. Building from nothing every time was
+        # the only way to use this page; most people want to take a theme they
+        # already like and move it a little.
+        start_row = QHBoxLayout()
+        start_row.setSpacing(8)
+        start_lbl = QLabel("Start from")
+        start_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        start_lbl.setStyleSheet("font-size: 11px; font-weight: 600;")
+        start_row.addWidget(start_lbl)
+
+        self.start_from = QComboBox()
+        self.start_from.setFixedHeight(28)
+        self.start_from.setAccessibleName("Start from an existing theme")
+        self.start_from.setToolTip("Load a theme's colours into the Studio and edit from there.")
+        self.start_from.activated.connect(self._on_start_from)
+        start_row.addWidget(self.start_from, 1)
+        left_box.addLayout(start_row)
+        self._populate_start_from()
+
+        self.start_note = QLabel("")
+        self.start_note.setTextFormat(Qt.TextFormat.PlainText)
+        self.start_note.setWordWrap(True)
+        self.start_note.setStyleSheet("font-size: 10px; color: #888888;")
+        self.start_note.setVisible(False)
+        left_box.addWidget(self.start_note)
+
+        # B. Primary Color Picker & Hex Input
         color_pick_row = QHBoxLayout()
         color_pick_row.setSpacing(8)
 
@@ -595,7 +774,7 @@ class CustomThemeBuilderWidget(QWidget):
 
         left_box.addLayout(color_pick_row)
 
-        # B. Palette Mood / Harmony Style Chips
+        # C. Palette Mood / Harmony Style Chips
         mood_lbl = QLabel("Palette Mood & Harmony")
         mood_lbl.setTextFormat(Qt.TextFormat.PlainText)
         mood_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
@@ -620,6 +799,7 @@ class CustomThemeBuilderWidget(QWidget):
             btn.setProperty("chip", "true")
             btn.setFixedHeight(26)
             btn.setChecked(self._current_mood == m_key)
+            btn.setAccessibleName(f"{m_title} palette mood")
             btn.clicked.connect(lambda _, k=m_key: self._set_mood(k))
             self.mood_group.addButton(btn)
             self._mood_buttons[m_key] = btn
@@ -627,7 +807,7 @@ class CustomThemeBuilderWidget(QWidget):
 
         left_box.addLayout(mood_row)
 
-        # C. 15 Curated Preset Swatches
+        # D. 15 Curated Preset Swatches
         presets_lbl = QLabel("Quick Presets (15 Designer Hues)")
         presets_lbl.setTextFormat(Qt.TextFormat.PlainText)
         presets_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
@@ -641,6 +821,7 @@ class CustomThemeBuilderWidget(QWidget):
             btn.setFixedSize(24, 24)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip(f"{p_name} ({p_hex})")
+            btn.setAccessibleName(f"Preset colour: {p_name}")
             btn.setStyleSheet(
                 f"background-color: {p_hex}; border: 1px solid rgba(255, 255, 255, 0.2); "
                 f"border-radius: 12px;"
@@ -650,7 +831,7 @@ class CustomThemeBuilderWidget(QWidget):
             self._preset_buttons.append(btn)
         left_box.addLayout(presets_grid)
 
-        # D. Dark / Light Canvas Mode Toggle
+        # E. Dark / Light Canvas Mode Toggle
         mode_lbl = QLabel("Canvas Mode")
         mode_lbl.setTextFormat(Qt.TextFormat.PlainText)
         mode_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
@@ -681,7 +862,7 @@ class CustomThemeBuilderWidget(QWidget):
 
         left_box.addLayout(mode_row)
 
-        # E. Sliders for Surface Contrast & Accent Intensity
+        # F. Sliders for Surface Contrast & Accent Intensity
         sliders_box = QVBoxLayout()
         sliders_box.setSpacing(6)
 
@@ -701,6 +882,7 @@ class CustomThemeBuilderWidget(QWidget):
         self.contrast_slider = QSlider(Qt.Orientation.Horizontal)
         self.contrast_slider.setRange(60, 140)
         self.contrast_slider.setValue(int(self._current_contrast * 100))
+        self.contrast_slider.setAccessibleName("Surface contrast")
         self.contrast_slider.valueChanged.connect(self._on_contrast_changed)
         self.contrast_slider.sliderReleased.connect(self._apply_debounced)
         sliders_box.addWidget(self.contrast_slider)
@@ -721,18 +903,97 @@ class CustomThemeBuilderWidget(QWidget):
         self.intensity_slider = QSlider(Qt.Orientation.Horizontal)
         self.intensity_slider.setRange(50, 150)
         self.intensity_slider.setValue(int(self._current_intensity * 100))
+        self.intensity_slider.setAccessibleName("Accent vibrancy")
         self.intensity_slider.valueChanged.connect(self._on_intensity_changed)
         self.intensity_slider.sliderReleased.connect(self._apply_debounced)
         sliders_box.addWidget(self.intensity_slider)
 
+        # Background Depth. Every saved theme carries this value; until now the only
+        # way to change it was to edit the theme file by hand.
+        d_label_row = QHBoxLayout()
+        self.darkness_title = QLabel("Background Depth")
+        self.darkness_title.setTextFormat(Qt.TextFormat.PlainText)
+        self.darkness_title.setStyleSheet("font-size: 11px; color: #888888;")
+        self.darkness_val_lbl = QLabel(f"{int(self._current_bg_darkness * 100)}%")
+        self.darkness_val_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.darkness_val_lbl.setStyleSheet("font-size: 11px; font-weight: 700;")
+        d_label_row.addWidget(self.darkness_title)
+        d_label_row.addStretch(1)
+        d_label_row.addWidget(self.darkness_val_lbl)
+        sliders_box.addLayout(d_label_row)
+
+        self.darkness_slider = QSlider(Qt.Orientation.Horizontal)
+        self.darkness_slider.setRange(50, 150)
+        self.darkness_slider.setValue(int(self._current_bg_darkness * 100))
+        self.darkness_slider.setAccessibleName("Background depth")
+        self.darkness_slider.setToolTip(
+            "How dark the window and panels sit behind the accent colour."
+        )
+        self.darkness_slider.valueChanged.connect(self._on_darkness_changed)
+        self.darkness_slider.sliderReleased.connect(self._apply_debounced)
+        sliders_box.addWidget(self.darkness_slider)
+
         left_box.addLayout(sliders_box)
-        columns_layout.addLayout(left_box, 1)
+
+        # Readability. The column ended here with nothing below it, and this is
+        # the one thing worth knowing before a theme is saved.
+        read_row = QHBoxLayout()
+        read_lbl = QLabel("Readability")
+        read_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        read_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
+        read_row.addWidget(read_lbl)
+        read_row.addStretch(1)
+
+        self.fix_btn = QPushButton("Fix")
+        self.fix_btn.setProperty("primary", "true")
+        # No icon: the icon colour would be baked in, so a disabled button would
+        # still carry a bright tick, and a light theme a white one.
+        self.fix_btn.setMinimumWidth(72)
+        self.fix_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.fix_btn.setAccessibleName("Adjust the theme until the text reads")
+        self.fix_btn.setToolTip(
+            "Move the Studio's own controls until the failing pairs pass, and say "
+            "what changed. Reset Defaults, or the sliders, undo it."
+        )
+        self.fix_btn.clicked.connect(self._fix_readability)
+        read_row.addWidget(self.fix_btn)
+        left_box.addLayout(read_row)
+
+        self.contrast_summary = QLabel("")
+        self.contrast_summary.setTextFormat(Qt.TextFormat.PlainText)
+        self.contrast_summary.setWordWrap(True)
+        self.contrast_summary.setStyleSheet("font-size: 10px; font-weight: 700;")
+        left_box.addWidget(self.contrast_summary)
+
+        self.contrast_rows: list[QLabel] = []
+        rows_box = QVBoxLayout()
+        rows_box.setSpacing(2)
+        for _ in CONTRAST_PAIRS:
+            pair_row = QLabel("")
+            pair_row.setTextFormat(Qt.TextFormat.PlainText)
+            pair_row.setFixedHeight(18)
+            self.contrast_rows.append(pair_row)
+            rows_box.addWidget(pair_row)
+        left_box.addLayout(rows_box)
+
+        self.fix_note = QLabel("")
+        self.fix_note.setTextFormat(Qt.TextFormat.PlainText)
+        self.fix_note.setWordWrap(True)
+        self.fix_note.setStyleSheet("font-size: 10px; color: #888888;")
+        self.fix_note.setVisible(False)
+        left_box.addWidget(self.fix_note)
+        left_box.addStretch(1)
+        columns_layout.addLayout(left_box, 2)
 
         # --- RIGHT COLUMN: Live Preview ---
+        # The preview is what the page is for, so it gets the room: three parts to
+        # the controls' two, and it stretches with the window instead of leaving
+        # the bottom half of the page empty.
         self.preview_card = LiveThemePreviewCard(main_card)
-        columns_layout.addWidget(self.preview_card, 1)
+        self.preview_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        columns_layout.addWidget(self.preview_card, 3)
 
-        card_lay.addLayout(columns_layout)
+        card_lay.addLayout(columns_layout, 1)
 
         # 3. Bottom Action Bar
         actions_row = QHBoxLayout()
@@ -743,9 +1004,38 @@ class CustomThemeBuilderWidget(QWidget):
         self.reset_btn.clicked.connect(self._reset_to_defaults)
         actions_row.addWidget(self.reset_btn)
 
+        # The whole interface follows the edit, a moment after the last change.
+        # Restyling it makes every widget recompute, so it is coalesced rather
+        # than run per keystroke; the preview itself keeps up in real time.
+        self.live_apply_check = QCheckBox("Restyle the window as I edit")
+        self.live_apply_check.setChecked(True)
+        self.live_apply_check.setToolTip(
+            "Apply each edit to the whole application, not just the preview. "
+            "Turn it off if the pause after each change gets in the way."
+        )
+        actions_row.addWidget(self.live_apply_check)
+
         actions_row.addStretch(1)
 
-        self.apply_btn = QPushButton("Apply && Save Custom Theme")
+        # Applying sets the live custom theme; saving makes it a theme of its own,
+        # which is what puts it in the gallery and makes it editable later.
+        self.save_btn = QPushButton("Save to Gallery…")
+        self.save_btn.setProperty("secondary", "true")
+        self.save_btn.setIcon(material_icon("add", "#ffffff"))
+        self.save_btn.setFixedHeight(34)
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_btn.setToolTip(
+            "Save these colours as a named theme. It appears in the gallery and can be "
+            "edited, shared, or removed like any other."
+        )
+        self.save_btn.clicked.connect(self._save_to_gallery)
+        actions_row.addWidget(self.save_btn)
+
+        self.apply_btn = QPushButton("Apply to CrapCleaner")
+        self.apply_btn.setToolTip(
+            "Use these colours as the running theme. Saving to the gallery is "
+            "separate, and is what lets you come back to it later."
+        )
         self.apply_btn.setProperty("primary", "true")
         self.apply_btn.setIcon(material_icon("check", "#ffffff"))
         self.apply_btn.setFixedHeight(34)
@@ -754,11 +1044,115 @@ class CustomThemeBuilderWidget(QWidget):
         actions_row.addWidget(self.apply_btn)
 
         card_lay.addLayout(actions_row)
-        root.addWidget(main_card)
+        root.addWidget(main_card, 1)
 
     # -----------------------------------------------------------------------
     # Event Handlers & State Management
     # -----------------------------------------------------------------------
+
+    def _populate_start_from(self) -> None:
+        """List every theme, with the ones the Studio can reproduce exactly first."""
+        from crapcleaner.gui.theme import THEMES, theme_generator, theme_label
+
+        self.start_from.blockSignals(True)
+        self.start_from.clear()
+        self.start_from.addItem("Nothing - start from scratch", None)
+
+        exact: list[str] = []
+        approximate: list[str] = []
+        for theme_id in THEMES:
+            if theme_id == "custom":
+                continue
+            target = exact if theme_generator(theme_id) else approximate
+            target.append(theme_id)
+
+        for theme_id in exact:
+            self.start_from.addItem(f"{theme_label(theme_id)} (your theme)", theme_id)
+        for theme_id in approximate:
+            self.start_from.addItem(theme_label(theme_id), theme_id)
+        self.start_from.blockSignals(False)
+
+    def _on_start_from(self, index: int) -> None:
+        theme_id = self.start_from.itemData(index)
+        if theme_id:
+            self.load_theme(str(theme_id))
+        else:
+            self.start_note.setVisible(False)
+
+    def load_theme(self, theme_id: str) -> bool:
+        """Seed the Studio from a theme. True when it reproduces it exactly.
+
+        A theme saved from here records the settings that made it, so it comes
+        back unchanged. Anything else - the themes we ship, a file written by
+        hand - has no recipe, so its accent and canvas are taken and the rest is
+        generated afresh. That is a starting point, not a copy, and it says so.
+        """
+        from crapcleaner.gui.theme import PALETTES, is_dark_theme, theme_generator, theme_label
+
+        recipe = theme_generator(theme_id)
+        if recipe:
+            self._current_primary = normalize_hex(
+                recipe.get("primary_color", self._current_primary)
+            )
+            self._current_mode = recipe.get("mode", "dark")
+            self._current_mood = recipe.get("mood", "cohesive")
+            self._current_contrast = float(recipe.get("surface_contrast", 1.0))
+            self._current_intensity = float(recipe.get("accent_intensity", 1.0))
+            self._current_bg_darkness = float(recipe.get("bg_darkness", 1.0))
+            self.start_note.setText(f"Loaded {theme_label(theme_id)} exactly as it was saved.")
+            self.start_note.setVisible(True)
+            self._sync_controls()
+            self._update_preview(auto_apply=False)
+            return True
+
+        palette = PALETTES.get(theme_id)
+        if not palette:
+            return False
+        self._current_primary = normalize_hex(palette.get("accent", self._current_primary))
+        self._current_mode = "dark" if is_dark_theme(theme_id) else "light"
+        self._current_mood = "cohesive"
+        self._current_contrast = 1.0
+        self._current_intensity = 1.0
+        self._current_bg_darkness = 1.0
+        self.start_note.setText(
+            f"{theme_label(theme_id)} has no Studio recipe, so its accent and canvas "
+            f"were taken and the rest generated. Expect a relative, not a copy."
+        )
+        self.start_note.setVisible(True)
+        self._sync_controls()
+        self._update_preview(auto_apply=False)
+        return False
+
+    def _sync_controls(self) -> None:
+        """Push the current values out to the widgets that show them."""
+        self.hex_input.blockSignals(True)
+        self.hex_input.setText(self._current_primary)
+        self.hex_input.blockSignals(False)
+        self._mark_hex_valid(True)
+
+        self.dark_btn.setChecked(self._current_mode != "light")
+        self.light_btn.setChecked(self._current_mode == "light")
+        if self._current_mood in self._mood_buttons:
+            self._mood_buttons[self._current_mood].setChecked(True)
+
+        for slider, value in (
+            (self.contrast_slider, self._current_contrast),
+            (self.intensity_slider, self._current_intensity),
+            (self.darkness_slider, self._current_bg_darkness),
+        ):
+            slider.blockSignals(True)
+            slider.setValue(int(round(value * 100)))
+            slider.blockSignals(False)
+        self.contrast_val_lbl.setText(f"{int(round(self._current_contrast * 100))}%")
+        self.intensity_val_lbl.setText(f"{int(round(self._current_intensity * 100))}%")
+        self.darkness_val_lbl.setText(f"{int(round(self._current_bg_darkness * 100))}%")
+
+    def _mark_hex_valid(self, valid: bool) -> None:
+        """Say so when what has been typed is not a colour."""
+        self.hex_input.setStyleSheet(
+            "" if valid else "border: 1px solid #ef4444; border-radius: 4px;"
+        )
+        self.hex_input.setToolTip("" if valid else "Six hex digits, for example #3b82f6.")
 
     def _open_color_dialog(self) -> None:
         init_col = QColor(self._current_primary)
@@ -776,7 +1170,12 @@ class CustomThemeBuilderWidget(QWidget):
             clean = f"#{clean}"
         if len(clean) == 7 and normalize_hex(clean) == clean.lower():
             self._current_primary = clean.lower()
-            self._update_preview(auto_apply=True)
+            self._mark_hex_valid(True)
+            # Typing is continuous: redraw as it is typed, restyle when it stops.
+            self._request_preview()
+            self._debounce_timer.start(160)
+        else:
+            self._mark_hex_valid(not text.strip())
 
     def _set_primary_color(self, hex_code: str) -> None:
         normalized = normalize_hex(hex_code)
@@ -784,30 +1183,61 @@ class CustomThemeBuilderWidget(QWidget):
         self.hex_input.blockSignals(True)
         self.hex_input.setText(normalized)
         self.hex_input.blockSignals(False)
-        self._update_preview(auto_apply=True)
+        self._changed()
 
     def _set_mode(self, mode: str) -> None:
         self._current_mode = mode
-        self._update_preview(auto_apply=True)
+        self._changed()
 
     def _set_mood(self, mood: str) -> None:
         self._current_mood = mood
-        self._update_preview(auto_apply=True)
+        self._changed()
+
+    def _changed(self) -> None:
+        """Redraw the preview now; let the rest of the window follow.
+
+        Restyling the window is the same cost whether a slider or a swatch caused
+        it, so both go through the same wait. Clicking through the presets stays
+        immediate in the preview and the interface catches up when you stop.
+        """
+        self._request_preview()
+        self._debounce_timer.start(160)
 
     def _on_contrast_changed(self, value: int) -> None:
         self._current_contrast = value / 100.0
         self.contrast_val_lbl.setText(f"{value}%")
-        self._update_preview(auto_apply=False, full_restyle=False)
-        self._debounce_timer.start(220)
+        self._request_preview()
+        self._debounce_timer.start(160)
+
+    def _on_darkness_changed(self, value: int) -> None:
+        self._current_bg_darkness = value / 100.0
+        self.darkness_val_lbl.setText(f"{value}%")
+        self._request_preview()
+        self._debounce_timer.start(160)
 
     def _on_intensity_changed(self, value: int) -> None:
         self._current_intensity = value / 100.0
         self.intensity_val_lbl.setText(f"{value}%")
+        self._request_preview()
+        self._debounce_timer.start(160)
+
+    def _request_preview(self) -> None:
+        """Redraw now, or as soon as the last redraw has had its frame."""
+        if self._preview_timer.isActive():
+            self._preview_pending = True
+            return
         self._update_preview(auto_apply=False, full_restyle=False)
-        self._debounce_timer.start(220)
+        self._preview_timer.start()
+
+    def _preview_cooldown(self) -> None:
+        if self._preview_pending:
+            self._preview_pending = False
+            self._update_preview(auto_apply=False, full_restyle=False)
+            self._preview_timer.start()
 
     def _apply_debounced(self) -> None:
         self._debounce_timer.stop()
+        self._preview_pending = False
         self._update_preview(auto_apply=True, full_restyle=True)
 
     def _on_magic_dice_clicked(self) -> None:
@@ -818,65 +1248,14 @@ class CustomThemeBuilderWidget(QWidget):
         self._current_mood = magic["mood"]
         self._current_contrast = magic["surface_contrast"]
         self._current_intensity = magic["accent_intensity"]
+        # The dice returns a background depth too; it used to be thrown away, so
+        # the roll never produced the theme it described.
+        self._current_bg_darkness = magic["bg_darkness"]
 
-        self.hex_input.blockSignals(True)
-        self.hex_input.setText(self._current_primary)
-        self.hex_input.blockSignals(False)
-
-        self.dark_btn.setChecked(self._current_mode == "dark")
-        self.light_btn.setChecked(self._current_mode == "light")
-
-        if self._current_mood in self._mood_buttons:
-            self._mood_buttons[self._current_mood].setChecked(True)
-
-        self.contrast_slider.setValue(int(self._current_contrast * 100))
-        self.intensity_slider.setValue(int(self._current_intensity * 100))
+        self.start_from.setCurrentIndex(0)
+        self.start_note.setVisible(False)
+        self._sync_controls()
         self._update_preview(auto_apply=True)
-
-    def _copy_theme_json(self) -> None:
-        cfg = {
-            "primary_color": self._current_primary,
-            "mode": self._current_mode,
-            "mood": self._current_mood,
-            "surface_contrast": self._current_contrast,
-            "accent_intensity": self._current_intensity,
-            "bg_darkness": self._current_bg_darkness,
-        }
-        json_str = export_custom_theme_json(cfg)
-        clipboard = QGuiApplication.clipboard()
-        if clipboard:
-            clipboard.setText(json_str)
-            QMessageBox.information(
-                self, "Theme Copied", "Custom theme configuration copied to clipboard."
-            )
-
-    def _import_theme_json(self) -> None:
-        text, ok = QInputDialog.getMultiLineText(
-            self,
-            "Import Custom Theme JSON",
-            "Paste theme JSON configuration below:",
-            "",
-        )
-        if ok and text.strip():
-            imported = import_custom_theme_json(text.strip())
-            if imported:
-                self._current_primary = imported["primary_color"]
-                self._current_mode = imported["mode"]
-                self._current_mood = imported["mood"]
-                self._current_contrast = imported["surface_contrast"]
-                self._current_intensity = imported["accent_intensity"]
-                self._current_bg_darkness = imported["bg_darkness"]
-
-                self.hex_input.setText(self._current_primary)
-                self.dark_btn.setChecked(self._current_mode == "dark")
-                self.light_btn.setChecked(self._current_mode == "light")
-                if self._current_mood in self._mood_buttons:
-                    self._mood_buttons[self._current_mood].setChecked(True)
-                self.contrast_slider.setValue(int(self._current_contrast * 100))
-                self.intensity_slider.setValue(int(self._current_intensity * 100))
-                self._update_preview(auto_apply=True)
-            else:
-                QMessageBox.warning(self, "Import Error", "Invalid theme JSON configuration.")
 
     def _update_preview(self, auto_apply: bool = False, full_restyle: bool = True) -> None:
         palette = generate_custom_palette(
@@ -890,6 +1269,7 @@ class CustomThemeBuilderWidget(QWidget):
         self.preview_card.update_palette(
             palette, self._current_primary, self._current_mode, self._current_mood
         )
+        self._update_readability(palette)
 
         if full_restyle or auto_apply:
             self.color_swatch_btn.setStyleSheet(
@@ -916,7 +1296,7 @@ class CustomThemeBuilderWidget(QWidget):
                 material_icon("light_mode", palette["muted"] if is_dark else "#ffffff")
             )
 
-        if auto_apply:
+        if auto_apply and self.live_apply_check.isChecked():
             custom_cfg = {
                 "primary_color": self._current_primary,
                 "mode": self._current_mode,
@@ -926,6 +1306,130 @@ class CustomThemeBuilderWidget(QWidget):
                 "bg_darkness": self._current_bg_darkness,
             }
             self.theme_applied.emit(custom_cfg)
+
+    def _fix_readability(self) -> None:
+        """Work the controls until the failing pairs read, and report the moves."""
+        fixed, notes = plan_readability_fix(self.current_config())
+        if not notes:
+            self.fix_note.setText(
+                "No combination of these three sliders clears every pair. A different "
+                "accent, or the other canvas, will."
+            )
+            self.fix_note.setVisible(True)
+            return
+
+        self._current_primary = fixed["primary_color"]
+        self._current_contrast = fixed["surface_contrast"]
+        self._current_intensity = fixed["accent_intensity"]
+        self._current_bg_darkness = fixed["bg_darkness"]
+        self._sync_controls()
+        self._update_preview(auto_apply=True)
+
+        remaining = len(self.preview_card.contrast_failures())
+        outcome = (
+            "every pair now reads." if not remaining else f"{remaining} still below the floor."
+        )
+        self.fix_note.setText(f"Fixed: {', '.join(notes)} - {outcome}")
+        self.fix_note.setVisible(True)
+
+    def _update_readability(self, palette: dict[str, str]) -> None:
+        """Rate every pair the running application draws."""
+        report = contrast_report(palette)
+        failing = sum(1 for _, _, grade in report if grade == "FAILS")
+        colors = {
+            "AAA": palette["success"],
+            "AA": palette["text"],
+            "FAILS": palette["danger"],
+        }
+        for pair_row, (label, ratio, grade) in zip(self.contrast_rows, report):
+            pair_row.setText(f"{label}   {ratio:.2f}:1   {grade}")
+            weight = 700 if grade == "FAILS" else 400
+            pair_row.setStyleSheet(
+                f"color: {colors[grade]}; font-size: 10px; font-weight: {weight};"
+            )
+
+        self.fix_btn.setEnabled(bool(failing))
+        if failing:
+            self.contrast_summary.setText(
+                f"{failing} of {len(report)} fall below {MIN_PAIR_CONTRAST}:1. The "
+                f"application will correct them when it loads the theme; Fix adjusts "
+                f"the settings so it does not have to."
+            )
+            self.contrast_summary.setStyleSheet(
+                f"color: {palette['danger']}; font-size: 10px; font-weight: 700;"
+            )
+        else:
+            self.contrast_summary.setText(f"All {len(report)} pairs meet WCAG AA.")
+            self.contrast_summary.setStyleSheet(
+                f"color: {palette['success']}; font-size: 10px; font-weight: 700;"
+            )
+
+    def current_config(self) -> dict:
+        """The Studio's settings, which are what a saved theme stores."""
+        return {
+            "primary_color": self._current_primary,
+            "mode": self._current_mode,
+            "mood": self._current_mood,
+            "surface_contrast": self._current_contrast,
+            "accent_intensity": self._current_intensity,
+            "bg_darkness": self._current_bg_darkness,
+        }
+
+    def _save_to_gallery(self) -> None:
+        """Write the current palette to the theme directory as a theme of its own."""
+
+        from crapcleaner.gui.color_engine import generate_custom_palette
+        from crapcleaner.gui.theme import PALETTES, save_user_theme, slugify
+
+        name, accepted = QInputDialog.getText(
+            self, "Save theme", "Name this theme:", text=self._suggested_name()
+        )
+        if not accepted or not name.strip():
+            return
+
+        theme_id = slugify(name)
+        if theme_id in PALETTES:
+            from crapcleaner.gui.theme import is_user_theme
+
+            if not is_user_theme(theme_id):
+                QMessageBox.warning(
+                    self,
+                    "Name in use",
+                    f"{name!r} matches a built-in theme. Choose another name.",
+                )
+                return
+            answer = QMessageBox.question(
+                self,
+                "Replace theme",
+                f"You already have a theme called {name!r}. Replace it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        config = self.current_config()
+        palette = generate_custom_palette(
+            primary_color=self._current_primary,
+            mode=self._current_mode,
+            mood=self._current_mood,
+            surface_contrast=self._current_contrast,
+            accent_intensity=self._current_intensity,
+            bg_darkness=self._current_bg_darkness,
+        )
+        try:
+            saved_id = save_user_theme(name.strip(), palette, generator=config, theme_id=theme_id)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not save", str(exc))
+            return
+
+        self._populate_start_from()
+        index = self.start_from.findData(saved_id)
+        if index >= 0:
+            self.start_from.setCurrentIndex(index)
+        self.theme_saved.emit(saved_id)
+
+    def _suggested_name(self) -> str:
+        return f"{self._current_mood.title()} {self._current_primary.lstrip('#').upper()}"
 
     def _apply_and_save(self) -> None:
         custom_cfg = {
@@ -945,10 +1449,7 @@ class CustomThemeBuilderWidget(QWidget):
         self._current_contrast = 1.0
         self._current_intensity = 1.0
         self._current_bg_darkness = 1.0
-        self.hex_input.setText("#3b82f6")
-        self.dark_btn.setChecked(True)
-        if "cohesive" in self._mood_buttons:
-            self._mood_buttons["cohesive"].setChecked(True)
-        self.contrast_slider.setValue(100)
-        self.intensity_slider.setValue(100)
+        self.start_from.setCurrentIndex(0)
+        self.start_note.setVisible(False)
+        self._sync_controls()
         self._update_preview(auto_apply=True)

@@ -83,7 +83,8 @@ def scan_category(
             total += t
             count += c
             skipped += s
-            if cache is not None:
+            # A partial result must never be cached as if it were complete.
+            if cache is not None and counter[0] <= max_files:
                 cache.put_dir(
                     target.path,
                     target.patterns,
@@ -133,12 +134,22 @@ def scan_category(
                     total += t
                     count += c
                     skipped += s
-                    if cache is not None:
+                    if cache is not None and counter[0] <= max_files:
                         cache.put_dir(found, (), True, False, max_files, t, c, s)
             except _Cancelled:
                 raise
             except OSError as exc:
                 errors.append(f"{found}: {exc}")
+
+    # compute_dir_size stops walking once the shared counter passes the budget and
+    # says nothing about it, so the caller has to notice - otherwise the total is
+    # silently a floor.
+    truncated = counter[0] > max_files
+    if truncated:
+        errors.append(
+            f"Partial result: the {max_files:,}-file scan budget was reached. "
+            "Raise 'max_scan_files' in Settings to measure the rest."
+        )
 
     category.size = total
     category.item_count = count
@@ -156,6 +167,7 @@ def scan_category(
         description=category.description,
         reclaimable=category.reclaimable,
         errors=errors,
+        truncated=truncated,
     )
 
 

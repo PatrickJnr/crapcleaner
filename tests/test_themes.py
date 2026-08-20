@@ -36,7 +36,10 @@ def test_text_and_background_differ():
 
 
 def test_unknown_theme_falls_back_to_dark():
-    assert palette_for("nonsense") is DARK
+    # Not identity: every palette gains the derived label colours on the way out.
+    assert palette_for("nonsense") == palette_for("dark")
+    assert palette_for("nonsense")["window"] == DARK["window"]
+    assert palette_for("nonsense")["accent"] == DARK["accent"]
     assert theme_label("dark") == "Dark (default)"
     assert theme_label("nonsense") == "Nonsense"
 
@@ -178,9 +181,15 @@ def test_theme_gallery_widget_filtering_and_selection(qt_app):
     assert gallery.current_theme() == "dark"
     assert gallery.theme_combo.currentData() == "dark"
 
+    # Counts are derived, not hard-coded: a theme the user drops into their theme
+    # directory is a real theme and must not fail the suite.
+    from crapcleaner.gui.theme import THEME_CATEGORIES, get_theme_category
+
     chip_texts = [button.text().replace("&&", "&") for button in gallery.chip_group.buttons()]
-    assert "Modern Dark (7)" in chip_texts
-    assert "Light & Pastel (5)" in chip_texts
+    for category_id, label in THEME_CATEGORIES.items():
+        count = sum(1 for t in THEMES if get_theme_category(t) == category_id)
+        assert f"{label} ({count})" in chip_texts
+    assert f"All ({len(THEMES)})" in chip_texts
 
     # Test selecting a new theme
     changed_signals = []

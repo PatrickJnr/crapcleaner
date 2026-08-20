@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from crapcleaner.utils.files import walk_safe
+from crapcleaner.utils.files import walk_safe_entries
 from crapcleaner.utils.platform import get_user_profile
 
 _INSTALLER_EXTENSIONS = frozenset(
@@ -97,27 +97,28 @@ def scan_installers(
     for root in search_roots:
         if not root or not os.path.isdir(root):
             continue
-        for dirpath, dirnames, filenames in walk_safe(root, topdown=True):
+        # The listing already carries each file's metadata; re-stat'ing by path cost
+        # one syscall per file for no benefit.
+        for dirpath, file_entries in walk_safe_entries(root):
             if stop_event is not None and stop_event.is_set():
                 break
 
-            for name in filenames:
+            for entry in file_entries:
                 if stop_event is not None and stop_event.is_set():
                     break
-                full = os.path.join(dirpath, name)
                 visited_files += 1
-                if not _is_installer_file(name, dirpath):
+                if not _is_installer_file(entry.name, dirpath):
                     continue
                 try:
-                    st = os.stat(full)
+                    st = entry.stat(follow_symlinks=False)
                     mtime = datetime.fromtimestamp(st.st_mtime)
                     items.append(
                         InstallerItem(
-                            filename=name,
-                            path=full,
+                            filename=entry.name,
+                            path=entry.path,
                             size=st.st_size,
                             modified_at=mtime,
-                            extension=os.path.splitext(name)[1].lower(),
+                            extension=os.path.splitext(entry.name)[1].lower(),
                         )
                     )
                 except (OSError, PermissionError):

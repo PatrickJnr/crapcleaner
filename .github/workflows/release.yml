@@ -20,6 +20,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A workflow_dispatch run defaults to the branch it was started from, so
+          # rebuilding a tag would publish current master under that tag's name.
+          ref: ${{ github.event.inputs.target_tag || github.ref }}
       - name: Install Linux System Dependencies
         if: runner.os == 'Linux'
         run: |
@@ -35,16 +39,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install .
           pip install pytest
+      - name: Verify the tag matches the application version
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.target_tag || github.ref_name }}"
+          python scripts/check_release_version.py "$TAG"
+
       - name: Run Test Suite
         env:
           QT_QPA_PLATFORM: offscreen
         run: pytest -q
+
+      - name: Verify the built executable honours arguments
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pip install pyinstaller
+          pyinstaller --noconfirm --clean CrapCleaner.spec
+          # The frozen launcher used to ignore argv entirely and open the GUI.
+          OUTPUT=$(./dist/CrapCleaner.exe --version)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "$(python -c "from crapcleaner.constants import VERSION; print(VERSION)")"
 
   build-windows-exe:
     needs: verify
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A workflow_dispatch run defaults to the branch it was started from, so
+          # rebuilding a tag would publish current master under that tag's name.
+          ref: ${{ github.event.inputs.target_tag || github.ref }}
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -81,6 +106,10 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A workflow_dispatch run defaults to the branch it was started from, so
+          # rebuilding a tag would publish current master under that tag's name.
+          ref: ${{ github.event.inputs.target_tag || github.ref }}
       - name: Install Linux System Dependencies
         run: |
           sudo apt-get update -qq -o Acquire::Retries=3 -o Acquire::http::Timeout="20"
@@ -126,6 +155,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A workflow_dispatch run defaults to the branch it was started from, so
+          # rebuilding a tag would publish current master under that tag's name.
+          ref: ${{ github.event.inputs.target_tag || github.ref }}
       - name: Download Windows Artifact
         uses: actions/download-artifact@v8
         with:

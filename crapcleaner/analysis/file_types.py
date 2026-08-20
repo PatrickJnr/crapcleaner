@@ -178,17 +178,90 @@ class _GroupStats:
     extensions: set[str] = field(default_factory=set)
 
 
+class FileTypeCollector:
+    """Accumulates the breakdown from files handed to it, from any number of threads.
+
+    The Storage view used to walk the tree a second time to build this. It now
+    subscribes to the hierarchy scan's traversal instead, which runs on a pool - so
+    each thread accumulates into its own dict and they are merged at the end rather
+    than contending on a lock per file.
+    """
+
+    __slots__ = ("_local", "_per_thread", "_lock")
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+        self._per_thread: list[dict[str, _GroupStats]] = []
+        self._lock = threading.Lock()
+
+    def _groups(self) -> dict[str, _GroupStats]:
+        groups = getattr(self._local, "groups", None)
+        if groups is None:
+            groups = {}
+            self._local.groups = groups
+            with self._lock:
+                self._per_thread.append(groups)
+        return groups
+
+    def observe(self, name: str, size: int) -> None:
+        ext = os.path.splitext(name)[1].lower()
+        category = FILE_CATEGORY_MAP.get(ext, "Other")
+        groups = self._groups()
+        group = groups.get(category)
+        if group is None:
+            group = _GroupStats()
+            groups[category] = group
+        group.size += size
+        group.count += 1
+        if ext:
+            group.extensions.add(ext)
+
+    def summaries(self) -> list[FileTypeSummary]:
+        merged: dict[str, _GroupStats] = {}
+        with self._lock:
+            per_thread = list(self._per_thread)
+        for groups in per_thread:
+            for category, stats in groups.items():
+                target = merged.get(category)
+                if target is None:
+                    target = _GroupStats()
+                    merged[category] = target
+                target.size += stats.size
+                target.count += stats.count
+                target.extensions |= stats.extensions
+        return _summaries_from(merged)
+
+
+def _summaries_from(groups: dict[str, _GroupStats]) -> list[FileTypeSummary]:
+    total_bytes = sum(stats.size for stats in groups.values())
+    summaries = [
+        FileTypeSummary(
+            category=category,
+            total_size=stats.size,
+            file_count=stats.count,
+            percentage=(stats.size / total_bytes * 100.0) if total_bytes > 0 else 0.0,
+            extensions=sorted(stats.extensions),
+        )
+        for category, stats in groups.items()
+    ]
+    summaries.sort(key=lambda s: s.total_size, reverse=True)
+    return summaries
+
+
 def analyze_file_types(
     root: str,
     stop_event: threading.Event | None = None,
     progress_cb: Callable[[int, str], None] | None = None,
 ) -> list[FileTypeSummary]:
-    """Scan root and group storage by functional file categories."""
+    """Scan root and group storage by functional file categories.
+
+    Kept for callers that only want this one breakdown (the CLI). The Storage view
+    shares the hierarchy scan's traversal through :class:`FileTypeCollector`.
+    """
     if not root or not os.path.isdir(root):
         return []
 
     groups: dict[str, _GroupStats] = {}
-    total_bytes = 0
     visited_files = 0
 
     # walk_safe_entries hands back the DirEntry objects from the directory listing,
@@ -219,26 +292,8 @@ def analyze_file_types(
             group.count += 1
             if ext:
                 group.extensions.add(ext)
-            total_bytes += sz
 
             if progress_cb is not None and visited_files % 1500 == 0:
                 progress_cb(visited_files, dirpath)
 
-    summaries: list[FileTypeSummary] = []
-    for cat_name, data in groups.items():
-        sz = data.size
-        cnt = data.count
-        exts = sorted(list(data.extensions))
-        pct = (sz / total_bytes * 100.0) if total_bytes > 0 else 0.0
-        summaries.append(
-            FileTypeSummary(
-                category=cat_name,
-                total_size=sz,
-                file_count=cnt,
-                percentage=pct,
-                extensions=exts,
-            )
-        )
-
-    summaries.sort(key=lambda s: s.total_size, reverse=True)
-    return summaries
+    return _summaries_from(groups)

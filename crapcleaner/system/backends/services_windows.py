@@ -126,6 +126,24 @@ def list_services() -> list["ServiceItem"]:
     return services
 
 
+#: PowerShell reads the service name from the environment rather than from the command
+#: text. Interpolating it - `-Name '{name}'` - lets a name containing an apostrophe end
+#: the quoted string and append its own commands, which is the pattern this codebase
+#: rejects everywhere else (see `utils.files.reveal_in_file_manager`). The value of an
+#: environment variable is substituted as a single argument and is never re-parsed.
+_PS_BASE = ["powershell", "-NoProfile", "-NonInteractive", "-Command"]
+_NAME_VAR = "CRAPCLEANER_SERVICE_NAME"
+_TYPE_VAR = "CRAPCLEANER_SERVICE_STARTUP"
+
+
+def _run_service_command(script: str, name: str, timeout: float, startup_type: str = ""):
+    """Run a service cmdlet with its arguments supplied through the environment."""
+    env = {_NAME_VAR: name}
+    if startup_type:
+        env[_TYPE_VAR] = startup_type
+    return run_command(_PS_BASE + [script], timeout=timeout, env_extra=env)
+
+
 def _requires_admin(action: str, name: str) -> tuple[bool, str] | None:
     if is_admin():
         return None
@@ -137,9 +155,8 @@ def start(name: str) -> tuple[bool, str]:
     if denied:
         return denied
 
-    res = run_command(
-        ["powershell", "-NoProfile", "-Command", f"Start-Service -Name '{name}' -ErrorAction Stop"],
-        timeout=20.0,
+    res = _run_service_command(
+        f"Start-Service -Name $env:{_NAME_VAR} -ErrorAction Stop", name, timeout=20.0
     )
     if res.get("returncode") == 0:
         return True, f"Service '{name}' started successfully."
@@ -160,14 +177,8 @@ def stop(name: str) -> tuple[bool, str]:
     if denied:
         return denied
 
-    res = run_command(
-        [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            f"Stop-Service -Name '{name}' -Force -ErrorAction Stop",
-        ],
-        timeout=20.0,
+    res = _run_service_command(
+        f"Stop-Service -Name $env:{_NAME_VAR} -Force -ErrorAction Stop", name, timeout=20.0
     )
     if res.get("returncode") == 0:
         return True, f"Service '{name}' stopped successfully."
@@ -185,14 +196,8 @@ def restart(name: str) -> tuple[bool, str]:
     if denied:
         return denied
 
-    res = run_command(
-        [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            f"Restart-Service -Name '{name}' -Force -ErrorAction Stop",
-        ],
-        timeout=30.0,
+    res = _run_service_command(
+        f"Restart-Service -Name $env:{_NAME_VAR} -Force -ErrorAction Stop", name, timeout=30.0
     )
     if res.get("returncode") == 0:
         return True, f"Service '{name}' restarted successfully."
@@ -226,14 +231,11 @@ def set_startup_type(name: str, startup_type: str) -> tuple[bool, str]:
     # Set-Service does not accept the delayed variant as a StartupType value.
     ps_type = "Automatic" if target_type.startswith("Automatic") else target_type
 
-    res = run_command(
-        [
-            "powershell",
-            "-NoProfile",
-            "-Command",
-            f"Set-Service -Name '{name}' -StartupType '{ps_type}' -ErrorAction Stop",
-        ],
+    res = _run_service_command(
+        f"Set-Service -Name $env:{_NAME_VAR} -StartupType $env:{_TYPE_VAR} -ErrorAction Stop",
+        name,
         timeout=15.0,
+        startup_type=ps_type,
     )
     if res.get("returncode") == 0 and sc_start != "delayed-auto":
         return True, f"Startup type for service '{name}' set to {target_type}."

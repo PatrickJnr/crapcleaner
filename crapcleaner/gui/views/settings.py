@@ -6,9 +6,11 @@ import shutil
 from PySide6.QtCore import (
     QSize,
     Qt,
+    QTime,
 )
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -35,6 +38,7 @@ from crapcleaner.gui.theme_picker import ThemeGalleryWidget
 from crapcleaner.gui.views.common import page_header
 from crapcleaner.models.category import SafetyLevel
 from crapcleaner.registry import get_all_categories
+from crapcleaner.utils.format import format_datetime, format_size
 
 
 class SettingsView(QWidget):
@@ -162,8 +166,10 @@ class SettingsView(QWidget):
 
         self.custom_builder = CustomThemeBuilderWidget(page_studio_container)
         self.custom_builder.theme_applied.connect(self._on_custom_theme_applied)
-        lay_studio.addWidget(self.custom_builder)
-        lay_studio.addStretch(1)
+        self.custom_builder.theme_saved.connect(self._on_custom_theme_saved)
+        # The Studio takes the height it is given. A trailing stretch here was
+        # what left the bottom half of the page empty.
+        lay_studio.addWidget(self.custom_builder, 1)
 
         page_studio_scroll.setWidget(page_studio_container)
         self.tab_stack.addWidget(page_studio_scroll)
@@ -396,8 +402,83 @@ class SettingsView(QWidget):
         pc_lay.addWidget(ttl_sub)
 
         lay_perf.addWidget(perf_card)
+
+        # Scheduled scans. The schedule belongs to the operating system - Task
+        # Scheduler or a systemd user timer - so this reports what is registered
+        # rather than keeping a setting that might not match reality.
+        sched_card = QFrame()
+        sched_card.setProperty("card", "true")
+        sc_lay = QVBoxLayout(sched_card)
+        sc_lay.setContentsMargins(16, 16, 16, 16)
+        sc_lay.setSpacing(12)
+
+        sc_title = QLabel("Scheduled Scan")
+        sc_title.setProperty("strong", "true")
+        sc_lay.addWidget(sc_title)
+
+        sc_sub = QLabel(
+            "Run a scan on a schedule and be told when there is something worth cleaning. "
+            "A scheduled run only ever scans - it never deletes anything."
+        )
+        sc_sub.setWordWrap(True)
+        sc_sub.setProperty("subtle", "true")
+        sc_lay.addWidget(sc_sub)
+
+        self.schedule_status_label = QLabel("Checking…")
+        self.schedule_status_label.setWordWrap(True)
+        sc_lay.addWidget(self.schedule_status_label)
+
+        sched_row = QHBoxLayout()
+        sched_row.setSpacing(10)
+
+        sched_row.addWidget(QLabel("Run:"))
+        self.schedule_frequency = QComboBox()
+        self.schedule_frequency.addItem("Every day", "daily")
+        self.schedule_frequency.addItem("Every week", "weekly")
+        self.schedule_frequency.setAccessibleName("How often the scheduled scan runs")
+        sched_row.addWidget(self.schedule_frequency)
+
+        sched_row.addWidget(QLabel("at"))
+        self.schedule_time = QTimeEdit()
+        self.schedule_time.setDisplayFormat("HH:mm")
+        self.schedule_time.setAccessibleName("Time of day the scheduled scan runs")
+        sched_row.addWidget(self.schedule_time)
+
+        sched_row.addWidget(QLabel("Tell me above:"))
+        self.schedule_threshold = QSpinBox()
+        self.schedule_threshold.setRange(0, 1024 * 1024)
+        self.schedule_threshold.setSingleStep(512)
+        self.schedule_threshold.setSuffix(" MB")
+        self.schedule_threshold.setAccessibleName("Notify when at least this much is reclaimable")
+        sched_row.addWidget(self.schedule_threshold)
+        sched_row.addStretch(1)
+        sc_lay.addLayout(sched_row)
+
+        sched_actions = QHBoxLayout()
+        sched_actions.setSpacing(8)
+        self.schedule_enable_btn = QPushButton("Enable Schedule")
+        self.schedule_enable_btn.setProperty("primary", "true")
+        self.schedule_enable_btn.clicked.connect(self._enable_schedule)
+        self.schedule_disable_btn = QPushButton("Remove Schedule")
+        self.schedule_disable_btn.clicked.connect(self._disable_schedule)
+        self.schedule_run_btn = QPushButton("Run One Now")
+        self.schedule_run_btn.setToolTip("Run the unattended scan once, right now")
+        self.schedule_run_btn.clicked.connect(self._run_scheduled_scan_now)
+        sched_actions.addWidget(self.schedule_enable_btn)
+        sched_actions.addWidget(self.schedule_disable_btn)
+        sched_actions.addWidget(self.schedule_run_btn)
+        sched_actions.addStretch(1)
+        sc_lay.addLayout(sched_actions)
+
+        self.schedule_last_label = QLabel("")
+        self.schedule_last_label.setWordWrap(True)
+        self.schedule_last_label.setProperty("subtle", "true")
+        sc_lay.addWidget(self.schedule_last_label)
+
+        lay_perf.addWidget(sched_card)
         lay_perf.addStretch(1)
         self.tab_stack.addWidget(page_perf)
+        self._refresh_schedule_state()
 
         # --- PAGE 4: Category Rules ---
         page_rules = QWidget()
@@ -483,6 +564,97 @@ class SettingsView(QWidget):
 
         root.addWidget(self.tab_stack, 1)
 
+    # ------------------------------------------------------------------
+    # Scheduled scans
+    # ------------------------------------------------------------------
+    def _refresh_schedule_state(self):
+        """Ask the operating system what is registered, and show that."""
+        from datetime import datetime
+
+        from crapcleaner.core.scheduler import last_result, status
+
+        state = status()
+        config = state.config
+
+        self.schedule_frequency.setCurrentIndex(1 if config.frequency == "weekly" else 0)
+        hours, _, minutes = config.at.partition(":")
+        self.schedule_time.setTime(QTime(int(hours or 18), int(minutes or 0)))
+        self.schedule_threshold.setValue(int(config.threshold_mb))
+
+        for widget in (
+            self.schedule_frequency,
+            self.schedule_time,
+            self.schedule_threshold,
+            self.schedule_enable_btn,
+            self.schedule_run_btn,
+        ):
+            widget.setEnabled(state.supported)
+        self.schedule_disable_btn.setEnabled(state.supported and state.registered)
+
+        if not state.supported:
+            self.schedule_status_label.setText(state.detail)
+        elif state.registered:
+            self.schedule_status_label.setText(
+                f"Scheduled: {config.frequency} at {config.at}. Registered as {state.detail}."
+            )
+        else:
+            self.schedule_status_label.setText("No scheduled scan. Nothing runs in the background.")
+
+        previous = last_result()
+        if previous:
+            when = datetime.fromtimestamp(previous.get("finished_at", 0))
+            self.schedule_last_label.setText(
+                f"Last scheduled scan: {format_datetime(when)} - "
+                f"{format_size(previous.get('total_reclaimable', 0))} reclaimable."
+            )
+        else:
+            self.schedule_last_label.setText("No scheduled scan has run yet.")
+
+    def _enable_schedule(self):
+        from crapcleaner.core.scheduler import ScheduleConfig, enable
+
+        wanted = ScheduleConfig(
+            enabled=True,
+            at=self.schedule_time.time().toString("HH:mm"),
+            frequency=self.schedule_frequency.currentData() or "daily",
+            threshold_mb=int(self.schedule_threshold.value()),
+        )
+        try:
+            ok, message = enable(wanted)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Scheduled Scan", str(exc))
+            return
+        if ok:
+            QMessageBox.information(self, "Scheduled Scan", message)
+        else:
+            QMessageBox.warning(self, "Scheduled Scan", message)
+        self._refresh_schedule_state()
+
+    def _disable_schedule(self):
+        from crapcleaner.core.scheduler import disable
+
+        ok, message = disable()
+        if not ok:
+            QMessageBox.warning(self, "Scheduled Scan", message)
+        self._refresh_schedule_state()
+
+    def _run_scheduled_scan_now(self):
+        """Run the unattended scan once, off the interface thread."""
+        from crapcleaner.gui.workers import ScheduledScanWorker, is_worker_running
+
+        if is_worker_running(getattr(self, "_schedule_worker", None)):
+            return
+        self.schedule_run_btn.setEnabled(False)
+        self.schedule_status_label.setText("Running a scan…")
+
+        worker = ScheduledScanWorker(parent=self)
+        self._schedule_worker = worker
+        worker.done.connect(lambda _result: self._refresh_schedule_state())
+        worker.failed.connect(lambda message: QMessageBox.warning(self, "Scheduled Scan", message))
+        worker.finished.connect(lambda: self.schedule_run_btn.setEnabled(True))
+        worker.finished.connect(lambda: setattr(self, "_schedule_worker", None))
+        worker.start()
+
     def _set_active_tab(self, key: str, index: int):
         self.tab_stack.setCurrentIndex(index)
         theme = getattr(self, "_theme", "dark")
@@ -564,19 +736,42 @@ class SettingsView(QWidget):
             else:
                 self.theme_combo.setCurrentIndex(THEMES.index(theme))
 
+    def _on_custom_theme_saved(self, theme_id: str):
+        """A Studio theme was saved: show it in the gallery and switch to it."""
+        from crapcleaner.gui.theme import theme_label
+
+        self.refresh_theme_gallery()
+        self.theme_gallery.select_theme(theme_id)
+        window = self.window()
+        status = getattr(window, "statusBar", None)
+        if callable(status):
+            status().showMessage(f"Saved the theme {theme_label(theme_id)!r}.", 6000)
+
+    def refresh_theme_gallery(self):
+        """Rebuild the gallery from the current registry."""
+        gallery = getattr(self, "theme_gallery", None)
+        if gallery is not None and hasattr(gallery, "refresh_themes"):
+            gallery.refresh_themes()
+
     def _on_custom_theme_applied(self, custom_cfg: dict):
         """Apply and persist custom theme configuration."""
         from crapcleaner.gui.theme import invalidate_custom_theme_cache
 
         invalidate_custom_theme_cache()
+        already_custom = self.settings.get("theme") == "custom"
         self.settings["theme"] = "custom"
         self.settings["custom_theme"] = custom_cfg
         save_settings({"theme": "custom", "custom_theme": custom_cfg})
-        if hasattr(self, "theme_gallery"):
+        # The gallery only needs telling the first time; rebuilding its selection
+        # on every edit is work nobody sees.
+        if not already_custom and hasattr(self, "theme_gallery"):
             self.theme_gallery.select_theme("custom", emit_signal=False)
         switch = getattr(self._main, "switch_theme", None)
         if switch is not None:
-            switch("custom")
+            try:
+                switch("custom", animate=False)
+            except TypeError:
+                switch("custom")
 
     def _on_theme_changed(self, theme: str):
         """Apply theme selected from the visual theme gallery."""

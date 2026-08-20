@@ -30,9 +30,16 @@ Desktop.ini
 # Local runtime data
 *.log
 
-# Generated image and SVG assets
-*.svg
-*.png
-assets/
-scripts/render_social_preview.py
+# Generated output only. File-type wide ignores used to live here (*.png, *.svg,
+# assets/), which silently excluded shipped assets: the application icon and the
+# repository social preview. Ignore what is generated, by path, not whole file types.
+/release/
+/artifacts/
+
+# scripts/render_social_preview.py writes these; the committed copies live in
+# .github/. assets/screenshots/ holds the README images and is tracked.
+/assets/*.png
+/assets/*.svg
+
 AUDIT_IMPLEMENTATION.md
+/docs

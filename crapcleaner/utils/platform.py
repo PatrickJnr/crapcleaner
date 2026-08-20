@@ -55,12 +55,17 @@ def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
         target = f"{drive}\\" if not drive.endswith(("\\", "/")) else drive
         total, used, free = shutil.disk_usage(target)
         label, filesystem = _windows_volume_info(target)
+        # The same keys on both platforms. Returning a different shape per platform
+        # pushed `is_windows()` checks into the views, which is the opposite of what
+        # this module is for.
         return {
             "total": total,
             "used": used,
             "free": free,
             "label": label,
             "filesystem": filesystem,
+            "display_name": label or f"Drive {drive.rstrip(chr(92))}",
+            "display_kind": "LOCAL",
         }
 
     target = drive if drive and drive != "C:" else "/"
@@ -318,20 +323,13 @@ def _elevation_args() -> str:
 
 
 def relaunch_as_admin(argv: list[str] | None = None) -> bool:
-    if is_admin():
-        return True
-    argv = argv or sys.argv
-    if is_windows():
-        params = " ".join(f'"{a}"' for a in argv[1:])
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", argv[0], params, None, 1)
-        return True
-    if shutil.which("pkexec"):
-        try:
-            subprocess.Popen(["pkexec"] + list(argv))
-            return True
-        except Exception:
-            return False
-    return False
+    """Restart this application with administrative rights.
+
+    Kept as a name for callers that use it; the behaviour is :func:`elevate`. The two
+    used to be separate implementations that disagreed - this one asked ShellExecute
+    to `runas` `argv[0]`, which is a .py file when running from source.
+    """
+    return elevate()
 
 
 def is_windows() -> bool:

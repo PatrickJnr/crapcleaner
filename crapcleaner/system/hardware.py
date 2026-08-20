@@ -183,7 +183,12 @@ def _get_os_specs() -> OsSpec:
                     display_ver, _ = winreg.QueryValueEx(key, "DisplayVersion")
                     build_str, _ = winreg.QueryValueEx(key, "CurrentBuildNumber")
                     build = f"{display_ver} (Build {build_str})"
-                except OSError:
+                    # Microsoft never changed ProductName for Windows 11, so the
+                    # registry calls it "Windows 10 Pro" on an 11 machine. The
+                    # build number is the only thing that says which it is.
+                    if int(build_str) >= 22000 and "Windows 10" in edition:
+                        edition = edition.replace("Windows 10", "Windows 11")
+                except (OSError, ValueError):
                     pass
         except Exception:
             pass
@@ -208,6 +213,21 @@ def _get_os_specs() -> OsSpec:
         computer_name=computer,
         user_name=user,
     )
+
+
+def os_label() -> str:
+    """The operating system as a person would name it, with its architecture.
+
+    `platform.release()` answers "10" on Windows 11, so this goes through the
+    same detection the PC Specs page uses: the registry product name on Windows,
+    `PRETTY_NAME` on Linux.
+    """
+    specs = _get_os_specs()
+    name = specs.name or f"{platform.system()} {platform.release()}"
+    arch = {"AMD64": "64-bit", "x86_64": "64-bit", "arm64": "ARM64", "aarch64": "ARM64"}.get(
+        specs.architecture, specs.architecture
+    )
+    return f"{name} ({arch})" if arch else name
 
 
 def _get_cpu_specs() -> CpuSpec:

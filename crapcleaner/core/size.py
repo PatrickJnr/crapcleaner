@@ -141,9 +141,3 @@ def compute_dir_size(
 
 class _Cancelled(Exception):
     pass
-
-
-def should_scan_target(
-    target_path: str, patterns: tuple[str, ...], subdirs: tuple[str, ...]
-) -> bool:
-    return True

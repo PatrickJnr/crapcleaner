@@ -16,6 +16,10 @@ class ScanCategoryResult:
     description: str
     reclaimable: bool
     errors: list[str] = field(default_factory=list)
+    #: True when the scan stopped at the file budget, so `size` is a floor rather
+    #: than a total. Without it the cap was invisible and the cleanup then removed
+    #: more than the scan had promised.
+    truncated: bool = False
 
 
 @dataclass

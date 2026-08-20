@@ -283,10 +283,14 @@ class StorageDonut(QWidget):
         self._fraction = 0.0
         self._theme = "dark"
         self.setFixedSize(148, 148)
+        self.setAccessibleName("Drive usage chart")
+        self.setAccessibleDescription("Drive usage: not measured yet")
 
     def set_usage(self, fraction: float, theme: str):
         self._fraction = max(0.0, min(1.0, fraction))
         self._theme = theme
+        # The figure is drawn, so it also has to be stated for anyone not seeing it.
+        self.setAccessibleDescription(f"Drive usage: {self._fraction * 100:.0f} percent used")
         self.update()
 
     def paintEvent(self, event):
@@ -354,6 +358,8 @@ class DriveCard(QFrame):
         self.drive = drive
         self._theme = "dark"
         self.setObjectName("DriveCard")
+        self.setAccessibleName(f"Drive {drive}")
+        self.setAccessibleDescription(f"Select drive {drive} to analyse")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("selected", "false")
         self.setFixedWidth(184)
@@ -520,6 +526,7 @@ class ContributorCard(QFrame):
         super().__init__(parent)
         self._theme = theme
         self.setProperty("card", "true")
+        self.setAccessibleName(f"Contributor {getattr(contributor, 'login', '')}")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(64)
         self.setMinimumWidth(240)

@@ -14,7 +14,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from crapcleaner.utils.files import walk_safe
+from crapcleaner.core.protected_paths import DirectoryGuard
+from crapcleaner.utils.files import walk_safe_entries
 
 _PREFIX_SIZE = 8192  # 8 KB prefix
 _HASH_CHUNK_SIZE = 1024 * 1024  # 1 MB chunk
@@ -24,6 +25,10 @@ _HASH_CHUNK_SIZE = 1024 * 1024  # 1 MB chunk
 class DuplicateGroup:
     size: int
     files: list[str] = field(default_factory=list)
+    #: Paths dropped because they are additional names for a file already listed.
+    #: Deleting one of those frees nothing, so they are reported separately rather
+    #: than counted as reclaimable space.
+    hardlinks: list[str] = field(default_factory=list)
 
     @property
     def duplicate_count(self) -> int:
@@ -39,6 +44,7 @@ class DuplicateGroup:
             "duplicate_count": self.duplicate_count,
             "reclaimable": self.reclaimable,
             "files": self.files,
+            "hardlinks": self.hardlinks,
         }
 
 
@@ -71,6 +77,29 @@ def _hash_full_file(path: str, chunk_size: int = _HASH_CHUNK_SIZE) -> str | None
         return None
 
 
+def _collapse_hardlinks(paths: list[str], hardlinks_of: dict[str, list[str]]) -> list[str]:
+    """Keep one path per underlying file, recording the other names for it."""
+    kept: list[str] = []
+    first_seen: dict[tuple[int, int], str] = {}
+    for path in paths:
+        try:
+            st = os.stat(path)
+        except OSError:
+            kept.append(path)
+            continue
+        if not st.st_ino:
+            kept.append(path)
+            continue
+        identity = (st.st_dev, st.st_ino)
+        original = first_seen.get(identity)
+        if original is None:
+            first_seen[identity] = path
+            kept.append(path)
+        else:
+            hardlinks_of.setdefault(original, []).append(path)
+    return kept
+
+
 def find_duplicates(
     folders: list[str],
     min_size_bytes: int,
@@ -81,32 +110,55 @@ def find_duplicates(
 ) -> list[DuplicateGroup]:
     """Find duplicate files across one or more root folders using multi-stage hashing."""
     by_size: dict[int, list[str]] = {}
+    #: path -> other names for the same file. A second name is not a duplicate copy:
+    #: removing it frees nothing, so it is reported rather than counted.
+    hardlinks_of: dict[str, list[str]] = {}
     visited = 0
 
-    # Stage 1: Walk directories and group by size
+    # Stage 1: Walk directories and group by size.
+    #
+    # The listing already carries each file's size, so the entry is used directly
+    # rather than re-stat'ing by path. Protected content is filtered out here rather
+    # than at deletion time: a credential store or a Git object listed as a "duplicate"
+    # is an invitation to delete it, so it is never offered in the first place.
     for folder in folders:
         if not folder or not os.path.isdir(folder):
             continue
-        for dirpath, dirnames, filenames in walk_safe(folder, topdown=True):
+        for dirpath, file_entries in walk_safe_entries(folder):
             if stop_event is not None and stop_event.is_set():
                 return []
-            for name in filenames:
+            guard = DirectoryGuard(dirpath)
+            if not guard.directory_allowed:
+                continue
+            for entry in file_entries:
                 if stop_event is not None and stop_event.is_set():
                     return []
-                full = os.path.join(dirpath, name)
+                if not guard.allows_file(entry.name):
+                    continue
                 try:
-                    st = os.stat(full)
+                    st = entry.stat(follow_symlinks=False)
                     visited += 1
                 except OSError:
                     continue
                 if st.st_size < min_size_bytes:
                     continue
-                by_size.setdefault(st.st_size, []).append(full)
+
+                by_size.setdefault(st.st_size, []).append(entry.path)
                 if progress_cb is not None and visited % 2000 == 0:
                     progress_cb(visited, 0)
 
     # Filter to only sizes with 2 or more files
     size_candidates = {size: paths for size, paths in by_size.items() if len(paths) > 1}
+    if not size_candidates:
+        return []
+
+    # Collapse additional names for one file. The listing cannot answer this - on
+    # Windows `DirEntry.stat()` reports st_ino as 0 - so it takes a real stat, and it
+    # is only paid for files that already share a size with another file.
+    size_candidates = {
+        size: _collapse_hardlinks(paths, hardlinks_of) for size, paths in size_candidates.items()
+    }
+    size_candidates = {size: paths for size, paths in size_candidates.items() if len(paths) > 1}
     if not size_candidates:
         return []
 
@@ -191,7 +243,11 @@ def find_duplicates(
                 progress_cb(processed, total_candidates)
 
     groups = [
-        DuplicateGroup(size=size, files=paths)
+        DuplicateGroup(
+            size=size,
+            files=paths,
+            hardlinks=[link for path in paths for link in hardlinks_of.get(path, ())],
+        )
         for (size, _digest), paths in by_full_hash.items()
         if len(paths) > 1
     ]
