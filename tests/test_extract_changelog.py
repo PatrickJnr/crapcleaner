@@ -3,7 +3,9 @@
 import tempfile
 from pathlib import Path
 
-from scripts.extract_changelog import extract_changelog, extract_release_title
+import pytest
+
+from scripts.extract_changelog import extract_changelog, extract_release_title, main
 
 SAMPLE_CHANGELOG = """# Changelog
 
@@ -50,13 +52,11 @@ def test_extract_exact_version():
         assert "Feature A in 1.0.7" in notes_107
         assert "1.0.6" not in notes_107
 
-        # With leading 'v'
         notes_v106 = extract_changelog("v1.0.6", tmp_path)
         assert "Theme Gallery release." in notes_v106
         assert "Visual Theme Gallery" in notes_v106
         assert "1.0.7" not in notes_v106
 
-        # With refs/tags/v prefix
         notes_ref = extract_changelog("refs/tags/v1.0.5", tmp_path)
         assert "Repository reorganization." in notes_ref
     finally:
@@ -93,6 +93,28 @@ def test_extract_release_title():
         assert title_top == "v1.0.7: Feature improvements release"
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+def test_a_missing_version_is_not_silently_substituted(tmp_path):
+    """A tag whose heading was renamed used to publish the newest release's notes."""
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(SAMPLE_CHANGELOG, encoding="utf-8")
+
+    with pytest.raises(LookupError, match=r"1\.0\.4"):
+        extract_changelog("v1.0.4", changelog)
+
+    with pytest.raises(LookupError):
+        extract_release_title("v1.0.4", changelog)
+
+    assert "Feature improvements release." in extract_changelog("1.0.7", changelog)
+
+
+def test_the_command_exits_non_zero_for_a_missing_version(tmp_path):
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(SAMPLE_CHANGELOG, encoding="utf-8")
+
+    assert main(["v1.0.4", "-c", str(changelog)]) == 1
+    assert main(["v1.0.7", "-c", str(changelog)]) == 0
 
 
 def test_extract_nonexistent_file():

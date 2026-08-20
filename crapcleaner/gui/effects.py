@@ -54,11 +54,6 @@ def _qcolor(theme: str, token: str, alpha: int | None = None) -> QColor:
     return color
 
 
-# ---------------------------------------------------------------------------
-# Animated value label
-# ---------------------------------------------------------------------------
-
-
 class AnimatedNumber(QLabel):
     """A label whose value eases to each new target instead of snapping.
 
@@ -113,11 +108,6 @@ class AnimatedNumber(QLabel):
         if self._animation is not None:
             self._animation.stop()
             self._animation = None
-
-
-# ---------------------------------------------------------------------------
-# Sparkline
-# ---------------------------------------------------------------------------
 
 
 class Sparkline(QWidget):
@@ -207,11 +197,6 @@ class Sparkline(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(points[-1], 2.0, 2.0)
         painter.end()
-
-
-# ---------------------------------------------------------------------------
-# Segmented bar
-# ---------------------------------------------------------------------------
 
 
 class SegmentedBar(QWidget):
@@ -305,11 +290,6 @@ class SegmentedBar(QWidget):
             painter.fillRect(QRectF(x, rect.top(), segment_width, rect.height()), color)
             x += segment_width
         painter.end()
-
-
-# ---------------------------------------------------------------------------
-# Depth
-# ---------------------------------------------------------------------------
 
 
 class HoverLift(QWidget):

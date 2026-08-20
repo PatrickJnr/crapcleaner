@@ -24,14 +24,13 @@ if [ "$MODE" != "onefile" ] && [ "$MODE" != "onedir" ]; then
 fi
 export CRAPCLEANER_BUILD_MODE="$MODE"
 
-# Only install what is missing. Building used to reinstall the project non-editable
-# over the working tree and add PyInstaller to whatever interpreter it found, which
-# changes how the source tree runs afterwards.
+# Only install what is missing: an unconditional `pip install .` reinstalled the
+# project non-editable over the working tree, changing how the source tree runs.
 if ! "$PYTHON_BIN" -c "import PySide6" >/dev/null 2>&1; then
     "$PYTHON_BIN" -m pip install .
 fi
 if ! "$PYTHON_BIN" -c "import PyInstaller" >/dev/null 2>&1; then
-    "$PYTHON_BIN" -m pip install pyinstaller
+    "$PYTHON_BIN" -m pip install -r requirements-build.txt
 fi
 if [ -f "CrapCleaner.spec" ]; then
     "$PYTHON_BIN" -m PyInstaller --noconfirm --clean CrapCleaner.spec

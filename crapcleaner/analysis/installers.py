@@ -97,8 +97,8 @@ def scan_installers(
     for root in search_roots:
         if not root or not os.path.isdir(root):
             continue
-        # The listing already carries each file's metadata; re-stat'ing by path cost
-        # one syscall per file for no benefit.
+        # DirEntry.stat() reuses the directory listing; re-stat'ing by path costs a
+        # syscall per file for no benefit.
         for dirpath, file_entries in walk_safe_entries(root):
             if stop_event is not None and stop_event.is_set():
                 break

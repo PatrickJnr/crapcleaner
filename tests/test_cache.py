@@ -1,5 +1,6 @@
 """Tests for the scan result cache."""
 
+import json
 import time
 
 from crapcleaner.core.cache import ScanCache
@@ -105,3 +106,36 @@ def test_scan_category_uses_cache(tmp_path):
     r2 = scan_category(cat, cache=cache)
     assert r2.size == 100
     assert cache.stats[0] == hits_before + 1
+
+
+class TestExpiredCacheFile:
+    """BUG-04: a cache that pruned to nothing was left on disk and reparsed forever."""
+
+    def _write_file(self, path, cached_at):
+        path.write_text(
+            json.dumps(
+                {
+                    "entries": {
+                        key: {"total": 1, "count": 1, "skipped": 0, "cached_at": at}
+                        for key, at in cached_at.items()
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_a_fully_expired_cache_is_removed(self, tmp_path):
+        path = tmp_path / "cache.json"
+        self._write_file(path, {"stale": time.time() - 100_000})
+
+        ScanCache(ttl=300, path=str(path)).save()
+
+        assert not path.exists()
+
+    def test_a_partly_expired_cache_keeps_only_the_fresh_entries(self, tmp_path):
+        path = tmp_path / "cache.json"
+        self._write_file(path, {"stale": time.time() - 100_000, "fresh": time.time()})
+
+        ScanCache(ttl=300, path=str(path)).save()
+
+        assert set(json.loads(path.read_text(encoding="utf-8"))["entries"]) == {"fresh"}

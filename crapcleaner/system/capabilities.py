@@ -38,8 +38,7 @@ class Capability:
     supported: bool
     platform: str
     unsupported_reason: str = ""
-    #: Free-form platform vocabulary the views substitute into their own strings
-    # (button captions, empty states, confirmation prompts).
+    #: Platform vocabulary the views substitute in (captions, empty states, prompts).
     terms: dict[str, str] = field(default_factory=dict)
 
 
@@ -57,9 +56,8 @@ def _current_platform() -> str:
 
 # --- Per-platform definitions -------------------------------------------------
 #
-# Each entry maps a platform name to the wording and availability probe for that
-# capability. `available` is a callable so tool detection happens at call time
-# rather than at import time, which keeps the registry testable.
+# `available` is a callable so tool detection happens at call time rather than at
+# import time, which keeps the registry testable.
 
 _DEFINITIONS: dict[str, dict[str, dict[str, Any]]] = {
     STARTUP: {

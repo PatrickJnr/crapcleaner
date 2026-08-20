@@ -21,7 +21,6 @@ class TestSettings:
         settings = load_settings()
         assert settings["theme"] == "light"
         assert settings["max_scan_files"] == 999
-        # untouched defaults preserved
         assert settings["dry_run_default"] is True
 
     def test_update_settings(self):
@@ -66,7 +65,6 @@ def test_settings_view_tab_navigation_and_controls(app):
     assert view.tab_stack.count() == 7
     assert view.tab_stack.currentIndex() == 0
 
-    # Test tab switching
     view._set_active_tab("custom_studio", 1)
     assert view.tab_stack.currentIndex() == 1
     assert view._section_buttons["custom_studio"].property("active") == "true"
@@ -79,7 +77,6 @@ def test_settings_view_tab_navigation_and_controls(app):
     view._set_active_tab("rules", 5)
     assert view.tab_stack.currentIndex() == 5
 
-    # Test category batch selection
     view._disable_all_categories()
     for i in range(view.cat_list.count()):
         assert view.cat_list.item(i).checkState() == Qt.CheckState.Unchecked
@@ -89,7 +86,6 @@ def test_settings_view_tab_navigation_and_controls(app):
         assert view.cat_list.item(i).checkState() == Qt.CheckState.Checked
 
     view._enable_safe_only_categories()
-    # At least some categories should be checked (the SAFE ones)
     checked_count = sum(
         1
         for i in range(view.cat_list.count())
@@ -97,6 +93,5 @@ def test_settings_view_tab_navigation_and_controls(app):
     )
     assert 0 < checked_count < view.cat_list.count()
 
-    # Test apply theme
     view.apply_theme("nord")
     assert view._theme == "nord"

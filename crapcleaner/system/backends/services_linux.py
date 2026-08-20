@@ -8,6 +8,7 @@ elevation and are always driven directly.
 
 import os
 import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
 from crapcleaner.utils.platform import run_command
@@ -263,7 +264,13 @@ def set_startup_type(name: str, startup_type: str) -> tuple[bool, str]:
 def open_console() -> tuple[bool, str]:
     """systemd has no bundled GUI console; point at the equivalent command instead."""
     for candidate in ("systemadm", "systemd-ui"):
-        if shutil.which(candidate):
-            run_command([candidate], timeout=5.0)
-            return True, f"Opened {candidate}."
+        if not shutil.which(candidate):
+            continue
+        try:
+            # Detached: a GUI runs until the user closes it, so waiting on it would
+            # block, then time out, then kill the window that was just opened.
+            subprocess.Popen([candidate], start_new_session=True)
+        except OSError as exc:
+            return False, f"Could not start {candidate}: {exc}"
+        return True, f"Opened {candidate}."
     return False, "No systemd GUI is installed. Use `systemctl status <unit>` in a terminal."

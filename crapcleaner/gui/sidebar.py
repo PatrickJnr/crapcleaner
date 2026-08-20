@@ -46,8 +46,8 @@ NAV_SECTIONS = [
         [
             ("specs", "PC Specs", "specs"),
             ("memory", "Memory Cleaner", "memory"),
-            # The label for these four comes from the capability registry, so each
-            # platform names them in its own vocabulary. The text here is a fallback.
+            # These four are relabelled per platform by the capability registry;
+            # the text here is only the fallback.
             ("startup", "Startup Apps", "rocket"),
             ("services", "Services", "tune"),
             ("app_updates", "App Updates", "system_update"),
@@ -101,7 +101,6 @@ class Sidebar(QFrame):
         self.setFixedWidth(230)
         self._theme = "dark"
         self._buttons: dict[str, NavButton] = {}
-        # page_keys controls which nav items are visible (None = show all)
         self._page_keys = set(page_keys) if page_keys is not None else None
         self._build(version)
 
@@ -110,7 +109,6 @@ class Sidebar(QFrame):
         layout.setContentsMargins(12, 16, 12, 14)
         layout.setSpacing(3)
 
-        # Brand header
         brand_card = QWidget()
         brand_card.setStyleSheet("background: transparent;")
         brand_lay = QHBoxLayout(brand_card)
@@ -150,7 +148,6 @@ class Sidebar(QFrame):
         layout.addWidget(brand_card)
         layout.addSpacing(4)
 
-        # Navigation sections — only show items whose key is in _page_keys
         for section_title, items in NAV_SECTIONS:
             visible_items = [
                 (k, lbl, ico)
@@ -158,7 +155,7 @@ class Sidebar(QFrame):
                 if self._page_keys is None or k in self._page_keys
             ]
             if not visible_items:
-                continue  # skip section if all items hidden on this platform
+                continue
             sec_lbl = QLabel(section_title)
             sec_lbl.setProperty("navSection", "true")
             layout.addWidget(sec_lbl)
@@ -172,7 +169,6 @@ class Sidebar(QFrame):
 
         layout.addStretch(1)
 
-        # Footer
         footer_card = QFrame()
         footer_card.setProperty("card", "true")
         footer_card.setStyleSheet("border-radius: 8px; padding: 8px;")

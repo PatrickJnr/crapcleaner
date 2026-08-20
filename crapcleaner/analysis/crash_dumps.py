@@ -62,10 +62,6 @@ def find_kernel_dump_paths() -> list[str]:
     return [d.path for d in find_crash_dumps() if d.dump_type != "User-mode crash dump"]
 
 
-def total_dump_size() -> int:
-    return sum(d.size for d in find_crash_dumps())
-
-
 def find_crash_dumps() -> list[CrashDumpItem]:
     """Scan platform crash dump and minidump locations and return structured items."""
     dumps: list[CrashDumpItem] = []
@@ -111,7 +107,6 @@ def find_crash_dumps() -> list[CrashDumpItem]:
             except (OSError, PermissionError):
                 continue
 
-        # Single MEMORY.DMP check
         mem_dmp = os.path.join(windir, "MEMORY.DMP")
         if os.path.isfile(mem_dmp):
             try:

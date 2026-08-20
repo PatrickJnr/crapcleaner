@@ -69,6 +69,10 @@ registry cleaning, no process killing, no invented RAM or VRAM reclamation, no
    system is transmitted. The only outbound requests go to GitHub, and only when you
    ask for them: the About page's contributor list, *Check for Updates*, and the
    release download if you accept an update.
+9. **Offline mode.** One setting stops all of it — the update check, the contributor
+   list, the package-manager queries the Updates view runs, and the hostname lookup on
+   the specs page. Anything skipped says it was skipped, rather than failing as though
+   the network were down.
 
 ---
 
@@ -110,6 +114,13 @@ selectable. Everything is previewed before anything is removed.
 - **Recycle Bin / Trash** — recoverable space, item count, oldest and newest entries.
 - **Crash dumps** — application dumps and kernel `MEMORY.DMP` files, grouped by the
   application that wrote them. Often the largest single removable file on Windows.
+- **A record of every cleanup** — each run writes a manifest of exactly what it removed,
+  kept for the last twenty runs. History shows it, and a run that used the Recycle Bin
+  offers the exact paths back. The manifest is a list of your own paths: it is never
+  logged and never leaves the machine.
+- **How fast a category comes back** — "regrows about 400 MB per week", from your own
+  run history, so you can stop cleaning things that will be back tomorrow. Where there
+  is not enough history it says so rather than showing zero.
 - **Changes since last scan** — each storage scan is remembered, so the next one can
   say which folders grew and by how much. This is the answer to "my drive filled up
   this week and I do not know why".
@@ -154,12 +165,14 @@ selectable. Everything is previewed before anything is removed.
   themes CrapCleaner ships
   is treated as yours — wherever the file sits, and whatever the file claims — so a
   theme you added is always in Custom and always editable.
+- **High contrast** as a mode rather than a theme — the palette you are already using,
+  routed through the contrast engine at a stricter 7:1 ratio.
 - **44 built-in themes** in six families — Modern Dark, Light & Pastel, Retro & Vintage,
   Cyber & Synth, Code Palettes, and Warm & Nature. Every palette is checked against WCAG
   AA contrast for the text and background pairs the interface actually renders.
 - **Custom Theme Studio** — pick one colour and get a full palette: a perceptual colour
   engine with hue-dependent lightness compensation, six harmony moods, fifteen presets,
-  four sliders, and a randomiser. The preview is a working miniature of the application —
+  three sliders, and a randomiser. The preview is a working miniature of the application —
   sidebar, header, figures, a list, badges and buttons — above every palette token with
   its value, and the whole window follows the edit a moment after you stop, so a theme is
   judged on the application rather than on a mockup of it.
@@ -229,8 +242,14 @@ From [Releases](https://github.com/PatrickJnr/crapcleaner/releases/latest):
 - **Windows x64** — [`CrapCleaner.exe`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner.exe). Double-click for the interface, or pass any option below to the same file: `CrapCleaner.exe --scan --json`.
 - **Linux x86_64** — [`crapcleaner-linux-x86_64`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/crapcleaner-linux-x86_64), built against glibc 2.35 (Ubuntu 22.04) so it also runs on newer Debian, Fedora and Arch. `chmod +x` after downloading.
 
-Every release ships `checksums.txt` with SHA-256 sums. The Windows build is not
-code-signed, so SmartScreen will warn on first run.
+Every release ships `checksums.txt` with SHA-256 sums. Each binary also carries a
+build provenance attestation, so you can confirm which commit and workflow produced it:
+
+```bash
+gh attestation verify CrapCleaner.exe --repo PatrickJnr/crapcleaner
+```
+
+The Windows build is not code-signed, so SmartScreen will warn on first run.
 
 ### From source
 
@@ -292,6 +311,8 @@ scripts keep working.
 | `--crash-dumps` | Crash and kernel memory dumps, grouped by application |
 | `--schedule [status\|enable\|disable]` | The scheduled scan. Scheduled runs never delete anything |
 | `--update [check\|install]` | Check for a release, or download, verify, and install it |
+| `--diagnostics [--output PATH]` | Write a diagnostics bundle: version, platform, capabilities, drives, and the tail of the log, with paths redacted |
+| `--history [--manifest RUN]` | Past runs; what a given run removed |
 | `--capabilities` | What this operating system supports |
 | `--protected-paths` | The active safety rules |
 | `--export FORMAT --output FILE` | Write JSON, CSV or TXT |
@@ -426,8 +447,9 @@ scripts\build_windows.bat     # or PyInstaller directly, Windows
 ./scripts/build_linux.sh      # or PyInstaller directly, Linux
 ```
 
-CI runs all four gates on Windows and Linux across Python 3.10–3.12, and builds the
-executable on both platforms.
+CI runs the test suite on Windows and Linux across Python 3.10-3.12. Formatting,
+linting and type checking run once per push, on Windows and Python 3.12, and the
+executable is built and run on both platforms.
 
 ### Layout
 

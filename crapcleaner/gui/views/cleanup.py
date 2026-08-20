@@ -29,11 +29,26 @@ from PySide6.QtWidgets import (
 
 from crapcleaner.gui.icons import icon as material_icon
 from crapcleaner.gui.views.common import _c, _safety_color, _SizeSortedItem, page_header
+from crapcleaner.history import last_cleaned, regrowth_estimate
 from crapcleaner.models.category import SafetyLevel
 from crapcleaner.utils.files import file_manager_name, reveal_in_file_manager
 from crapcleaner.utils.format import (
+    format_datetime,
     format_size,
 )
+
+#: Read as "not enough history": one cleanup tells you nothing about a rate.
+NOT_ENOUGH_HISTORY = "not enough history yet"
+
+
+def regrowth_text(category_id: str) -> str:
+    """How fast a category comes back, phrased as a rate rather than a total."""
+    last = last_cleaned(category_id)
+    rate = regrowth_estimate(category_id)
+    when = f"last cleaned {format_datetime(last)}" if last else "never cleaned here"
+    if rate is None:
+        return f"{when} · regrowth: {NOT_ENOUGH_HISTORY}"
+    return f"{when} · regrows about {format_size(int(rate))} per week"
 
 
 class CleanupView(QWidget):
@@ -61,7 +76,6 @@ class CleanupView(QWidget):
             )
         )
 
-        # Primary toolbar
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
 
@@ -111,11 +125,11 @@ class CleanupView(QWidget):
         self.search_edit.setPlaceholderText("Search categories (Ctrl+F)...")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setFixedWidth(220)
+        self.search_edit.setAccessibleName("Search cleanup categories")
         self.search_edit.textChanged.connect(self._apply_filter)
         toolbar.addWidget(self.search_edit)
         layout.addLayout(toolbar)
 
-        # Filter chips & Expand/Collapse row
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
 
@@ -158,7 +172,6 @@ class CleanupView(QWidget):
         shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         shortcut.activated.connect(self.search_edit.setFocus)
 
-        # Category Tree
         tree_card = QFrame()
         tree_card.setProperty("card", "true")
         tree_card_lay = QVBoxLayout(tree_card)
@@ -169,6 +182,7 @@ class CleanupView(QWidget):
         self.tree.setHeaderLabels(["Category", "Safety Level", "Item Count", "Reclaimable Size"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setIndentation(18)
+        self.tree.setAccessibleName("Cleanup categories")
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.NoSelection)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_tree_menu)
@@ -178,7 +192,6 @@ class CleanupView(QWidget):
         tree_card_lay.addWidget(self.tree)
         layout.addWidget(tree_card, 1)
 
-        # Floating / Sticky Summary Footer
         summary_card = QFrame()
         summary_card.setProperty("card", "true")
         summary_lay = QHBoxLayout(summary_card)
@@ -206,6 +219,7 @@ class CleanupView(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setFixedWidth(180)
         self.progress_bar.setVisible(False)
+        self.progress_bar.setAccessibleName("Cleanup progress")
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color: {_c(self._theme, 'muted')}; font-size: 12px;")
         progress_row.addWidget(self.progress_bar)
@@ -326,6 +340,8 @@ class CleanupView(QWidget):
             parts.append("<b>Permission:</b> Requires administrator privileges.")
         if not category.reversible:
             parts.append("<b>Reversibility:</b> This action is not reversible.")
+        # Read on selection rather than per row: each lookup re-reads the history log.
+        parts.append(f"<b>History:</b> {regrowth_text(category.id)}")
         self.explain_label.setText("<br><br>".join(parts))
 
     def set_scan_delta(self, previous_snapshot, current_snapshot):

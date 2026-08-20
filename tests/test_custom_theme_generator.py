@@ -30,10 +30,6 @@ from crapcleaner.gui.theme import (
     theme_label,
 )
 
-# ---------------------------------------------------------------------------
-# 1. Color Math & Conversions
-# ---------------------------------------------------------------------------
-
 
 def test_normalize_hex():
     assert normalize_hex("#fff") == "#ffffff"
@@ -58,11 +54,6 @@ def test_hsl_hex_roundtrip():
         assert abs(lum - l2) < 0.05
 
 
-# ---------------------------------------------------------------------------
-# 2. Relative Luminance & Contrast Ratio
-# ---------------------------------------------------------------------------
-
-
 def test_relative_luminance():
     assert relative_luminance("#000000") == pytest.approx(0.0, abs=1e-3)
     assert relative_luminance("#ffffff") == pytest.approx(1.0, abs=1e-3)
@@ -80,10 +71,6 @@ def test_ensure_contrast():
     adjusted_light = ensure_contrast("#dddddd", "#ffffff", min_ratio=4.5)
     assert contrast_ratio(adjusted_light, "#ffffff") >= 4.5
 
-
-# ---------------------------------------------------------------------------
-# 3. Palette Generation & Required Tokens
-# ---------------------------------------------------------------------------
 
 REQUIRED_TOKENS = {
     "window",
@@ -122,11 +109,6 @@ def test_palette_contains_all_tokens():
             assert REQUIRED_TOKENS.issubset(pal.keys())
 
 
-# ---------------------------------------------------------------------------
-# 4. WCAG Contrast Compliance across Hues and Modes
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "mode,hex_color",
     [
@@ -157,11 +139,6 @@ def test_palette_wcag_contrast_standards(mode, hex_color):
     assert cr_surface >= 3.0, f"{mode} muted against surface failed contrast ({cr_surface:.2f})"
 
 
-# ---------------------------------------------------------------------------
-# 5. Palette Mood Presets (Cohesive, Vibrant, Muted, OLED, Pastel, Minimal)
-# ---------------------------------------------------------------------------
-
-
 def test_palette_mood_styles():
     for mood in MOOD_STYLES:
         pal_dark = generate_custom_palette("#3b82f6", mode="dark", mood=mood)
@@ -169,14 +146,8 @@ def test_palette_mood_styles():
         assert REQUIRED_TOKENS.issubset(pal_dark.keys())
         assert REQUIRED_TOKENS.issubset(pal_light.keys())
 
-    # OLED mode has true black window
     pal_oled = generate_custom_palette("#3b82f6", mode="dark", mood="oled")
     assert pal_oled["window"] == "#000000"
-
-
-# ---------------------------------------------------------------------------
-# 6. Color Harmonies & Magic Generator
-# ---------------------------------------------------------------------------
 
 
 def test_color_harmonies():
@@ -200,11 +171,6 @@ def test_magic_palette_generator():
     assert REQUIRED_TOKENS.issubset(pal.keys())
 
 
-# ---------------------------------------------------------------------------
-# 7. JSON Export & Import
-# ---------------------------------------------------------------------------
-
-
 def test_theme_json_export_import():
     cfg = {
         "primary_color": "#8b5cf6",
@@ -224,14 +190,8 @@ def test_theme_json_export_import():
     assert imported["mood"] == "vibrant"
     assert imported["mode"] == "dark"
 
-    # Invalid JSON
     assert import_custom_theme_json("invalid json") is None
     assert import_custom_theme_json("[]") is None
-
-
-# ---------------------------------------------------------------------------
-# 8. Edge Case Colors
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -251,11 +211,6 @@ def test_edge_case_colors_generate_valid_palettes(edge_color):
     pal_light = generate_custom_palette(edge_color, mode="light")
     assert REQUIRED_TOKENS.issubset(pal_dark.keys())
     assert REQUIRED_TOKENS.issubset(pal_light.keys())
-
-
-# ---------------------------------------------------------------------------
-# 9. Theme Engine & Persistence Integration
-# ---------------------------------------------------------------------------
 
 
 def test_custom_theme_in_theme_registry():
@@ -282,7 +237,6 @@ def test_custom_theme_palette_resolution_and_cache():
     assert pal["accent"] != ""
     assert is_dark_theme("custom") is True
 
-    # Switching to light mode
     invalidate_custom_theme_cache()
     update_settings(
         custom_theme={

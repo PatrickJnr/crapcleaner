@@ -1,9 +1,7 @@
 """Custom Theme Studio & Builder Widget for CrapCleaner GUI.
 
-Allows users to pick a signature primary color, select palette mood styles
-(Cohesive, Vibrant, Muted, OLED, Pastel, Minimal), switch between Dark, Light,
-and OLED canvases, generate harmonious palettes with a magic dice, fine-tune
-contrast and vibrancy, and preview live multi-tab UI mockups before saving.
+Pick a primary colour and a mood style, choose a dark or light canvas, tune
+contrast and vibrancy, and see the result on a live mockup before saving.
 """
 
 from __future__ import annotations
@@ -44,9 +42,6 @@ from crapcleaner.gui.color_engine import (
 )
 from crapcleaner.gui.icons import icon as material_icon
 
-# ---------------------------------------------------------------------------
-# 15 Curated Designer Color Presets
-# ---------------------------------------------------------------------------
 PRESET_COLORS = [
     ("Sapphire Blue", "#3b82f6"),
     ("Emerald Forest", "#10b981"),
@@ -67,9 +62,6 @@ PRESET_COLORS = [
 
 
 #: The colour pairs the running application actually draws, and what each one is.
-#: The soft badge tints are translucent, so they are composited over the card
-#: they sit on before being measured - comparing the raw ``rgba()`` string against
-#: its own accent reports about 1:1 for every theme ever made, which is nonsense.
 CONTRAST_PAIRS: tuple[tuple[str, str, str], ...] = (
     ("text", "window", "Body text on the window"),
     ("text", "surface", "Body text on a card"),
@@ -92,9 +84,9 @@ MIN_PAIR_CONTRAST = 4.5
 def contrast_report(palette: dict[str, str]) -> list[tuple[str, float, str]]:
     """Every pair the running application draws, as it actually renders.
 
-    The soft badge tints are translucent, so they are composited over the card
-    they sit on first. Measuring the raw ``rgba()`` string against its own accent
-    reports about 1:1 for every theme ever made, which says nothing.
+    Soft badge tints are translucent and so are composited over the card first:
+    measuring the raw ``rgba()`` against its own accent reports about 1:1 for
+    every theme, which says nothing.
     """
     if not palette:
         return []
@@ -145,11 +137,10 @@ def _sweep(config: dict, grids: list[list[float]]) -> tuple[dict, float] | None:
 def plan_readability_fix(config: dict) -> tuple[dict, list[str]]:
     """Find settings that read, and say what changed to get there.
 
-    A sweep rather than a walk. The three sliders interact - raising Surface
-    Contrast lightens the raised panel that secondary text is drawn on, so more
-    of it can be the thing making text unreadable - and moving one at a time,
-    keeping only moves that help on their own, walks straight past combinations
-    that work. The result is the one nearest to what was set.
+    A sweep rather than a walk: the three sliders interact (Surface Contrast
+    lightens the panel secondary text sits on), so moving one at a time and
+    keeping only moves that help alone walks past combinations that work. The
+    result is the passing combination nearest to what was set.
     """
     if _failing_pairs(config) == 0:
         return dict(config), []
@@ -162,7 +153,6 @@ def plan_readability_fix(config: dict) -> tuple[dict, list[str]]:
     if coarse is None:
         return dict(config), []
 
-    # Then again, finely, around what the coarse pass found.
     found, _moved = coarse
     fine = _sweep(
         config,
@@ -187,7 +177,7 @@ def plan_readability_fix(config: dict) -> tuple[dict, list[str]]:
 
 
 class LiveThemePreviewCard(QFrame):
-    """Interactive visual preview with tabbed mockups (Overview, Table, Palette Matrix)."""
+    """A miniature of the application, plus every token the palette defines."""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -203,7 +193,6 @@ class LiveThemePreviewCard(QFrame):
         self.main_layout.setContentsMargins(14, 12, 14, 12)
         self.main_layout.setSpacing(10)
 
-        # 1. Header with Title, Mode Badges & View Switcher
         header_row = QHBoxLayout()
         header_row.setSpacing(6)
 
@@ -236,16 +225,14 @@ class LiveThemePreviewCard(QFrame):
 
         self.main_layout.addLayout(header_row)
 
-        # 2. The preview itself. A miniature of the application, then every
-        # token it is built from - which is everything the three tabs used to
-        # show, without hiding two thirds of it behind a click.
+        # Everything at once: the three tabs this replaced hid two thirds of the
+        # palette behind a click.
         self.mini_window = QFrame()
         self.mini_window.setObjectName("miniWindow")
         mini_lay = QHBoxLayout(self.mini_window)
         mini_lay.setContentsMargins(1, 1, 1, 1)
         mini_lay.setSpacing(0)
 
-        # --- sidebar ---
         self.mini_nav = QFrame()
         self.mini_nav.setObjectName("miniNav")
         self.mini_nav.setFixedWidth(132)
@@ -285,7 +272,6 @@ class LiveThemePreviewCard(QFrame):
         nav_lay.addWidget(self.mini_nav_footer)
         mini_lay.addWidget(self.mini_nav)
 
-        # --- content ---
         content = QWidget()
         content_lay = QVBoxLayout(content)
         content_lay.setContentsMargins(12, 10, 12, 10)
@@ -339,6 +325,7 @@ class LiveThemePreviewCard(QFrame):
 
         self.mini_list = QTableWidget(0, 3)
         self.mini_list.setObjectName("miniList")
+        self.mini_list.setAccessibleName("Palette preview rows")
         self.mini_list.setHorizontalHeaderLabels(["Location", "Size", "Risk"])
         self.mini_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.mini_list.verticalHeader().setVisible(False)
@@ -404,7 +391,6 @@ class LiveThemePreviewCard(QFrame):
         mini_lay.addWidget(content, 1)
         self.main_layout.addWidget(self.mini_window, 1)
 
-        # --- every token, named and valued ---
         tokens_lbl = QLabel("PALETTE")
         tokens_lbl.setObjectName("tokensLabel")
         tokens_lbl.setTextFormat(Qt.TextFormat.PlainText)
@@ -507,9 +493,8 @@ class LiveThemePreviewCard(QFrame):
     def _stylesheet(self, p: dict[str, str], cr_role: str) -> str:
         """The whole preview as one sheet.
 
-        Styling each mock widget on its own meant ninety-nine `setStyleSheet`
-        calls per edit, and Qt recomputes a widget's style on every one. The
-        application styles itself with a single sheet; so does its preview.
+        Qt recomputes a widget's style on every `setStyleSheet`, and styling each
+        mock widget separately meant ninety-nine of them per edit.
         """
         chip_rules = []
         for token in self.matrix_chips:
@@ -620,10 +605,7 @@ class LiveThemePreviewCard(QFrame):
 
 
 class CustomThemeBuilderWidget(QWidget):
-    """Complete Custom Theme Studio component with color picker, presets, mood modes,
-
-    magic generator dice, tuning sliders, live interactive preview, and save/apply actions.
-    """
+    """The Theme Studio page: controls on the left, live preview on the right."""
 
     theme_applied = Signal(dict)
     #: A theme was saved to the gallery; carries its id.
@@ -643,9 +625,9 @@ class CustomThemeBuilderWidget(QWidget):
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.setInterval(160)
         self._debounce_timer.timeout.connect(self._apply_debounced)
-        # Redrawing the preview costs about 12ms, so a drag that fires one per
-        # notch spends longer redrawing than moving. Leading edge, then at most
-        # one redraw per frame, and always a last one with the value it ended on.
+        # A redraw costs about 12ms, so a drag firing one per notch spends longer
+        # redrawing than moving: leading edge, then at most one per frame, and always
+        # a final one with the value the drag ended on.
         self._preview_pending = False
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -681,7 +663,6 @@ class CustomThemeBuilderWidget(QWidget):
         card_lay.setContentsMargins(16, 14, 16, 14)
         card_lay.setSpacing(12)
 
-        # 1. Header Toolbar (Title + Magic Dice + JSON Export/Import)
         header_row = QHBoxLayout()
         header_row.setSpacing(8)
 
@@ -703,7 +684,6 @@ class CustomThemeBuilderWidget(QWidget):
         title_box.addWidget(sub_lbl)
         header_row.addLayout(title_box, 1)
 
-        # Quick Action Tools
         self.magic_dice_btn = QPushButton("Surprise Me (Magic Dice)")
         self.magic_dice_btn.setIcon(material_icon("dice", "#ffffff"))
         self.magic_dice_btn.setFixedHeight(30)
@@ -713,17 +693,14 @@ class CustomThemeBuilderWidget(QWidget):
 
         card_lay.addLayout(header_row)
 
-        # 2. Main 2-Column Studio Layout
         columns_layout = QHBoxLayout()
         columns_layout.setSpacing(16)
 
-        # --- LEFT COLUMN: Studio Controls ---
         left_box = QVBoxLayout()
         left_box.setSpacing(10)
 
-        # A. Start from an existing theme. Building from nothing every time was
-        # the only way to use this page; most people want to take a theme they
-        # already like and move it a little.
+        # Most people want to nudge a theme they already like rather than build one
+        # from nothing, which was the only way to use this page.
         start_row = QHBoxLayout()
         start_row.setSpacing(8)
         start_lbl = QLabel("Start from")
@@ -747,7 +724,6 @@ class CustomThemeBuilderWidget(QWidget):
         self.start_note.setVisible(False)
         left_box.addWidget(self.start_note)
 
-        # B. Primary Color Picker & Hex Input
         color_pick_row = QHBoxLayout()
         color_pick_row.setSpacing(8)
 
@@ -755,6 +731,7 @@ class CustomThemeBuilderWidget(QWidget):
         self.color_swatch_btn.setFixedSize(36, 36)
         self.color_swatch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.color_swatch_btn.setToolTip("Click to open system color picker")
+        self.color_swatch_btn.setAccessibleName("Pick the primary colour")
         self.color_swatch_btn.clicked.connect(self._open_color_dialog)
         color_pick_row.addWidget(self.color_swatch_btn)
 
@@ -766,6 +743,7 @@ class CustomThemeBuilderWidget(QWidget):
         self.hex_input = QLineEdit(self._current_primary)
         self.hex_input.setMaxLength(7)
         self.hex_input.setPlaceholderText("#3b82f6")
+        self.hex_input.setAccessibleName("Primary colour hex code")
         self.hex_input.setFixedHeight(28)
         self.hex_input.textChanged.connect(self._on_hex_text_changed)
         hex_box.addWidget(hex_lbl)
@@ -774,7 +752,6 @@ class CustomThemeBuilderWidget(QWidget):
 
         left_box.addLayout(color_pick_row)
 
-        # C. Palette Mood / Harmony Style Chips
         mood_lbl = QLabel("Palette Mood & Harmony")
         mood_lbl.setTextFormat(Qt.TextFormat.PlainText)
         mood_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
@@ -807,7 +784,6 @@ class CustomThemeBuilderWidget(QWidget):
 
         left_box.addLayout(mood_row)
 
-        # D. 15 Curated Preset Swatches
         presets_lbl = QLabel("Quick Presets (15 Designer Hues)")
         presets_lbl.setTextFormat(Qt.TextFormat.PlainText)
         presets_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
@@ -831,7 +807,6 @@ class CustomThemeBuilderWidget(QWidget):
             self._preset_buttons.append(btn)
         left_box.addLayout(presets_grid)
 
-        # E. Dark / Light Canvas Mode Toggle
         mode_lbl = QLabel("Canvas Mode")
         mode_lbl.setTextFormat(Qt.TextFormat.PlainText)
         mode_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #888888;")
@@ -862,11 +837,9 @@ class CustomThemeBuilderWidget(QWidget):
 
         left_box.addLayout(mode_row)
 
-        # F. Sliders for Surface Contrast & Accent Intensity
         sliders_box = QVBoxLayout()
         sliders_box.setSpacing(6)
 
-        # Contrast Slider
         c_label_row = QHBoxLayout()
         self.contrast_title = QLabel("Surface Contrast")
         self.contrast_title.setTextFormat(Qt.TextFormat.PlainText)
@@ -887,7 +860,6 @@ class CustomThemeBuilderWidget(QWidget):
         self.contrast_slider.sliderReleased.connect(self._apply_debounced)
         sliders_box.addWidget(self.contrast_slider)
 
-        # Accent Intensity Slider
         a_label_row = QHBoxLayout()
         self.intensity_title = QLabel("Accent Vibrancy")
         self.intensity_title.setTextFormat(Qt.TextFormat.PlainText)
@@ -908,8 +880,6 @@ class CustomThemeBuilderWidget(QWidget):
         self.intensity_slider.sliderReleased.connect(self._apply_debounced)
         sliders_box.addWidget(self.intensity_slider)
 
-        # Background Depth. Every saved theme carries this value; until now the only
-        # way to change it was to edit the theme file by hand.
         d_label_row = QHBoxLayout()
         self.darkness_title = QLabel("Background Depth")
         self.darkness_title.setTextFormat(Qt.TextFormat.PlainText)
@@ -935,8 +905,6 @@ class CustomThemeBuilderWidget(QWidget):
 
         left_box.addLayout(sliders_box)
 
-        # Readability. The column ended here with nothing below it, and this is
-        # the one thing worth knowing before a theme is saved.
         read_row = QHBoxLayout()
         read_lbl = QLabel("Readability")
         read_lbl.setTextFormat(Qt.TextFormat.PlainText)
@@ -946,8 +914,8 @@ class CustomThemeBuilderWidget(QWidget):
 
         self.fix_btn = QPushButton("Fix")
         self.fix_btn.setProperty("primary", "true")
-        # No icon: the icon colour would be baked in, so a disabled button would
-        # still carry a bright tick, and a light theme a white one.
+        # No icon: its colour bakes in, so a disabled button keeps a bright tick and
+        # a light theme a white one.
         self.fix_btn.setMinimumWidth(72)
         self.fix_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.fix_btn.setAccessibleName("Adjust the theme until the text reads")
@@ -985,17 +953,14 @@ class CustomThemeBuilderWidget(QWidget):
         left_box.addStretch(1)
         columns_layout.addLayout(left_box, 2)
 
-        # --- RIGHT COLUMN: Live Preview ---
-        # The preview is what the page is for, so it gets the room: three parts to
-        # the controls' two, and it stretches with the window instead of leaving
-        # the bottom half of the page empty.
+        # The preview is what the page is for, so it takes three parts to the
+        # controls' two and stretches with the window.
         self.preview_card = LiveThemePreviewCard(main_card)
         self.preview_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         columns_layout.addWidget(self.preview_card, 3)
 
         card_lay.addLayout(columns_layout, 1)
 
-        # 3. Bottom Action Bar
         actions_row = QHBoxLayout()
         actions_row.setSpacing(8)
 
@@ -1004,9 +969,8 @@ class CustomThemeBuilderWidget(QWidget):
         self.reset_btn.clicked.connect(self._reset_to_defaults)
         actions_row.addWidget(self.reset_btn)
 
-        # The whole interface follows the edit, a moment after the last change.
-        # Restyling it makes every widget recompute, so it is coalesced rather
-        # than run per keystroke; the preview itself keeps up in real time.
+        # Restyling the window recomputes every widget, so edits are coalesced rather
+        # than applied per keystroke. The preview itself keeps up in real time.
         self.live_apply_check = QCheckBox("Restyle the window as I edit")
         self.live_apply_check.setChecked(True)
         self.live_apply_check.setToolTip(
@@ -1017,8 +981,6 @@ class CustomThemeBuilderWidget(QWidget):
 
         actions_row.addStretch(1)
 
-        # Applying sets the live custom theme; saving makes it a theme of its own,
-        # which is what puts it in the gallery and makes it editable later.
         self.save_btn = QPushButton("Save to Gallery…")
         self.save_btn.setProperty("secondary", "true")
         self.save_btn.setIcon(material_icon("add", "#ffffff"))
@@ -1045,10 +1007,6 @@ class CustomThemeBuilderWidget(QWidget):
 
         card_lay.addLayout(actions_row)
         root.addWidget(main_card, 1)
-
-    # -----------------------------------------------------------------------
-    # Event Handlers & State Management
-    # -----------------------------------------------------------------------
 
     def _populate_start_from(self) -> None:
         """List every theme, with the ones the Studio can reproduce exactly first."""
@@ -1082,10 +1040,9 @@ class CustomThemeBuilderWidget(QWidget):
     def load_theme(self, theme_id: str) -> bool:
         """Seed the Studio from a theme. True when it reproduces it exactly.
 
-        A theme saved from here records the settings that made it, so it comes
-        back unchanged. Anything else - the themes we ship, a file written by
-        hand - has no recipe, so its accent and canvas are taken and the rest is
-        generated afresh. That is a starting point, not a copy, and it says so.
+        A theme saved from here records the settings that made it. Anything else
+        has no recipe, so its accent and canvas are taken and the rest generated
+        afresh - a starting point rather than a copy, and it says so.
         """
         from crapcleaner.gui.theme import PALETTES, is_dark_theme, theme_generator, theme_label
 
@@ -1196,9 +1153,8 @@ class CustomThemeBuilderWidget(QWidget):
     def _changed(self) -> None:
         """Redraw the preview now; let the rest of the window follow.
 
-        Restyling the window is the same cost whether a slider or a swatch caused
-        it, so both go through the same wait. Clicking through the presets stays
-        immediate in the preview and the interface catches up when you stop.
+        A restyle costs the same whether a slider or a swatch caused it, so both
+        wait: clicking through presets stays instant in the preview.
         """
         self._request_preview()
         self._debounce_timer.start(160)
@@ -1241,15 +1197,13 @@ class CustomThemeBuilderWidget(QWidget):
         self._update_preview(auto_apply=True, full_restyle=True)
 
     def _on_magic_dice_clicked(self) -> None:
-        """Roll random beautiful theme configuration."""
         magic = generate_magic_palette()
         self._current_primary = magic["primary_color"]
         self._current_mode = magic["mode"]
         self._current_mood = magic["mood"]
         self._current_contrast = magic["surface_contrast"]
         self._current_intensity = magic["accent_intensity"]
-        # The dice returns a background depth too; it used to be thrown away, so
-        # the roll never produced the theme it described.
+        # Dropping the rolled depth meant the roll never produced the theme it described.
         self._current_bg_darkness = magic["bg_darkness"]
 
         self.start_from.setCurrentIndex(0)
@@ -1276,7 +1230,6 @@ class CustomThemeBuilderWidget(QWidget):
                 f"background-color: {self._current_primary}; border: 2px solid #ffffff; "
                 f"border-radius: 18px;"
             )
-            # Style Dark / Light mode segment buttons cleanly
             is_dark = self._current_mode == "dark"
             active_btn_style = (
                 f"QPushButton {{ background-color: {palette['accent']}; color: #ffffff; "

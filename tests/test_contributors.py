@@ -36,13 +36,11 @@ def test_contributors_success(tmp_path, monkeypatch):
         res = fetch_contributors(force_refresh=True)
 
     assert len(res) == 2
-    # Should be sorted by contributions descending
     assert res[0].login == "Bob"
     assert res[0].contributions == 42
     assert res[1].login == "Alice"
     assert res[1].contributions == 15
 
-    # Verify cache file was written
     cache_file = tmp_path / "contributors_cache.json"
     assert cache_file.exists()
 
@@ -50,7 +48,6 @@ def test_contributors_success(tmp_path, monkeypatch):
 def test_contributors_rate_limit_fallback_to_cache(tmp_path, monkeypatch):
     monkeypatch.setattr("crapcleaner.utils.contributors.config_dir", lambda: str(tmp_path))
 
-    # Pre-populate cache
     cache_file = tmp_path / "contributors_cache.json"
     payload = {
         "timestamp": time.time() - 100,
@@ -66,7 +63,6 @@ def test_contributors_rate_limit_fallback_to_cache(tmp_path, monkeypatch):
     with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(payload, f)
 
-    # Mock rate limit HTTPError 403
     http_err = urllib.error.HTTPError(
         url="https://api.github.com/...",
         code=403,
@@ -87,7 +83,6 @@ def test_contributors_timeout_fallback(tmp_path, monkeypatch):
     with patch("urllib.request.urlopen", side_effect=TimeoutError("Request timed out")):
         res = fetch_contributors(force_refresh=True)
 
-    # Offline without cache should return empty list gracefully
     assert res == []
 
 

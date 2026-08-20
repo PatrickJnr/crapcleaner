@@ -1,22 +1,69 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "crapcleaner"
-version = "1.1.0"
+version = "1.2.0"
 description = "Modern cleanup and disk-analysis utility"
-requires-python = ">=3.10"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Patrick Jr." }]
+keywords = ["cleanup", "disk-usage", "duplicate-finder", "maintenance", "pyside6", "temp-files"]
+# Upper bound is the tested ceiling: CI covers 3.10 through 3.12.
+requires-python = ">=3.10,<3.14"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: System Administrators",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Desktop Environment",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
 dependencies = ["PySide6>=6.5"]
+
+[project.urls]
+Homepage = "https://github.com/PatrickJnr/crapcleaner"
+Repository = "https://github.com/PatrickJnr/crapcleaner"
+Issues = "https://github.com/PatrickJnr/crapcleaner/issues"
+Changelog = "https://github.com/PatrickJnr/crapcleaner/blob/master/CHANGELOG.md"
 
 [project.scripts]
 crapcleaner = "crapcleaner.app:main"
+
+# Same entry point without a console window attached, so a pip-installed GUI launch
+# on Windows does not open a terminal behind it.
+[project.gui-scripts]
+crapcleaner-gui = "crapcleaner.app:main"
 
 [tool.setuptools.packages.find]
 include = ["crapcleaner*"]
 
 [tool.setuptools.package-data]
 crapcleaner = ["assets/*", "assets/themes/*.json"]
+
+[tool.pytest.ini_options]
+# Without this a bare `pytest` at the root also collects scratch/ and website/.
+testpaths = ["tests"]
+addopts = "--strict-markers"
+filterwarnings = [
+    "error",
+    # Handles left for the garbage collector by the logging and self-update paths.
+    "ignore:unclosed file:ResourceWarning",
+    "ignore:Exception ignored in:pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.coverage.run]
+branch = true
+omit = ["tests/*", "scripts/*"]
 
 [tool.ruff]
 target-version = "py310"

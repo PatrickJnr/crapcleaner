@@ -1,5 +1,7 @@
 """Tests for duplicate finder."""
 
+import threading
+
 from crapcleaner.analysis.duplicates import DuplicateGroup, find_duplicates
 
 
@@ -76,3 +78,39 @@ class TestFindDuplicates:
             _write(tmp_path, f"g{i}/b.bin", payload)
         groups = find_duplicates([str(tmp_path)], min_size_bytes=1, max_groups=2)
         assert len(groups) == 2
+
+
+class TestCancelledHashPass:
+    """A cancelled full-hash pass returned [], discarding groups already confirmed."""
+
+    def test_groups_confirmed_before_the_stop_are_returned(self, tmp_path):
+        small = b"s" * 100
+        large = b"l" * 20000
+        _write(tmp_path, "small_a.bin", small)
+        _write(tmp_path, "small_b.bin", small)
+        _write(tmp_path, "large_a.bin", large)
+        _write(tmp_path, "large_b.bin", large)
+        stop_event = threading.Event()
+
+        groups = find_duplicates(
+            [str(tmp_path)],
+            min_size_bytes=1,
+            stop_event=stop_event,
+            # Fires once the prefix-sized group is confirmed, before any full hashing.
+            progress_cb=lambda *_: stop_event.set(),
+            max_workers=1,
+        )
+
+        assert [g.size for g in groups] == [100]
+
+
+class TestGroupOrdering:
+    def test_the_capped_result_holds_the_largest_groups_first(self, tmp_path):
+        for index, size in enumerate((300, 100, 200)):
+            payload = bytes([index]) * size
+            _write(tmp_path, f"g{index}_a.bin", payload)
+            _write(tmp_path, f"g{index}_b.bin", payload)
+
+        groups = find_duplicates([str(tmp_path)], min_size_bytes=1, max_groups=2)
+
+        assert [g.size for g in groups] == [300, 200]

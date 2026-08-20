@@ -7,14 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from crapcleaner.core.protected_paths import DirectoryGuard
+from crapcleaner.core.protected_paths import GuardStack
 from crapcleaner.utils.files import walk_safe_entries
 from crapcleaner.utils.platform import get_program_data, get_windows_dir, is_windows
 
-#: Directory names that are skipped wherever they appear. Matched against the
-#: directory's own name, never as a substring of the whole path: "Windows" as a
-#: substring test also skips `Games\MyGame\WindowsNoEditor`, which is where a
-#: large-file scan most needs to look.
+#: Skipped wherever they appear. Matched against the directory's own name, never as a
+#: substring of the path: that would also skip `Games\MyGame\WindowsNoEditor`.
 SKIP_DIR_NAMES = frozenset(
     {
         "$recycle.bin",
@@ -95,8 +93,8 @@ def _file_type(path: str) -> str:
 def _system_scan_roots() -> tuple[str, ...]:
     """Operating system trees a "find big files" scan should not offer up.
 
-    Resolved from the real locations rather than matched by name, so a user folder
-    that happens to be called `Windows` is scanned and `C:\\Windows` is not.
+    Resolved from real locations, not matched by name, so a user folder called
+    `Windows` is still scanned.
     """
     global _SYSTEM_ROOTS
     if _SYSTEM_ROOTS is None:
@@ -139,14 +137,13 @@ def scan_large_files(
     results: list[LargeFile] = []
     visited = 0
 
-    # walk_safe_entries already keeps symlinks and junctions out of the traversal, and
-    # prunes skipped directories before listing them. Protected content is filtered
-    # here rather than at deletion time, so a credential file is never offered as a
-    # deletion candidate in the first place.
+    # Protected content is filtered here, not at deletion time, so a credential file is
+    # never offered as a deletion candidate in the first place.
+    guards = GuardStack()
     for dirpath, file_entries in walk_safe_entries(root, skip_dir=_should_skip_dir):
         if stop_event is not None and stop_event.is_set():
             break
-        guard = DirectoryGuard(dirpath)
+        guard = guards.guard_for(dirpath)
         if not guard.directory_allowed:
             continue
         for entry in file_entries:
@@ -161,6 +158,8 @@ def scan_large_files(
                 visited += 1
             except OSError:
                 continue
+            if progress_cb is not None and visited % 2000 == 0:
+                progress_cb(visited)
             if st.st_size < threshold_bytes:
                 continue
             try:
@@ -180,8 +179,6 @@ def scan_large_files(
                 heapq.heappush(heap, (item.size, len(heap), item))
             elif item.size > heap[0][0]:
                 heapq.heapreplace(heap, (item.size, visited, item))
-        if progress_cb is not None and visited % 2000 == 0:
-            progress_cb(visited)
 
     if max_results is not None and max_results > 0:
         results = [item for _size, _idx, item in sorted(heap, reverse=True)]

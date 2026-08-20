@@ -1,8 +1,7 @@
 """Theme package: palette data, accessibility rules, and Qt styling.
 
-Split out of a single 2 100-line module. The public names are unchanged, so
-`from crapcleaner.gui.theme import apply_theme` keeps working; palettes now come
-from data files (see :mod:`crapcleaner.gui.theme.palettes`).
+Re-exports the public names, so `from crapcleaner.gui.theme import apply_theme`
+works regardless of which submodule defines it.
 """
 
 from crapcleaner.gui.theme.palettes import (
@@ -11,6 +10,7 @@ from crapcleaner.gui.theme.palettes import (
     BUILTIN_THEME_IDS,
     CONTRAST_EXEMPTIONS,
     DARK,
+    HIGH_CONTRAST_RATIO,
     MIN_TEXT_CONTRAST,
     PALETTES,
     THEME_CATEGORIES,
@@ -29,12 +29,14 @@ from crapcleaner.gui.theme.palettes import (
     get_theme_category_label,
     get_theme_description,
     get_theme_swatches,
+    high_contrast,
     invalidate_custom_theme_cache,
     is_dark_theme,
     is_user_theme,
     palette_for,
     reload_themes,
     save_user_theme,
+    set_high_contrast,
     slugify,
     theme_generator,
     theme_label,
@@ -64,6 +66,7 @@ __all__ = [
     "user_theme_path",
     "user_themes",
     "DARK",
+    "HIGH_CONTRAST_RATIO",
     "MIN_TEXT_CONTRAST",
     "PALETTES",
     "THEMES",
@@ -85,11 +88,13 @@ __all__ = [
     "get_theme_category_label",
     "get_theme_description",
     "get_theme_swatches",
+    "high_contrast",
     "invalidate_custom_theme_cache",
     "is_dark_theme",
     "make_window_icon",
     "palette_for",
     "reload_themes",
+    "set_high_contrast",
     "theme_generator",
     "theme_label",
     "user_theme_dir",

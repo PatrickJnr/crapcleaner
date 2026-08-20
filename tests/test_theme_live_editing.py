@@ -244,8 +244,7 @@ class TestProvenance:
 
             assert theme_module.is_user_theme("dropped-in") is True
             assert theme_module.get_theme_category("dropped-in") == "custom"
-            # It can be removed from the gallery even though it is not in the
-            # user's own directory.
+            # Removable from the gallery even though it is not in the user's dir.
             assert theme_module.user_theme_path("dropped-in") == path
         finally:
             if os.path.exists(path):

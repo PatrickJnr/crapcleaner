@@ -48,8 +48,8 @@ def get_all_categories() -> list[CleanupCategory]:
         try:
             categories.extend(provider())
         except Exception:
-            # One broken provider must not remove every other category, but it used
-            # to vanish without a word - so a missing section had no explanation.
+            # One broken provider must not remove every other category, but a
+            # section vanishing silently has no explanation either.
             logger.warning("Category provider %r failed to load", group, exc_info=True)
             continue
 
@@ -77,10 +77,8 @@ def find_categories(
 ) -> list[CleanupCategory]:
     """Categories whose name or id contains `name_substring`.
 
-    Pass `categories` when resolving several names in a row. Building the registry
-    runs every provider and probes hundreds of paths (one of them parses Steam's
-    library index), so doing it once per name made resolving a handful of names cost
-    as many full enumerations.
+    Pass `categories` when resolving several names in a row: building the registry
+    runs every provider and probes hundreds of paths, once per name otherwise.
     """
     needle = name_substring.lower()
     pool = categories if categories is not None else get_all_categories()

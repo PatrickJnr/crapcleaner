@@ -10,8 +10,10 @@ import os
 
 import pytest
 
+import crapcleaner.core.protected_paths as protected_paths
 from crapcleaner.core.protected_paths import (
     DirectoryGuard,
+    GuardStack,
     refresh_protection_cache,
     validate_cleanup_path,
 )
@@ -33,11 +35,6 @@ def _agree(directory: str, name: str) -> None:
     assert guard_verdict == strict_verdict, (
         f"{directory!r} / {name!r}: guard={guard_verdict} strict={strict_verdict} ({message})"
     )
-
-
-# ---------------------------------------------------------------------------
-# Equivalence
-# ---------------------------------------------------------------------------
 
 
 def test_ordinary_cache_file_is_allowed_by_both(tmp_path):
@@ -99,9 +96,7 @@ def test_user_exclusions_are_honoured(tmp_path):
     assert "exclusion" in message.lower()
 
 
-# ---------------------------------------------------------------------------
 # The regression this design nearly introduced
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(not is_windows(), reason="Windows protected roots")
@@ -126,11 +121,6 @@ def test_the_root_itself_is_still_protected():
     allowed, message = validate_cleanup_path(root)
     assert allowed is False
     assert "protected" in message.lower()
-
-
-# ---------------------------------------------------------------------------
-# Cache invalidation
-# ---------------------------------------------------------------------------
 
 
 def test_exclusion_changes_are_picked_up_after_a_refresh(tmp_path, monkeypatch):
@@ -166,3 +156,51 @@ def test_settings_are_not_read_once_per_file(tmp_path, monkeypatch):
         guard.allows_file(f"file{i}.tmp")
 
     assert calls["n"] <= 1
+
+
+class TestGuardStack:
+    """A walk derives each guard from its parent instead of resolving it again."""
+
+    def _tree(self, tmp_path):
+        deep = tmp_path / "app" / "cache" / "shaders"
+        deep.mkdir(parents=True)
+        return deep
+
+    def test_a_derived_guard_agrees_with_a_resolved_one(self, tmp_path):
+        deep = self._tree(tmp_path)
+        stack = GuardStack()
+        for directory in (tmp_path, tmp_path / "app", tmp_path / "app" / "cache", deep):
+            derived = stack.guard_for(str(directory))
+            resolved = DirectoryGuard(str(directory))
+            assert derived.directory_allowed == resolved.directory_allowed
+            assert derived.allows_file("blob.bin") == resolved.allows_file("blob.bin")
+
+    def test_a_protected_component_still_refuses_the_subtree(self, tmp_path):
+        repo = tmp_path / "project" / ".git" / "objects"
+        repo.mkdir(parents=True)
+        stack = GuardStack()
+        for directory in (tmp_path, tmp_path / "project", tmp_path / "project" / ".git", repo):
+            stack.guard_for(str(directory))
+        assert not stack.guard_for(str(repo)).directory_allowed
+
+    def test_an_unrelated_path_falls_back_to_resolving(self, tmp_path):
+        other = tmp_path / "elsewhere"
+        other.mkdir()
+        stack = GuardStack()
+        stack.guard_for(str(self._tree(tmp_path)))
+        assert stack.guard_for(str(other)).directory_allowed
+
+    def test_a_walk_resolves_only_its_root(self, tmp_path, monkeypatch):
+        self._tree(tmp_path)
+        calls = []
+        real_norm = protected_paths._norm
+        monkeypatch.setattr(
+            protected_paths,
+            "_norm",
+            lambda path: (calls.append(path), real_norm(path))[1],
+        )
+        stack = GuardStack()
+        for directory in (tmp_path, tmp_path / "app", tmp_path / "app" / "cache"):
+            stack.guard_for(str(directory))
+
+        assert len(calls) == 1

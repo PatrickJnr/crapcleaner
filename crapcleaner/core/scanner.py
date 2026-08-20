@@ -141,9 +141,8 @@ def scan_category(
             except OSError as exc:
                 errors.append(f"{found}: {exc}")
 
-    # compute_dir_size stops walking once the shared counter passes the budget and
-    # says nothing about it, so the caller has to notice - otherwise the total is
-    # silently a floor.
+    # compute_dir_size stops at the budget without reporting it, so the caller must
+    # notice or the total is silently a floor.
     truncated = counter[0] > max_files
     if truncated:
         errors.append(
@@ -235,12 +234,9 @@ class ScanEngine:
                     break
                 futures.append(pool.submit(scan_one, index, category))
 
-            # Collect in submission order so results/progress stay deterministic.
-            # Progress is reported here rather than at submission time: every
-            # category is queued within milliseconds, so a submit-time report
-            # names whichever category was queued last while a different one is
-            # still running - which is how a multi-minute directory walk ends up
-            # displayed under the name of the fast category ahead of it.
+            # Collect in submission order so results and progress stay deterministic.
+            # Reporting progress at submission time instead would name whichever
+            # category was queued last - all are queued within milliseconds.
             for index, future in enumerate(futures):
                 category = self.categories[index]
                 if progress_cb is not None:

@@ -161,7 +161,6 @@ def _export_csv(data: Any, report_type: str) -> str:
             )
 
     else:
-        # Generic dict list fallback
         if isinstance(plain, list) and plain and isinstance(plain[0], dict):
             keys = list(plain[0].keys())
             writer.writerow(keys)

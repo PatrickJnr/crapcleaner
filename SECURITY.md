@@ -4,8 +4,9 @@
 
 | Version | Supported |
 | ------- | --------- |
-| 1.0.x   | Yes       |
-| < 1.0.0 | No        |
+| 1.2.x   | Yes       |
+| 1.1.x   | Security fixes only |
+| < 1.1.0 | No        |
 
 ---
 
@@ -14,7 +15,7 @@
 CrapCleaner is engineered with a strict safety-first architecture:
 
 1. **Non-Destructive Scanning**: Scanning operations are strictly read-only and never alter or delete disk contents.
-2. **Recycle Bin by Default**: Cleanups move files to the Windows Recycle Bin so they can be restored if necessary.
+2. **Recycle Bin by Default**: Cleanups move files to the Windows Recycle Bin, or to the FreeDesktop Trash on Linux, so they can be restored if necessary.
 3. **Safety Tiers**:
    - `SAFE`: Clean, automatically regenerated temporary files.
    - `LOW_RISK`: Rebuilt on demand (caches, shader caches).
@@ -29,4 +30,4 @@ CrapCleaner is engineered with a strict safety-first architecture:
 
 If you discover a security vulnerability or potential data-loss issue in CrapCleaner, please do not open a public issue.
 
-Instead, please send an email to the maintainer or report privately through GitHub Security Advisories. Reports will be reviewed, patched, and released promptly.
+Instead, please report it privately through [GitHub Security Advisories](https://github.com/PatrickJnr/crapcleaner/security/advisories/new), which notifies the maintainer directly. Reports will be reviewed, patched, and released promptly.

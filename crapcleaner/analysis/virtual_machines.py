@@ -37,7 +37,6 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
     user = get_user_profile()
     local = get_local_appdata()
 
-    # 1. WSL2 Disks
     wsl_candidates = [
         (os.path.join(local, "Docker", "wsl"), "Docker WSL2 backend (ext4.vhdx)"),
         (os.path.join(local, "Packages"), "WSL2 Distribution image (ext4.vhdx)"),
@@ -70,7 +69,6 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
                         )
                     )
 
-    # 2. VirtualBox VMs
     vbox_dirs = [
         os.path.join(user, "VirtualBox VMs"),
         os.path.join(user, ".VirtualBox"),
@@ -99,7 +97,6 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
                             )
                         )
 
-    # 3. VMware Disks
     vmware_dirs = [
         os.path.join(user, "Documents", "Virtual Machines"),
         os.path.join(user, "vmware"),
@@ -127,7 +124,6 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
                         )
                     )
 
-    # 4. Hyper-V Disks (Windows)
     if is_windows():
         hyperv_dirs = [
             "C:\\ProgramData\\Microsoft\\Windows\\Hyper-V\\Virtual Hard Disks",

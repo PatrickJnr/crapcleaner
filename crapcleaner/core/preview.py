@@ -1,7 +1,6 @@
-"""Pre-cleanup preview and item enumeration engine.
+"""Pre-cleanup preview: a manifest of everything a cleanup would touch.
 
-Generates a detailed manifest of all files, folders, and actions that would be
-affected prior to execution, supporting item-level deselection and staleness checking.
+Supports item-level deselection and staleness checking.
 """
 
 import fnmatch
@@ -92,6 +91,9 @@ class CleanupPreview:
         """Verify if previewed items still exist on disk."""
         stale = False
         for cat in self.categories:
+            if cat.action:
+                # An action category's single item is a label, not a path on disk.
+                continue
             for item in cat.items:
                 if not os.path.exists(item.path) and not os.path.islink(item.path):
                     item.exists = False
@@ -118,15 +120,11 @@ def generate_cleanup_preview(
 ) -> CleanupPreview:
     """Enumerate all files and directories targeted by categories and build a pre-cleanup manifest.
 
-    `max_items_per_category` caps the *listed* items only. Sizes and counts always
-    cover everything that would be deleted: capping them made the preview understate
-    exactly the categories where the number matters, and disagree with the scan.
+    `max_items_per_category` caps the *listed* items only; sizes and counts always
+    cover everything that would be deleted, so they agree with the scan.
 
-    Categories that discover their targets through a finder normally reuse the
-    numbers from the last scan, so opening the preview after a scan is instant.
-    Set `resolve_finders` when no scan has run - a caller that previews cold, like
-    the CLI, would otherwise show zero for categories that will really delete
-    thousands of files.
+    Finder categories reuse the last scan's numbers, which makes previewing after a
+    scan instant. Set `resolve_finders` when no scan has run, or they report zero.
     """
     preview = CleanupPreview(generated_at=datetime.now())
     total_cats = len(categories)
@@ -212,7 +210,6 @@ def generate_cleanup_preview(
             if not os.path.isdir(target.path):
                 continue
 
-            # Walk target directory
             try:
                 if not target.recurse:
                     with os.scandir(target.path) as it:
@@ -281,4 +278,7 @@ def generate_cleanup_preview(
         cat_prev.items_truncated = total_cat_items > len(items)
         preview.categories.append(cat_prev)
 
+    # A long preview outlives the files it listed first, and `is_stale` is what tells
+    # the caller its numbers have already moved.
+    preview.check_staleness()
     return preview

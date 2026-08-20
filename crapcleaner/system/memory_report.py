@@ -386,10 +386,8 @@ def get_gpu_memory() -> list[GpuMemoryStats]:
 def get_vram_consumers() -> list[VramConsumer]:
     """Processes holding GPU memory, where the driver reports them.
 
-    Disabled in the default report because NVIDIA's exposed process lists are often
-    incomplete or noisy on desktop Linux (for example, graphics contexts may not
-    appear in the compute-apps query, while other interfaces surface low-signal
-    helper processes). The GUI and CLI now focus on adapter-level VRAM figures.
+    Disabled by default: NVIDIA's process lists are incomplete or noisy on desktop
+    Linux (graphics contexts miss the compute-apps query). Adapter-level VRAM only.
     """
     return []
 

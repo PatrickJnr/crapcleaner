@@ -28,6 +28,9 @@ Thank you for your interest in contributing to **CrapCleaner**. We welcome contr
    - Windows: `scripts\build_windows.bat` (add `onedir` for a folder build)
    - Linux: `sh scripts/build_linux.sh`
 
+   Released binaries are built from the exact versions in `requirements-build.txt`.
+   Change a pin there and every workflow that ships an artifact follows.
+
 The repository layout is documented in the [Project Structure](README.md#project-structure) section of the README.
 
 ---
@@ -40,9 +43,9 @@ Before submitting a Pull Request, verify that all tests pass and formatting conf
 # Run test suite
 pytest
 
-# Code formatting and linting
-black crapcleaner tests
-ruff check crapcleaner tests
+# Formatting, linting and types - the same gates CI runs
+ruff format --check crapcleaner tests scripts
+ruff check crapcleaner tests scripts
 mypy crapcleaner
 ```
 

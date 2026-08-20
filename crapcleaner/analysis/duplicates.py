@@ -14,20 +14,19 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from crapcleaner.core.protected_paths import DirectoryGuard
+from crapcleaner.core.protected_paths import GuardStack
 from crapcleaner.utils.files import walk_safe_entries
 
-_PREFIX_SIZE = 8192  # 8 KB prefix
-_HASH_CHUNK_SIZE = 1024 * 1024  # 1 MB chunk
+_PREFIX_SIZE = 8192
+_HASH_CHUNK_SIZE = 1024 * 1024
 
 
 @dataclass
 class DuplicateGroup:
     size: int
     files: list[str] = field(default_factory=list)
-    #: Paths dropped because they are additional names for a file already listed.
-    #: Deleting one of those frees nothing, so they are reported separately rather
-    #: than counted as reclaimable space.
+    #: Extra names for a file already listed. Deleting one frees nothing, so they are
+    #: reported separately rather than counted as reclaimable space.
     hardlinks: list[str] = field(default_factory=list)
 
     @property
@@ -110,24 +109,21 @@ def find_duplicates(
 ) -> list[DuplicateGroup]:
     """Find duplicate files across one or more root folders using multi-stage hashing."""
     by_size: dict[int, list[str]] = {}
-    #: path -> other names for the same file. A second name is not a duplicate copy:
-    #: removing it frees nothing, so it is reported rather than counted.
+    #: path -> other names for the same file.
     hardlinks_of: dict[str, list[str]] = {}
     visited = 0
 
-    # Stage 1: Walk directories and group by size.
-    #
-    # The listing already carries each file's size, so the entry is used directly
-    # rather than re-stat'ing by path. Protected content is filtered out here rather
-    # than at deletion time: a credential store or a Git object listed as a "duplicate"
-    # is an invitation to delete it, so it is never offered in the first place.
+    # Stage 1: walk directories and group by size. Protected content is filtered out
+    # here, not at deletion time: a credential store listed as a "duplicate" is an
+    # invitation to delete it, so it is never offered in the first place.
     for folder in folders:
         if not folder or not os.path.isdir(folder):
             continue
+        guards = GuardStack()
         for dirpath, file_entries in walk_safe_entries(folder):
             if stop_event is not None and stop_event.is_set():
                 return []
-            guard = DirectoryGuard(dirpath)
+            guard = guards.guard_for(dirpath)
             if not guard.directory_allowed:
                 continue
             for entry in file_entries:
@@ -147,14 +143,12 @@ def find_duplicates(
                 if progress_cb is not None and visited % 2000 == 0:
                     progress_cb(visited, 0)
 
-    # Filter to only sizes with 2 or more files
     size_candidates = {size: paths for size, paths in by_size.items() if len(paths) > 1}
     if not size_candidates:
         return []
 
-    # Collapse additional names for one file. The listing cannot answer this - on
-    # Windows `DirEntry.stat()` reports st_ino as 0 - so it takes a real stat, and it
-    # is only paid for files that already share a size with another file.
+    # Collapse extra names for one file. Windows `DirEntry.stat()` reports st_ino as 0,
+    # so this needs a real stat - only paid for files that already share a size.
     size_candidates = {
         size: _collapse_hardlinks(paths, hardlinks_of) for size, paths in size_candidates.items()
     }
@@ -162,7 +156,7 @@ def find_duplicates(
     if not size_candidates:
         return []
 
-    # Stage 2: Prefix hashing (Quick 8KB check)
+    # Stage 2: prefix hashing.
     prefix_candidates: dict[tuple[int, str], list[str]] = {}
 
     def _process_prefix(item: tuple[int, str]) -> tuple[int, str, str | None]:
@@ -189,12 +183,11 @@ def find_duplicates(
             if p_hash is not None:
                 prefix_candidates.setdefault((size, p_hash), []).append(path)
 
-    # Filter to only matching prefix groups with 2 or more files
     matching_prefix_groups = {k: paths for k, paths in prefix_candidates.items() if len(paths) > 1}
     if not matching_prefix_groups:
         return []
 
-    # Stage 3: Full SHA-256 checksum for candidate duplicates
+    # Stage 3: full SHA-256 checksum for candidate duplicates.
     by_full_hash: dict[tuple[int, str], list[str]] = {}
     processed = 0
     total_candidates = sum(len(paths) for paths in matching_prefix_groups.values())
@@ -202,7 +195,7 @@ def find_duplicates(
     needs_full_hash: list[tuple[int, str]] = []
     for (size, prefix_digest), paths in matching_prefix_groups.items():
         if size <= _PREFIX_SIZE:
-            # Files smaller than or equal to prefix size are already fully verified!
+            # A file no larger than the prefix is already fully hashed.
             by_full_hash.setdefault((size, prefix_digest), []).extend(paths)
             processed += len(paths)
             if progress_cb is not None:
@@ -216,16 +209,14 @@ def find_duplicates(
             return size, path, None
         return size, path, _hash_full_file(path)
 
-    # Hashing is I/O bound, so a few readers overlap seek time with checksum work.
-    # The pool stays small on purpose: a spinning disk loses more to competing seeks
-    # than it gains from concurrency. Results are consumed in submission order, so
-    # grouping does not depend on which worker finishes first.
+    # Pool stays small on purpose: a spinning disk loses more to competing seeks than
+    # it gains from concurrency. Consumed in submission order, so grouping is stable.
     full_workers = min(max_workers, len(needs_full_hash)) if needs_full_hash else 0
     if full_workers > 1:
         with ThreadPoolExecutor(max_workers=full_workers) as pool:
             for size, path, full_digest in pool.map(_process_full, needs_full_hash):
                 if stop_event is not None and stop_event.is_set():
-                    return []
+                    break
                 processed += 1
                 if full_digest:
                     by_full_hash.setdefault((size, full_digest), []).append(path)
@@ -234,7 +225,7 @@ def find_duplicates(
     else:
         for size, path in needs_full_hash:
             if stop_event is not None and stop_event.is_set():
-                return []
+                break
             full_digest = _hash_full_file(path)
             processed += 1
             if full_digest:
@@ -251,9 +242,7 @@ def find_duplicates(
         for (size, _digest), paths in by_full_hash.items()
         if len(paths) > 1
     ]
-    groups.sort(key=lambda g: g.reclaimable, reverse=True)
     if max_groups is not None and max_groups > 0 and len(groups) > max_groups:
-        top_groups = heapq.nlargest(max_groups, groups, key=lambda g: g.reclaimable)
-        top_groups.sort(key=lambda g: g.reclaimable, reverse=True)
-        return top_groups
+        return heapq.nlargest(max_groups, groups, key=lambda g: g.reclaimable)
+    groups.sort(key=lambda g: g.reclaimable, reverse=True)
     return groups

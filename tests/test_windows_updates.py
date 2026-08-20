@@ -8,6 +8,7 @@ import json
 from contextlib import contextmanager
 from unittest.mock import patch
 
+from crapcleaner.system import package_managers
 from crapcleaner.system.backends import updates_linux, updates_windows
 from crapcleaner.system.system_updates import (
     SystemUpdateItem,
@@ -33,11 +34,6 @@ def force_platform(name: str, tooling: bool = True):
         with patch("crapcleaner.system.capabilities.is_linux", return_value=name == "linux"):
             with patch("crapcleaner.system.capabilities._has", return_value=tooling):
                 yield
-
-
-# ---------------------------------------------------------------------------
-# Shared model
-# ---------------------------------------------------------------------------
 
 
 def test_windows_update_item_to_dict():
@@ -90,10 +86,6 @@ def test_deprecated_aliases_point_at_the_shared_model():
     assert WindowsUpdateItem is SystemUpdateItem
     assert WindowsUpdateReport is SystemUpdateReport
 
-
-# ---------------------------------------------------------------------------
-# Windows backend
-# ---------------------------------------------------------------------------
 
 _SAMPLE_AVAILABLE = [
     {
@@ -220,10 +212,6 @@ def test_open_windows_update_settings():
             assert open_windows_update_settings() is True
 
 
-# ---------------------------------------------------------------------------
-# Linux backend
-# ---------------------------------------------------------------------------
-
 _APT_DRY_RUN = (
     "Reading package lists...\n"
     "Inst linux-image-generic [6.8.0-31] (6.8.0-40 Ubuntu:24.04/noble-security [amd64])\n"
@@ -233,15 +221,14 @@ _APT_DRY_RUN = (
 
 
 def test_check_updates_linux_apt():
+    # The apt query itself lives in package_managers; both update views share it.
     with force_platform("linux"):
         with patch.object(
             updates_linux.shutil,
             "which",
             side_effect=lambda t: "/usr/bin/apt-get" if t == "apt-get" else None,
         ):
-            with patch.object(
-                updates_linux, "run_command", return_value={"stdout": _APT_DRY_RUN, "returncode": 0}
-            ):
+            with patch.object(package_managers, "_run", return_value=(0, _APT_DRY_RUN, "")):
                 with patch.object(updates_linux.os.path, "isfile", return_value=False):
                     with patch.object(updates_linux.os.path, "exists", return_value=False):
                         report = check_system_updates(include_history=True)
@@ -331,11 +318,6 @@ def test_install_updates_linux_without_elevation_helper():
     assert "pkexec" in msg
 
 
-# ---------------------------------------------------------------------------
-# Unsupported platform
-# ---------------------------------------------------------------------------
-
-
 def test_unsupported_platform_refuses_gracefully():
     with force_platform("other"):
         assert is_available() is False
@@ -360,3 +342,77 @@ def test_windows_only_alias_refuses_on_linux():
         ok, msg = ensure_windows_update_service_running()
     assert ok is False
     assert "Windows" in msg
+
+
+def test_offline_mode_skips_the_windows_update_scan():
+    """FEAT-15: the COM search reaches Microsoft, so offline mode must not run it."""
+    commands: list[list[str]] = []
+
+    def record(args, **_kwargs):
+        commands.append(list(args))
+        return {"stdout": "", "returncode": 0}
+
+    with force_platform("windows"):
+        with patch.object(updates_windows, "offline_mode", return_value=True):
+            with patch.object(updates_windows, "run_command", side_effect=record):
+                report = check_system_updates(include_history=False)
+
+    assert report.available_updates == []
+    assert "offline mode" in (report.error or "")
+    assert not any("Microsoft.Update.Session" in " ".join(c) for c in commands)
+
+
+def test_offline_mode_skips_the_linux_update_check():
+    def explode(*_args, **_kwargs):
+        raise AssertionError("offline mode must not query a package repository")
+
+    with force_platform("linux"):
+        with patch.object(
+            updates_linux.shutil,
+            "which",
+            side_effect=lambda t: "/usr/bin/apt-get" if t == "apt-get" else None,
+        ):
+            with patch.object(updates_linux, "offline_mode", return_value=True):
+                with patch.object(package_managers, "_run", explode):
+                    with patch.object(updates_linux.os.path, "isfile", return_value=False):
+                        with patch.object(updates_linux.os.path, "exists", return_value=False):
+                            report = check_system_updates(include_history=False)
+
+    assert report.available_updates == []
+    assert "offline mode" in (report.error or "")
+
+
+def test_opening_the_linux_update_gui_does_not_wait_for_it():
+    """XP-05: run_command waited, timed out, killed the GUI, then claimed success."""
+    launched: list[list[str]] = []
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("a GUI launch must not be waited on")
+
+    with patch.object(
+        updates_linux.shutil,
+        "which",
+        side_effect=lambda t: "/usr/bin/gnome-software" if t == "gnome-software" else None,
+    ):
+        with patch.object(updates_linux, "run_command", explode):
+            with patch.object(
+                updates_linux.subprocess, "Popen", side_effect=lambda a, **_k: launched.append(a)
+            ):
+                ok, message = updates_linux.open_settings()
+
+    assert ok is True
+    assert launched == [["gnome-software"]]
+    assert "gnome-software" in message
+
+
+def test_a_failed_gui_launch_is_not_reported_as_success():
+    with patch.object(
+        updates_linux.shutil,
+        "which",
+        side_effect=lambda t: "/usr/bin/gnome-software" if t == "gnome-software" else None,
+    ):
+        with patch.object(updates_linux.subprocess, "Popen", side_effect=OSError("denied")):
+            ok, message = updates_linux.open_settings()
+
+    assert ok is False
+    assert "denied" in message

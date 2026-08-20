@@ -14,7 +14,6 @@ REM ============================================================
 setlocal
 cd /d "%~dp0.."
 
-REM Prefer the project virtualenv, otherwise fall back to system python.
 set "PY=python"
 if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
 
@@ -29,7 +28,7 @@ if errorlevel 1 (
 %PY% -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo [build] PyInstaller not found - installing...
-    %PY% -m pip install pyinstaller
+    %PY% -m pip install -r requirements-build.txt
     if errorlevel 1 (
         echo [build] ERROR: failed to install PyInstaller.
         exit /b 1

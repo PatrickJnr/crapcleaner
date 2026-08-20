@@ -12,7 +12,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
+from crapcleaner.config import offline_mode
 from crapcleaner.utils.format import format_size
+from crapcleaner.utils.logs import get_logger
 from crapcleaner.utils.platform import (
     get_drive_info,
     is_linux,
@@ -21,6 +23,8 @@ from crapcleaner.utils.platform import (
     run_command,
     which,
 )
+
+logger = get_logger("hardware")
 
 
 @dataclass
@@ -124,7 +128,8 @@ def _get_windows_uptime() -> str:
         lib = ctypes.windll.kernel32
         ticks = lib.GetTickCount64()
         return _format_uptime(int(ticks / 1000))
-    except Exception:
+    except Exception as exc:
+        logger.debug("windows uptime probe failed: %s", exc)
         return "N/A"
 
 
@@ -133,7 +138,8 @@ def _get_linux_uptime() -> str:
         with open("/proc/uptime", encoding="utf-8") as fh:
             seconds = int(float(fh.read().split()[0]))
         return _format_uptime(seconds)
-    except Exception:
+    except Exception as exc:
+        logger.debug("linux uptime probe failed: %s", exc)
         return "N/A"
 
 
@@ -141,7 +147,8 @@ def _read_text(path: str) -> str:
     try:
         with open(path, encoding="utf-8") as fh:
             return fh.read().strip()
-    except OSError:
+    except OSError as exc:
+        logger.debug("probe could not read %s: %s", path, exc)
         return ""
 
 
@@ -154,8 +161,8 @@ def _read_key_value_file(path: str, sep: str = ":") -> dict[str, str]:
                     continue
                 key, value = line.split(sep, 1)
                 values[key.strip()] = value.strip()
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.debug("probe could not read %s: %s", path, exc)
     return values
 
 
@@ -183,15 +190,14 @@ def _get_os_specs() -> OsSpec:
                     display_ver, _ = winreg.QueryValueEx(key, "DisplayVersion")
                     build_str, _ = winreg.QueryValueEx(key, "CurrentBuildNumber")
                     build = f"{display_ver} (Build {build_str})"
-                    # Microsoft never changed ProductName for Windows 11, so the
-                    # registry calls it "Windows 10 Pro" on an 11 machine. The
-                    # build number is the only thing that says which it is.
+                    # ProductName still reads "Windows 10" on Windows 11; only the
+                    # build number distinguishes them.
                     if int(build_str) >= 22000 and "Windows 10" in edition:
                         edition = edition.replace("Windows 10", "Windows 11")
-                except (OSError, ValueError):
-                    pass
-        except Exception:
-            pass
+                except (OSError, ValueError) as exc:
+                    logger.debug("windows build number probe failed: %s", exc)
+        except Exception as exc:
+            logger.debug("windows edition probe failed: %s", exc)
     elif is_linux():
         os_release = _read_key_value_file("/etc/os-release", sep="=")
         pretty = os_release.get("PRETTY_NAME", "").strip('"')
@@ -218,9 +224,8 @@ def _get_os_specs() -> OsSpec:
 def os_label() -> str:
     """The operating system as a person would name it, with its architecture.
 
-    `platform.release()` answers "10" on Windows 11, so this goes through the
-    same detection the PC Specs page uses: the registry product name on Windows,
-    `PRETTY_NAME` on Linux.
+    `platform.release()` answers "10" on Windows 11, so this uses the registry
+    product name on Windows and `PRETTY_NAME` on Linux.
     """
     specs = _get_os_specs()
     name = specs.name or f"{platform.system()} {platform.release()}"
@@ -258,8 +263,8 @@ def _get_cpu_specs() -> CpuSpec:
                     cores_logical=cores_logical,
                     max_clock_speed_mhz=clock_speed,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("windows cpu probe failed: %s", exc)
     elif is_linux():
         cpuinfo = _read_key_value_file("/proc/cpuinfo")
         cpu_name = cpuinfo.get("model name") or cpuinfo.get("Hardware") or cpu_name
@@ -330,8 +335,8 @@ def _get_memory_specs() -> MemorySpec:
                     used_bytes=used,
                     percent_used=pct,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("windows memory probe failed: %s", exc)
     elif is_linux():
         meminfo = _read_key_value_file("/proc/meminfo")
         try:
@@ -374,7 +379,6 @@ def _get_windows_gpu_registry() -> list[dict]:
                             continue
 
                         vram = 0
-                        # 1. 64-bit QWORD VRAM
                         for qword_name in (
                             "HardwareInformation.qwMemorySize",
                             "qwMemorySize",
@@ -391,7 +395,6 @@ def _get_windows_gpu_registry() -> list[dict]:
                             except OSError:
                                 pass
 
-                        # 2. 32-bit DWORD fallback if QWORD is not present
                         if not vram:
                             for dword_name in (
                                 "HardwareInformation.MemorySize",
@@ -423,10 +426,11 @@ def _get_windows_gpu_registry() -> list[dict]:
                                 "vram": vram,
                             }
                         )
-                except OSError:
+                except OSError as exc:
+                    logger.debug("gpu registry subkey probe failed: %s", exc)
                     continue
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("gpu registry probe failed: %s", exc)
     return gpus_reg
 
 
@@ -456,10 +460,10 @@ def _get_nvidia_smi_vram() -> dict[str, int]:
                             vram_map[g_name.strip().lower()] = (
                                 int(float(mem_mb.strip())) * 1024 * 1024
                             )
-                        except ValueError:
-                            pass
-        except Exception:
-            pass
+                        except ValueError as exc:
+                            logger.debug("nvidia-smi vram value unreadable: %s", exc)
+        except Exception as exc:
+            logger.debug("nvidia-smi probe failed: %s", exc)
     return vram_map
 
 
@@ -494,8 +498,8 @@ def _get_gpu_specs() -> list[GpuSpec]:
                             "resolution": mode,
                         }
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("wmi gpu probe failed: %s", exc)
 
         # Match WMI and Registry GPUs to obtain true 64-bit VRAM
         matched_reg_indices = set()
@@ -506,7 +510,6 @@ def _get_gpu_specs() -> list[GpuSpec]:
             ram = int(wmi.get("adapter_ram_bytes", 0))
             mode = str(wmi.get("resolution", ""))
 
-            # Try matching with registry for 64-bit qwMemorySize
             best_vram = ram
             for idx, reg in enumerate(reg_gpus):
                 r_lower = str(reg.get("name", "")).lower()
@@ -519,7 +522,6 @@ def _get_gpu_specs() -> list[GpuSpec]:
                         drv = str(reg["driver_version"])
                     break
 
-            # Try matching with nvidia-smi
             for smi_name, smi_bytes in smi_vram.items():
                 if smi_name in w_lower or w_lower in smi_name:
                     if smi_bytes > best_vram or (best_vram >= 4293918720 and smi_bytes > 0):
@@ -535,7 +537,6 @@ def _get_gpu_specs() -> list[GpuSpec]:
                 )
             )
 
-        # Add any registry GPUs that weren't detected via WMI
         for idx, reg in enumerate(reg_gpus):
             if idx not in matched_reg_indices:
                 r_name = reg["name"]
@@ -571,8 +572,8 @@ def _get_gpu_specs() -> list[GpuSpec]:
                                     vram = smi_bytes
                                     break
                             gpus.append(GpuSpec(name=name, adapter_ram_bytes=vram))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("lspci gpu probe failed: %s", exc)
         if not gpus:
             drm_cards = "/sys/class/drm"
             try:
@@ -596,8 +597,8 @@ def _get_gpu_specs() -> list[GpuSpec]:
                                 adapter_ram_bytes=vram,
                             )
                         )
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("drm gpu probe failed: %s", exc)
 
     if not gpus:
         gpus.append(GpuSpec(name="Standard Display Adapter"))
@@ -635,8 +636,8 @@ def _get_drive_specs() -> list[DriveSpec]:
                     percent_used=pct,
                 )
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("drive probe failed for %s: %s", d, exc)
     return drive_specs
 
 
@@ -657,25 +658,25 @@ def _get_motherboard_specs() -> MotherboardSpec:
                 try:
                     mfg_val, _ = winreg.QueryValueEx(key, "BaseBoardManufacturer")
                     mfg = str(mfg_val)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("board manufacturer probe failed: %s", exc)
                 try:
                     prod_val, _ = winreg.QueryValueEx(key, "BaseBoardProduct")
                     prod = str(prod_val)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("board product probe failed: %s", exc)
                 try:
                     bios_val, _ = winreg.QueryValueEx(key, "BIOSVersion")
                     bios_ver = str(bios_val)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("bios version probe failed: %s", exc)
                 try:
                     date_val, _ = winreg.QueryValueEx(key, "BIOSReleaseDate")
                     bios_date = str(date_val)
-                except OSError:
-                    pass
-        except Exception:
-            pass
+                except OSError as exc:
+                    logger.debug("bios release date probe failed: %s", exc)
+        except Exception as exc:
+            logger.debug("motherboard probe failed: %s", exc)
     elif is_linux():
         mfg = _read_text("/sys/class/dmi/id/board_vendor") or _read_text(
             "/sys/class/dmi/id/sys_vendor"
@@ -697,14 +698,15 @@ def _get_motherboard_specs() -> MotherboardSpec:
 def _get_network_specs() -> list[NetworkSpec]:
     adapters: list[NetworkSpec] = []
 
-    # Prefer the stdlib path first. It is fast, cross-platform, and avoids the
-    # PowerShell subprocess crash surface occasionally seen on Windows CI when
-    # this function is called from a Qt worker thread.
+    # stdlib first: PowerShell subprocesses have crashed on Windows CI when this
+    # runs from a Qt worker thread.
     hostname = socket.gethostname()
-    try:
-        ip = socket.gethostbyname(hostname)
-    except Exception:
-        ip = "127.0.0.1"
+    ip = "127.0.0.1"
+    if not offline_mode():
+        try:
+            ip = socket.gethostbyname(hostname)
+        except OSError as exc:
+            logger.debug("hostname resolution probe failed: %s", exc)
     if ip and not ip.startswith("127."):
         adapters.append(
             NetworkSpec(

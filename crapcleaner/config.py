@@ -46,8 +46,7 @@ def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
 
 
 #: Set when a damaged settings file was moved aside, so the UI can say so once.
-#: `excluded_paths` is a safety setting, and losing it silently is the part that
-#: matters - the user has to know their exclusions are no longer in force.
+#: `excluded_paths` is a safety setting; the user must know it is no longer in force.
 _recovery_notice: str | None = None
 
 
@@ -61,9 +60,8 @@ def take_recovery_notice() -> str | None:
 def _quarantine_unreadable_config(path: str, reason: str) -> None:
     """Move a damaged settings file aside instead of overwriting it.
 
-    The next save merges onto whatever load_settings returned, so without this a
-    single bad parse replaced every stored preference - including the user's
-    exclusion list - with defaults, permanently and without a word.
+    The next save merges onto whatever load_settings returned, so without this one
+    bad parse permanently replaces every stored preference - exclusions included.
     """
     global _recovery_notice
     backup = f"{path}.corrupt"
@@ -130,7 +128,7 @@ def save_settings(settings: dict[str, Any]) -> None:
             with open(temp, "w", encoding="utf-8") as fh:
                 fh.write(payload)
 
-            # Resilient atomic replace for Windows with retry backoff against transient file locks
+            # os.replace fails on Windows while an indexer or antivirus holds the file.
             replaced = False
             for attempt in range(8):
                 try:
@@ -141,7 +139,7 @@ def save_settings(settings: dict[str, Any]) -> None:
                     time.sleep(0.015 * (attempt + 1))
 
             if not replaced:
-                # Fallback: direct write if replace is blocked by antivirus or indexer
+                # Still blocked: a non-atomic write beats losing the settings.
                 with open(path, "w", encoding="utf-8") as fh:
                     fh.write(payload)
         finally:
@@ -165,6 +163,11 @@ def save_settings(settings: dict[str, Any]) -> None:
             "exclusion changes apply on next start",
             exc_info=True,
         )
+
+
+def offline_mode() -> bool:
+    """Whether every automatic network call must be skipped."""
+    return bool(load_settings().get("offline_mode", False))
 
 
 def update_settings(**updates) -> dict[str, Any]:

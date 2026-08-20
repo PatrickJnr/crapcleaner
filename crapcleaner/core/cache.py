@@ -1,28 +1,15 @@
 """Scan result cache: reuse directory sizes and finder output within a TTL.
 
-The cache makes repeated scans (including across app restarts) fast by reusing
-prior results instead of re-walking large directory trees. Two kinds of entries
-are stored, both keyed by a serialized identity:
+Two entry kinds, both keyed by a serialized identity: ``dir`` entries hold the
+``(total, count, skipped)`` of a ``compute_dir_size`` call; ``finder`` entries hold
+the paths a category's ``finder`` produced.
 
-* ``dir`` entries - the aggregate ``(total, count, skipped)`` of a
-  ``compute_dir_size`` call, keyed by (path, patterns, recurse, only_files,
-  max_files).
-* ``finder`` entries - the list of paths produced by a category's ``finder``,
-  keyed by the finder function name plus its call arguments.
+An entry is reused only while every scanned root still has its recorded
+(mtime, ctime) pair AND the entry is younger than the TTL. Nested changes that do
+not move a root's timestamps are caught by the TTL alone.
 
-An entry is only reused when every scanned root directory still has the same
-(mtime, ctime) pair as when it was recorded AND the entry is younger than the
-TTL. Direct additions/removals in a scanned root invalidate it immediately;
-deeply nested changes that do not touch a root directory's timestamps are
-bounded by the TTL, so results never stay stale for longer than the TTL.
-
-Groups that are written to continuously (browser caches, Windows Temp) use a
-shorter TTL - see :func:`ttl_for_group` - because a directory's timestamp is not
-a reliable signal for a change one level below it.
-
-The cache is persisted to JSON under the config directory and written
-atomically. It only ever holds display/scan data; cleaning always works from
-live disk state.
+Persisted as JSON under the config directory, written atomically. It holds scan
+data only; cleaning always works from live disk state.
 """
 
 import json
@@ -38,8 +25,8 @@ logger = get_logger("cache")
 
 DEFAULT_TTL = 300.0
 CACHE_FILE = "scan_cache.json"
-#: Upper bound on stored entries. A busy machine records a few thousand directories;
-#: beyond that the oldest are dropped rather than parsed on every start.
+#: Upper bound on stored entries; past it the oldest are dropped rather than
+#: reparsed on every start.
 MAX_CACHE_ENTRIES = 5000
 
 
@@ -68,11 +55,9 @@ def _finder_key(finder, args) -> str | None:
         return None
 
 
-#: Groups whose targets are rewritten while the app is open - a browser writes to
-#: its cache continuously, and Windows writes to Temp. A directory timestamp does
-#: not reliably move when a file changes one level below it (NTFS updates it
-#: lazily), so these entries are given a short life instead of a deeper, and much
-#: more expensive, validity check.
+#: Groups rewritten while the app is open (browser caches, Windows Temp). NTFS
+#: updates a directory timestamp lazily, so a change one level below it is missed:
+#: these entries get a short life instead of a much costlier deep validity check.
 VOLATILE_TTL = 45.0
 _VOLATILE_GROUPS = frozenset({"Browsers", "Windows"})
 
@@ -120,11 +105,9 @@ class ScanCache:
             self._entries = {}
 
     def _prune(self) -> dict[str, Any]:
-        """Entries worth keeping: recent enough to be reusable, and bounded in number.
+        """Entries recent enough to be reusable, bounded in number.
 
-        Nothing used to remove an entry, so every directory ever scanned - including
-        ones since deleted and drives since unplugged - stayed in the file forever and
-        was parsed again on every scan.
+        Without this the file grows without limit and is reparsed on every scan.
         """
         now = time.time()
         keep_age = max(self._ttl * 4, 3600.0)
@@ -144,9 +127,13 @@ class ScanCache:
         with self._lock:
             entries = self._prune()
             self._entries = entries
-        if not entries:
-            return
         try:
+            if not entries:
+                # Leaving the file behind means every start reparses a cache that
+                # pruned to nothing.
+                if os.path.exists(self._path):
+                    os.remove(self._path)
+                return
             os.makedirs(os.path.dirname(self._path), exist_ok=True)
             temp = self._path + ".tmp"
             with open(temp, "w", encoding="utf-8") as fh:

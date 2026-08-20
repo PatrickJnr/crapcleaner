@@ -1,23 +1,21 @@
 """PyInstaller entry point for the frozen CrapCleaner executable.
 
-This used to call `run_gui()` unconditionally and ignore `sys.argv`, so every
-command-line feature the README documents - `--scan`, `--json`, `--cleanup-preview`,
-`--capabilities` - opened the GUI instead when run from the shipped binary. Argument
-handling now goes through `crapcleaner.app.main`, the same dispatcher used by the
-console script and by `python -m crapcleaner`.
+Argument handling goes through `crapcleaner.app.main`, the same dispatcher used by
+the console script and `python -m crapcleaner`; calling `run_gui()` directly here
+made the shipped binary open the GUI for `--scan`, `--json` and every other flag.
 
 Windows builds are windowed, so the frozen process starts with no Python-level
-standard streams even when the shell that launched it handed it pipes. Two things
-have to happen before output can be seen, in this order:
+standard streams even when the shell that launched it handed it pipes. Before any
+output can be seen, in this order:
 
 1. Adopt any standard handles the parent passed. Handle inheritance does not depend
    on the subsystem, so `crapcleaner.exe --scan > out.txt` and `... | findstr` both
    arrive with valid handles that simply have no Python file objects attached.
-2. Failing that, attach to the console the process was launched from and open its
-   streams directly, which covers being run interactively from cmd or PowerShell.
+2. Failing that, attach to the launching console and open its streams directly,
+   which covers being run interactively from cmd or PowerShell.
 
-A binary started from Explorer has neither, and has no arguments either, so the GUI
-path never pays for any of this.
+A binary started from Explorer has neither, and no arguments either, so the GUI path
+never pays for any of this.
 """
 
 import os

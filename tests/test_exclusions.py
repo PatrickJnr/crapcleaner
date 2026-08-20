@@ -18,11 +18,9 @@ def test_is_path_excluded():
         with open(file_path, "w") as f:
             f.write("important data")
 
-        # Not excluded initially
         is_excl, _ = is_path_excluded(file_path, exclusions=[])
         assert not is_excl
 
-        # Excluded when added
         is_excl, reason = is_path_excluded(file_path, exclusions=[subfolder])
         assert is_excl
         assert subfolder in reason
@@ -49,12 +47,10 @@ def test_compute_dir_size_skips_excluded():
         with open(file1, "wb") as f:
             f.write(b"x" * 1024)
 
-        # Normal scan
         total, count, skipped = compute_dir_size(tmpdir)
         assert count == 1
         assert total == 1024
 
-        # With mock exclusion in settings
         from unittest.mock import patch
 
         with patch(

@@ -1,7 +1,7 @@
 """Windows service control, backed by CIM/PowerShell with an sc.exe fallback."""
 
 import json
-import subprocess
+import os
 from typing import TYPE_CHECKING
 
 from crapcleaner.utils.platform import is_admin, run_command
@@ -126,11 +126,9 @@ def list_services() -> list["ServiceItem"]:
     return services
 
 
-#: PowerShell reads the service name from the environment rather than from the command
-#: text. Interpolating it - `-Name '{name}'` - lets a name containing an apostrophe end
-#: the quoted string and append its own commands, which is the pattern this codebase
-#: rejects everywhere else (see `utils.files.reveal_in_file_manager`). The value of an
-#: environment variable is substituted as a single argument and is never re-parsed.
+#: The service name is passed through the environment, never interpolated into the
+#: command text: a name containing an apostrophe would close `-Name '{name}'` and
+#: append its own commands. An environment value is one argument, never re-parsed.
 _PS_BASE = ["powershell", "-NoProfile", "-NonInteractive", "-Command"]
 _NAME_VAR = "CRAPCLEANER_SERVICE_NAME"
 _TYPE_VAR = "CRAPCLEANER_SERVICE_STARTUP"
@@ -250,8 +248,10 @@ def set_startup_type(name: str, startup_type: str) -> tuple[bool, str]:
 
 def open_console() -> tuple[bool, str]:
     """Open the Windows Services management console."""
+    console = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "services.msc")
     try:
-        subprocess.Popen(["services.msc"], shell=True)
+        # A .msc is not executable; the shell association hands it to mmc.exe.
+        os.startfile(console)
         return True, "Opened the Windows Services console."
-    except Exception as exc:
+    except OSError as exc:
         return False, f"Could not open services.msc: {exc}"

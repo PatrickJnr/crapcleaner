@@ -17,8 +17,7 @@ class ScanCategoryResult:
     reclaimable: bool
     errors: list[str] = field(default_factory=list)
     #: True when the scan stopped at the file budget, so `size` is a floor rather
-    #: than a total. Without it the cap was invisible and the cleanup then removed
-    #: more than the scan had promised.
+    #: than a total and the cleanup may remove more than the scan promised.
     truncated: bool = False
 
 
@@ -68,6 +67,16 @@ class CleanupResult:
     dry_run: bool = False
 
 
+@dataclass(frozen=True)
+class RemovedPath:
+    """One entry in a cleanup manifest. A recycled tree is a single entry."""
+
+    path: str
+    size: int
+    recycled: bool
+    file_count: int = 1
+
+
 @dataclass
 class CleanupReport:
     started: datetime
@@ -76,6 +85,10 @@ class CleanupReport:
     use_recycle_bin: bool = False
     results: list[CleanupResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    manifest_path: str = ""
+    #: Deliberately absent from `to_dict`, which feeds exports and `--json`: these are
+    #: the user's own file paths and belong only in the manifest.
+    removed: list[RemovedPath] = field(default_factory=list, repr=False)
 
     @property
     def total_files_deleted(self) -> int:

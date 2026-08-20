@@ -1,18 +1,12 @@
 """Sub-command surface for the command line.
 
-`crapcleaner` grew about thirty-five top-level flags and one long if-chain, so
-adding a command meant editing three places and forgetting the third made the new
-flag silently open the GUI instead.
-
-Commands are declared here as data and translated into the flags the existing
-dispatcher already understands, so the behaviour of every documented flag is
-unchanged and both spellings work:
+Commands are declared here as data and translated into the legacy flags the
+dispatcher already understands, so both spellings keep working:
 
     crapcleaner scan --json
     crapcleaner --scan --json          # still fine
 
-`crapcleaner <command> --help` describes one command instead of listing all of
-them, which is the practical difference for anyone using it.
+`crapcleaner <command> --help` then describes one command rather than all of them.
 """
 
 from __future__ import annotations
@@ -58,6 +52,13 @@ _OPTION_GROUPS: dict[str, tuple[tuple[tuple[str, ...], dict], ...]] = {
         ),
     ),
     "root": ((("--root",), {"metavar": "PATH", "help": "Directory to scan."}),),
+    "output": ((("--output",), {"metavar": "FILE", "help": "Where to write it."}),),
+    "manifest": (
+        (
+            ("--manifest",),
+            {"metavar": "RUN", "help": "List what one run removed (position or timestamp)."},
+        ),
+    ),
     "schedule": (
         (("--at",), {"metavar": "HH:MM", "help": "Time of day to run."}),
         (("--frequency",), {"choices": ("daily", "weekly"), "help": "How often to run."}),
@@ -169,7 +170,18 @@ COMMANDS: tuple[Command, ...] = (
         "capabilities", "--capabilities", "What this operating system supports.", options=("json",)
     ),
     Command("protected-paths", "--protected-paths", "The active safety rules.", options=("json",)),
-    Command("history", "--history", "Recent scan and cleanup history.", options=("json",)),
+    Command(
+        "history",
+        "--history",
+        "Recent scan and cleanup history.",
+        options=("json", "export", "manifest"),
+    ),
+    Command(
+        "diagnostics",
+        "--diagnostics",
+        "Write a diagnostics bundle for a bug report.",
+        options=("json", "output"),
+    ),
     Command(
         "schedule",
         "--schedule",
@@ -207,7 +219,7 @@ def is_command(token: str) -> bool:
 
 
 def build_command_parser() -> argparse.ArgumentParser:
-    """A parser whose help lists the commands rather than thirty-five flags."""
+    """A parser whose help lists the commands rather than every legacy flag."""
     from crapcleaner import __version__
 
     parser = argparse.ArgumentParser(
@@ -225,7 +237,6 @@ def build_command_parser() -> argparse.ArgumentParser:
         for group in command.options:
             for flags, options in _OPTION_GROUPS[group]:
                 sub.add_argument(*flags, **options)
-        # Available everywhere, because a log path and a quiet run always make sense.
         sub.add_argument("--verbose", action="store_true", help="Write debug detail to the log.")
         sub.add_argument("--quiet", action="store_true", help="Suppress non-essential output.")
     return parser

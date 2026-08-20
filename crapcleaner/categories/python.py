@@ -27,8 +27,7 @@ SKIP_DIRS = {
     "site-packages",
 }
 
-# Lowercased once so the per-directory skip check is a single frozenset
-# membership test instead of rebuilding the set for every visited directory.
+# Lowercased once; the skip check runs for every directory visited.
 _SKIP_LOWER = frozenset(s.lower() for s in SKIP_DIRS)
 
 
@@ -47,16 +46,14 @@ def _walk_one(root: str, max_dirs: int):
             if visited > max_dirs:
                 break
             visited += 1
-            # walk_safe never lists a symlink or junction among the directories,
-            # so no per-entry link check is needed here.
+            # walk_safe already excludes symlinks and junctions.
             dirnames[:] = [d for d in dirnames if d in TOOL_CACHE_DIRS or not _is_skipped_dir(d)]
             yield dirpath, dirnames, filenames
     except OSError:
         return
 
 
-#: Per-project caches written by Python tooling. Each is rebuilt from the project's
-#: own sources on the next run, and none of them holds anything the project needs.
+#: Per-project tool caches, each rebuilt from the project's own sources on next run.
 TOOL_CACHE_DIRS = frozenset({".ruff_cache", ".mypy_cache", ".pytest_cache", ".tox"})
 
 _ARTIFACT_KINDS = 5
@@ -66,10 +63,8 @@ _ARTIFACT_KINDS = 5
 def _python_artifacts(roots: tuple, max_dirs: int = 50000) -> tuple:
     """Walk every root once and collect every Python artifact type.
 
-    The finder categories previously walked the same roots independently, so a
-    full-drive scan re-traversed the tree once per category. This merges those
-    traversals into a single walk (parallelized across roots) and caches the
-    result per (roots, max_dirs) for the duration of a scan.
+    One walk shared by all finder categories; a per-category walk re-traversed the
+    whole tree once per category on a full-drive scan.
     """
     results: dict[str, tuple[list[str], ...]] = {
         root: tuple([] for _ in range(_ARTIFACT_KINDS)) for root in roots
@@ -180,6 +175,10 @@ def get_categories(
             group="Python",
             description="Downloaded package wheels cached by pip. Re-downloaded when needed; frees space and speeds nothing until you install again.",
             safety_level=SafetyLevel.SAFE,
+            what_it_contains="Wheels and source archives pip downloaded from PyPI, plus the wheels pip built locally from source distributions.",
+            why_it_grows="pip keeps a copy of everything it fetches so repeat installs skip the download, and it never expires old versions.",
+            why_safe_to_delete="Installed packages and virtual environments are not touched - only pip's download copies. The next install fetches from the network again, and any package that has no wheel is recompiled from source, so an offline machine cannot reinstall what it has forgotten.",
+            regeneration_behavior="The cache refills as you install; the first install of each package is slower.",
             targets=[CacheTarget(path=os.path.join(local, "pip", "cache"))],
         )
     )
@@ -191,6 +190,10 @@ def get_categories(
             group="Python",
             description="Package cache maintained by uv (the fast Python package manager). Re-downloaded on demand.",
             safety_level=SafetyLevel.SAFE,
+            what_it_contains="Wheels, source distributions, and the built-wheel and resolution metadata uv stores between runs.",
+            why_it_grows="uv caches every distribution it resolves so later installs are near-instant, keeping each version it has seen.",
+            why_safe_to_delete="Existing environments keep working: uv links packages into them, so removing the cached copy does not remove the installed files. New installs and resolutions have to reach the network again instead of being served locally.",
+            regeneration_behavior="uv refills the cache on the next sync, resolve, or install.",
             targets=[CacheTarget(path=os.path.join(local, "uv", "cache"))],
         )
     )
@@ -202,7 +205,14 @@ def get_categories(
             group="Python",
             description="Wheel cache used by Poetry. Re-downloaded on demand.",
             safety_level=SafetyLevel.SAFE,
-            targets=[CacheTarget(path=os.path.join(local, "pypoetry", "Cache"))],
+            what_it_contains="Poetry's downloaded wheels and sdists and its cached package metadata.",
+            why_it_grows="Every project Poetry manages adds its downloads.",
+            why_safe_to_delete="Project files, pyproject.toml and lock files are untouched, and cached downloads are re-fetched from PyPI. Poetry keeps project virtual environments under the same cache root, and virtualenvs is deliberately not targeted, so no project environment is destroyed.",
+            regeneration_behavior="Poetry re-downloads packages on the next install; existing environments keep working.",
+            targets=[
+                CacheTarget(path=os.path.join(local, "pypoetry", "Cache", "cache")),
+                CacheTarget(path=os.path.join(local, "pypoetry", "Cache", "artifacts")),
+            ],
         )
     )
 
@@ -213,6 +223,10 @@ def get_categories(
             group="Python",
             description="Package download cache managed by Conda/Mamba. Only the download cache is targeted - installed environments are left untouched.",
             safety_level=SafetyLevel.SAFE,
+            what_it_contains="The channel index (repodata) and notice caches conda and mamba keep, under .conda/pkgs/cache and .cache/conda.",
+            why_it_grows="Every channel conda queries leaves a copy of its index, and each refresh writes another.",
+            why_safe_to_delete="Environments and the extracted packages in the pkgs directory are not targeted, so nothing you have installed stops working. This cache is shared by every environment on the machine rather than one project, so the next install, update, or search in any of them re-downloads channel data before it can solve.",
+            regeneration_behavior="conda re-fetches channel index data on the next command that needs it; that first command is noticeably slower.",
             targets=[
                 CacheTarget(path=os.path.join(user_profile, ".conda", "pkgs", "cache")),
                 CacheTarget(path=os.path.join(user_profile, ".cache", "conda")),
@@ -227,6 +241,10 @@ def get_categories(
             group="Python",
             description="Compiled bytecode folders created by Python. Recreated automatically; never contains source code.",
             safety_level=SafetyLevel.SAFE,
+            what_it_contains="__pycache__ folders inside the projects under your scan roots, holding the .pyc bytecode Python compiled from the .py files beside them.",
+            why_it_grows="Python writes bytecode for every module it imports, once per interpreter version, and leaves it behind when the source is moved or deleted.",
+            why_safe_to_delete="Only compiled bytecode is removed; the .py sources it was generated from stay exactly where they are, and the scan skips virtual environments and site-packages so installed libraries are not disturbed. Python recompiles a module the first time it is imported again.",
+            regeneration_behavior="The first import after cleaning is marginally slower while Python rewrites the bytecode.",
             finder=find_pycache_dirs,
             finder_args=(scan_roots,),
         )
@@ -239,6 +257,10 @@ def get_categories(
             group="Python",
             description="Orphaned compiled Python files outside __pycache__ folders. Regenerated by Python as needed.",
             safety_level=SafetyLevel.SAFE,
+            what_it_contains="Loose .pyc bytecode files sitting next to source instead of in a __pycache__ folder, the layout Python 2 and older tooling used.",
+            why_it_grows="They are written beside the module and left behind when the .py file is renamed, moved, or deleted.",
+            why_safe_to_delete="No .py file is ever removed, and any .pyc with its source still beside it is rebuilt on the next import. The exception worth checking: a folder that ships .pyc files with no .py at all is a sourceless deployment, and removing those does delete the only copy of that code.",
+            regeneration_behavior="Python recreates bytecode on import, in __pycache__ rather than beside the source.",
             finder=find_pyc_files,
             finder_args=(scan_roots,),
         )
@@ -251,6 +273,10 @@ def get_categories(
             group="Python",
             description="Metadata folders left behind by older Python packaging tooling. Safe to remove; regenerated on build.",
             safety_level=SafetyLevel.REVIEW,
+            what_it_contains=".egg-info folders setuptools generates beside a project's setup.py or pyproject.toml, listing its name, version, and entry points.",
+            why_it_grows="Every build or editable install regenerates one, and they stay in the project tree afterwards.",
+            why_safe_to_delete="Only generated packaging metadata is removed; setup.py, pyproject.toml, and the package source are untouched, and the folder is rebuilt by the next build. One case is not free: a project installed in editable mode by older setuptools resolves its metadata and entry points through this folder, so re-run 'pip install -e .' for those projects.",
+            regeneration_behavior="Recreated the next time the project is built or installed.",
             finder=find_egg_info_dirs,
             finder_args=(scan_roots,),
         )
@@ -284,6 +310,10 @@ def get_categories(
             group="Python",
             description="'build' output directories from Python packaging projects (detected via pyproject.toml / setup.py presence). Regenerated on the next build.",
             safety_level=SafetyLevel.REVIEW,
+            what_it_contains="The 'build' directory of Python packaging projects - the staged copies of your modules and the intermediate object files from compiled extensions.",
+            why_it_grows="Each wheel or sdist build stages another copy there and nothing clears it between builds.",
+            why_safe_to_delete="Everything inside is generated from the project's own sources, which are not touched, and nothing imports from it at runtime. Only a folder named 'build' next to a pyproject.toml, setup.py, setup.cfg, or .egg-info is offered, but if a project of yours keeps hand-written files in a folder by that name, review the list before cleaning.",
+            regeneration_behavior="The next build recreates it, recompiling C extensions from scratch instead of reusing the previous objects.",
             finder=find_build_dirs,
             finder_args=(scan_roots,),
         )
@@ -315,7 +345,6 @@ def _merge_scan_roots(configured: list[str]) -> list[str]:
 
 
 def _merge_all_drives(roots: list[str]) -> list[str]:
-    """Append every drive root so the finders search all drives."""
     merged = list(roots)
     for drive in list_drives():
         if drive not in merged:

@@ -22,6 +22,11 @@ def extract_changelog(
 
     Returns:
         Extracted markdown string for the release notes.
+
+    Raises:
+        LookupError: The changelog exists but documents no such version. Falling back
+            to the topmost section here published the newest release's notes under an
+            older tag, which is worse than publishing nothing.
     """
     path = Path(changelog_path)
     if not path.is_file():
@@ -30,16 +35,14 @@ def extract_changelog(
     content = path.read_text(encoding="utf-8")
 
     if version:
-        # Normalize version string: remove refs/tags/ and leading v
         clean_ver = version.replace("refs/tags/", "").lstrip("v").strip()
         pattern = rf"##\s*\[{re.escape(clean_ver)}\][^\n]*\n(.*?)(?=\n##\s*\[|\Z)"
         match = re.search(pattern, content, re.DOTALL)
-        if match:
-            body = match.group(1).strip()
-            body = re.sub(r"\n---\s*$", "", body).strip()
-            return body
+        if match is None:
+            raise LookupError(f"{path}: no '## [{clean_ver}]' section")
+        body = match.group(1).strip()
+        return re.sub(r"\n---\s*$", "", body).strip()
 
-    # Fallback: extract the first/latest release section
     first_match = re.search(r"##\s*\[[^\]]+\][^\n]*\n(.*?)(?=\n##\s*\[|\Z)", content, re.DOTALL)
     if first_match:
         body = first_match.group(1).strip()
@@ -75,9 +78,8 @@ def extract_release_title(
     if not notes:
         return tag_label
 
-    # The summary paragraph preceding the first markdown sub-heading. Joined
-    # before it is cut: taking the first physical line means a hard-wrapped
-    # paragraph is truncated at the wrap, mid-sentence.
+    # Joined before it is cut: taking the first physical line truncates a
+    # hard-wrapped paragraph mid-sentence.
     first_block = notes.split("###")[0].strip()
     paragraph = " ".join(
         line.strip()
@@ -91,9 +93,8 @@ def extract_release_title(
     return f"{tag_label}: {summarise(paragraph)}"
 
 
-#: Every release from v1.0.0 to v1.1.0 has a title of 38 to 63 characters. This
-#: keeps a generated one in that range: a summary longer than this is a sign the
-#: CHANGELOG's opening sentence is doing too much, and the ellipsis says so.
+#: Releases v1.0.0 to v1.1.0 all title in 38-63 characters. A longer summary means
+#: the CHANGELOG's opening sentence is doing too much, and the ellipsis says so.
 TITLE_LIMIT = 64
 
 
@@ -111,7 +112,7 @@ def summarise(paragraph: str, limit: int = TITLE_LIMIT) -> str:
     return (cut[:boundary] if boundary > 0 else sentence[:limit]).rstrip(",;:") + "\u2026"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Extract release notes and title for a version from CHANGELOG.md."
     )
@@ -145,12 +146,17 @@ def main() -> int:
         help="Print the formatted release title instead of the release notes.",
     )
 
-    args = parser.parse_args()
-    notes = extract_changelog(args.version, args.changelog)
+    args = parser.parse_args(argv)
+    try:
+        notes = extract_changelog(args.version, args.changelog)
+    except LookupError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
     title = extract_release_title(args.version, args.changelog)
 
     if not notes:
-        sys.stderr.write(f"Warning: No changelog section found for version '{args.version}'\n")
+        sys.stderr.write(f"error: no changelog notes for version '{args.version}'\n")
+        return 1
 
     if args.title_output:
         Path(args.title_output).write_text(title, encoding="utf-8")

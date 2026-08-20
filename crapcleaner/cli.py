@@ -310,6 +310,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="List crash dumps and kernel memory dumps, grouped by application.",
     )
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Write a diagnostics bundle for a bug report (see --output).",
+    )
+    parser.add_argument(
+        "--manifest",
+        metavar="RUN",
+        help=(
+            "With --history, list what one run removed. RUN is its position from the "
+            "newest (1, 2, ...) or part of its timestamp."
+        ),
+    )
     return parser
 
 
@@ -602,6 +615,7 @@ def run(argv: list[str] | None = None) -> int:
             args.schedule,
             args.scheduled_scan,
             args.update,
+            args.diagnostics,
         )
     ):
         from crapcleaner.gui.app import run_gui
@@ -618,7 +632,12 @@ def run(argv: list[str] | None = None) -> int:
             can_self_update,
             download_update,
         )
-        from crapcleaner.utils.updater import check_for_updates
+        from crapcleaner.utils.updater import check_for_updates, offline_skip_reason
+
+        blocked = offline_skip_reason()
+        if blocked:
+            print(blocked, file=sys.stderr)
+            return 1
 
         release = check_for_updates(timeout_seconds=10.0)
         if release is None:
@@ -882,7 +901,11 @@ def run(argv: list[str] | None = None) -> int:
             index_out=storage_index,
         )
         storage_sizes = sizes_from_index(storage_index)
-        comparison = compare_snapshots(target_path, storage_sizes) if args.compare else None
+        comparison = (
+            compare_snapshots(target_path, storage_sizes, size_mode=size_mode)
+            if args.compare
+            else None
+        )
         save_snapshot(target_path, storage_sizes, size_mode=size_mode)
 
         if args.compare:
@@ -1025,6 +1048,8 @@ def run(argv: list[str] | None = None) -> int:
         from crapcleaner.history import load as load_hist
 
         records = load_hist()
+        if args.manifest:
+            return _print_manifest(records, args.manifest, args.json)
         if args.export:
             export_report(
                 records, report_type="history", export_format=args.export, output_path=args.output
@@ -1359,6 +1384,19 @@ def run(argv: list[str] | None = None) -> int:
             append(HistoryEntry.from_report(cleanup_report))
         return 0
 
+    if args.diagnostics:
+        from crapcleaner.config import config_dir
+        from crapcleaner.system.diagnostics import write_diagnostics_bundle
+
+        destination = args.output or os.path.join(config_dir(), "crapcleaner-diagnostics.txt")
+        try:
+            written = write_diagnostics_bundle(destination)
+        except OSError as exc:
+            print(f"error: could not write the diagnostics bundle: {exc}", file=sys.stderr)
+            return 1
+        print(f"Diagnostics written to {written}")
+        return 0
+
     if args.capabilities:
         return _run_capabilities(args)
 
@@ -1372,6 +1410,40 @@ def run(argv: list[str] | None = None) -> int:
         return _run_system_updates(args)
 
     parser.print_help()
+    return 0
+
+
+def _find_run(records: list, run: str):
+    """A run named by position from the newest (1, 2, ...), or by part of its timestamp."""
+    if run.isdigit() and 1 <= int(run) <= len(records):
+        return records[-int(run)]
+    return next((e for e in reversed(records) if run in e.started.isoformat()), None)
+
+
+def _print_manifest(records: list, run: str, as_json: bool) -> int:
+    """List what one recorded run removed, from the manifest that run wrote."""
+    from crapcleaner.core.manifest import read_manifest
+
+    entry = _find_run(records, run)
+    if entry is None:
+        print(f"No history entry matches {run!r}.", file=sys.stderr)
+        return 1
+    manifest = read_manifest(getattr(entry, "manifest_path", "") or "")
+    if not manifest:
+        print(
+            f"The run of {format_datetime(entry.started)} kept no manifest.",
+            file=sys.stderr,
+        )
+        return 1
+    if as_json:
+        print(json.dumps(manifest, indent=2))
+        return 0
+    items = manifest.get("items", [])
+    print(f"Removed by the run of {format_datetime(entry.started)} ({len(items)} items):")
+    for item in items:
+        print(f"  {format_size(item.get('size', 0)):>10}  {item.get('path', '')}")
+    if manifest.get("truncated"):
+        print("  (the run removed more than the manifest could record)")
     return 0
 
 

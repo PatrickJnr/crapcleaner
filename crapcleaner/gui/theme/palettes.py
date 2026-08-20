@@ -59,7 +59,6 @@ REQUIRED_TOKENS = [
     "window",
 ]
 
-#: Qt stylesheets take hex or rgb()/rgba(), and the soft accent tokens use rgba.
 #: Category ids the gallery has a filter chip for. A theme naming anything else
 #: is filed under the closest thing that exists, so it stays reachable.
 THEME_CATEGORIES = {
@@ -73,10 +72,8 @@ THEME_CATEGORIES = {
 }
 
 DEFAULT_CATEGORY = "modern-dark"
-#: Every theme this project ships. Membership decides whether a theme is ours, so a
-#: file dropped into any theme directory is the user's regardless of where it sits or
-#: what its `category` says - which is what puts it in Custom, and what makes Edit and
-#: Delete safe to offer for it.
+#: Every theme this project ships. Membership, not location or `category`, decides
+#: whether a theme is ours - which is what makes Edit and Delete safe to offer.
 BUILTIN_THEME_IDS: frozenset[str] = frozenset(
     (
         "adwaita-dark",
@@ -130,6 +127,7 @@ BUILTIN_THEME_IDS: frozenset[str] = frozenset(
 USER_CATEGORY = "custom"
 
 
+#: Qt stylesheets take hex or rgb()/rgba(), and the soft accent tokens use rgba.
 _COLOR = re.compile(
     r"^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})"
     r"|rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*[0-9.]+\s*)?\))$"
@@ -192,12 +190,10 @@ def _load_dir(directory: str, source: str) -> list[dict]:
         is_builtin = name in BUILTIN_THEME_IDS
         category = str(data.get("category") or "")
         if not is_builtin:
-            # Someone else's theme goes in Custom whatever the file says, so it is
-            # always somewhere the user can find it.
+            # Custom whatever the file says, so the user can always find it.
             category = USER_CATEGORY
         elif category not in THEME_CATEGORIES:
-            # An unknown category has no filter chip, which would leave the theme
-            # loaded but unreachable in the gallery.
+            # No filter chip exists for it, so it would load but be unreachable.
             logger.info(
                 "Theme %r asks for the unknown category %r; filing it under %s",
                 name,
@@ -213,8 +209,7 @@ def _load_dir(directory: str, source: str) -> list[dict]:
                 "description": str(data.get("description") or ""),
                 "order": data.get("order") if isinstance(data.get("order"), int) else 10_000,
                 "colors": colors,
-                # Ours or theirs, and the file it came from - a dropped-in theme can
-                # be shown or removed wherever it lives.
+                # Lets a dropped-in theme be shown or removed wherever it lives.
                 "source": "bundled" if is_builtin else "user",
                 "path": path,
             }
@@ -248,15 +243,14 @@ THEME_SOURCES: dict[str, str] = {t["id"]: t["source"] for t in _THEMES}
 THEME_PATHS: dict[str, str] = {t["id"]: t["path"] for t in _THEMES}
 
 
-#: Fallback palette, used when a theme name is unknown. Kept as one object for the
-#: life of the process so a reload cannot leave a stale reference behind.
+#: Fallback for an unknown theme name. One object for the life of the process, so a
+#: reload cannot leave a stale reference behind.
 DARK: dict[str, str] = dict(PALETTES.get("dark") or next(iter(PALETTES.values()), {}))
 if "dark" in PALETTES:
     PALETTES["dark"] = DARK
 
-#: Theme ids in display order. A list rather than a tuple so a reload can update it
-#: in place: modules import this name once, and rebinding it would leave them
-#: looking at the themes that existed when they were imported.
+#: Theme ids in display order. A list so a reload can update it in place: importers
+#: bind this name once, and rebinding it would strand them on the old themes.
 THEMES: list[str] = list(PALETTES)
 
 
@@ -289,6 +283,7 @@ def reload_themes() -> None:
     DARK.update(replacement)
     PALETTES["dark"] = DARK if "dark" in PALETTES else PALETTES.get("dark", DARK)
     _accessible_cache.clear()
+    _high_contrast_cache.clear()
 
 
 def slugify(label: str) -> str:
@@ -435,22 +430,24 @@ def invalidate_custom_theme_cache() -> None:
     """Clear the cached custom palette so the next lookup regenerates it."""
     global _custom_palette_cache
     _custom_palette_cache.clear()
+    _high_contrast_cache.pop("custom", None)
 
 
-#: Text roles and the backgrounds the stylesheet actually draws them on. Cards use
-#: `panel` and switch to `elevated` on hover; tables and headers use `surface` and
-#: `surface2`; the window itself uses `window`. Only pairs that really appear
-#: together are enforced - checking every colour against every other would flag
-#: combinations the interface never renders.
+#: Backgrounds the stylesheet really draws text on: cards use `panel` and `elevated`
+#: on hover, tables and headers `surface` and `surface2`, the window `window`. Only
+#: pairs that actually appear together are enforced; checking every colour against
+#: every other would flag combinations the interface never renders.
 _TEXT_ROLES = ("text", "muted")
 _TEXT_BACKGROUNDS = ("window", "panel", "surface", "surface2", "elevated")
 
 #: WCAG 2.1 AA for body text.
 MIN_TEXT_CONTRAST = 4.5
 
-#: Palettes that may keep a text colour below AA, with the reason. Nothing is listed
-#: today; an entry here is a deliberate, reviewed exception, not a way to silence the
-#: test.
+#: WCAG 2.1 AAA, the ratio the high-contrast setting holds every theme to.
+HIGH_CONTRAST_RATIO = 7.0
+
+#: Palettes allowed below AA, with the reason. An entry is a reviewed exception, not
+#: a way to silence the test.
 CONTRAST_EXEMPTIONS: dict[str, str] = {}
 
 _BADGE_ROLES = ("accent", "success", "warning", "danger", "info", "review")
@@ -461,11 +458,9 @@ _accessible_cache: dict[str, dict] = {}
 def derive_ink(palette: dict) -> dict:
     """Add the label colours the interface draws but no theme file sets.
 
-    Two of them: the text on a coloured button, and the text on a soft badge.
-    Both used to be hard-coded - white on the button, the role's own colour on a
-    fifteen-percent tint of itself - and both are unreadable on a good half of the
-    themes we ship. Deriving them from what they sit on settles it once, for every
-    theme, instead of asking each theme to work around a constant.
+    The text on a coloured button and the text on a soft badge. Hard-coding them
+    (white, and the role's own colour on a 15% tint of itself) was unreadable on
+    half the themes we ship; deriving from what they sit on settles it for all.
 
     Idempotent: a palette that already carries a token keeps it.
     """
@@ -510,10 +505,8 @@ def _readable_over(foreground: str, backgrounds: list[str], min_ratio: float) ->
 
     hue, saturation, lightness = hex_to_hsl(foreground)
     nearest: tuple[float, str] | None = None
-    # Some palettes draw text on backgrounds too far apart for any one lightness
-    # to clear them all. Rather than leave it unreadable, take whatever reads
-    # best - which is what the previous fallback to white amounted to, chosen
-    # deliberately instead of by accident.
+    # Some palettes span backgrounds too far apart for any one lightness to clear
+    # them all; take whatever reads best rather than leaving text unreadable.
     fallback: tuple[float, str] | None = None
 
     def rate(candidate: str) -> float:
@@ -545,10 +538,9 @@ def _readable_over(foreground: str, backgrounds: list[str], min_ratio: float) ->
 def _with_accessible_text(name: str, palette: dict) -> dict:
     """Raise text colours that fall below AA on a background they are drawn on.
 
-    `color_engine.ensure_contrast` was already applied to generated custom themes
-    while the 44 built-in palettes were exempt from it - on `commodore-64`, hovering
-    a card left its secondary text at 1.21:1, which is invisible. Only the text
-    colour moves: the accent, surfaces and borders that give a palette its identity
+    The built-in palettes were exempt from the correction generated themes got:
+    on `commodore-64`, hovering a card left its secondary text at 1.21:1. Only the
+    text moves - the accent, surfaces and borders that give a palette its identity
     are untouched.
     """
     palette = derive_ink(palette)
@@ -581,11 +573,73 @@ def accessible_palette(name: str, palette: dict) -> dict:
     return cached
 
 
+_high_contrast_cache: dict[str, dict] = {}
+_high_contrast_mode: bool | None = None
+
+
+def high_contrast() -> bool:
+    """Whether the stricter contrast pass is on. Read once, then held in memory.
+
+    `palette_for` is on the path of every colour lookup in the interface, so it
+    cannot afford to re-read the settings file each time.
+    """
+    global _high_contrast_mode
+    if _high_contrast_mode is None:
+        from crapcleaner.config import load_settings
+
+        _high_contrast_mode = bool(load_settings().get("high_contrast", False))
+    return _high_contrast_mode
+
+
+def set_high_contrast(enabled: bool) -> None:
+    """Publish a change to the setting; the next palette lookup reflects it."""
+    global _high_contrast_mode
+    _high_contrast_mode = bool(enabled)
+    _high_contrast_cache.clear()
+
+
+def _at_ratio(palette: dict, min_ratio: float) -> dict:
+    """Every label colour in `palette` raised to `min_ratio` against its backdrop.
+
+    The derivation-time pass only runs when a palette is built, which leaves the 43
+    shipped themes at whatever their JSON declares. This runs on the active palette
+    instead, so the setting applies to every theme rather than to one.
+    """
+    from crapcleaner.gui.color_engine import flatten_alpha
+
+    raised = dict(palette)
+    backgrounds = [palette[key] for key in _TEXT_BACKGROUNDS if palette.get(key)]
+    if backgrounds:
+        for role in (*_TEXT_ROLES, "faint"):
+            if palette.get(role):
+                raised[role] = _readable_over(palette[role], backgrounds, min_ratio)
+
+    card = palette.get("surface", "#202020")
+    behind_ink = [("on_accent", palette.get("accent")), ("on_danger", palette.get("danger"))]
+    for role in _BADGE_ROLES:
+        tint = palette.get(f"{role}_soft")
+        behind_ink.append((f"on_{role}_soft", flatten_alpha(tint, card) if tint else None))
+    for token, behind in behind_ink:
+        if palette.get(token) and behind:
+            # Not ensure_contrast: an accent no ink can clear at this ratio should
+            # still get the best reading colour, not be left where it was.
+            raised[token] = _readable_over(palette[token], [behind], min_ratio)
+    return raised
+
+
 def palette_for(theme: str) -> dict:
     if theme == "custom":
         # Custom palettes are generated through ensure_contrast already.
-        return get_custom_theme_palette()
-    return accessible_palette(theme, PALETTES.get(theme, DARK))
+        palette = get_custom_theme_palette()
+    else:
+        palette = accessible_palette(theme, PALETTES.get(theme, DARK))
+    if not high_contrast():
+        return palette
+    strict = _high_contrast_cache.get(theme)
+    if strict is None:
+        strict = _at_ratio(palette, HIGH_CONTRAST_RATIO)
+        _high_contrast_cache[theme] = strict
+    return strict
 
 
 def theme_label(theme: str) -> str:

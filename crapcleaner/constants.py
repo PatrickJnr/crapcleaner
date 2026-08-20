@@ -2,7 +2,7 @@
 
 APP_NAME = "CrapCleaner"
 APP_DISPLAY_NAME = "CrapCleaner"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 COMPANY_NAME = "CrapCleaner"
 APP_URL = "https://github.com/PatrickJnr/crapcleaner"
 
@@ -30,16 +30,13 @@ DEFAULT_CONFIG = {
     "disabled_categories": [],
     "excluded_paths": [],
     "auto_rescan_after_cleanup": True,
+    "offline_mode": False,
     "show_command_preview": True,
     "reduce_motion": False,
+    "high_contrast": False,
     "window_geometry": "",
     "storage_favorites": [],
     "last_scan_snapshot": {},
-    # "notify" tells you and stops there; "download" fetches and verifies the new
-    # release and then asks; "install" applies it and restarts. Never silent: an
-    # update always ends with the user being told what happened.
-    "update_policy": "notify",
-    "update_check_on_start": False,
     "schedule": {
         "enabled": False,
         "at": "18:00",

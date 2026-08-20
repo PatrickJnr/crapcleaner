@@ -1,11 +1,15 @@
 """Custom dialogs for the CrapCleaner GUI."""
 
+import os
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -23,6 +27,40 @@ from PySide6.QtWidgets import (
 
 from crapcleaner.models.category import CleanupCategory
 from crapcleaner.utils.format import format_size
+
+#: Rule id to the label shown for it. Also the order they are offered in.
+KEEP_RULES: dict[str, str] = {
+    "first": "Keep First",
+    "oldest": "Keep Oldest",
+    "newest": "Keep Newest",
+    "shortest": "Keep Shortest Path",
+    "folder": "Keep the copy in a chosen folder",
+}
+
+
+def _mtime(path: str, missing: float) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return missing
+
+
+def keep_index(paths: list[str], rule: str, folder: str = "") -> int:
+    """Which copy in `paths` a keep rule spares. Always a real index."""
+    if not paths:
+        return -1
+    if rule == "oldest":
+        return min(range(len(paths)), key=lambda i: _mtime(paths[i], float("inf")))
+    if rule == "newest":
+        return max(range(len(paths)), key=lambda i: _mtime(paths[i], float("-inf")))
+    if rule == "shortest":
+        return min(range(len(paths)), key=lambda i: len(paths[i]))
+    if rule == "folder" and folder:
+        prefix = os.path.normcase(os.path.abspath(folder))
+        for index, path in enumerate(paths):
+            if os.path.normcase(os.path.abspath(path)).startswith(prefix):
+                return index
+    return 0
 
 
 class DuplicateFilesDialog(QDialog):
@@ -56,31 +94,25 @@ class DuplicateFilesDialog(QDialog):
 
         layout.addWidget(header_card)
 
-        # Quick selection helpers
         sel_row = QHBoxLayout()
         sel_row.setSpacing(6)
-        btn_keep_first = QPushButton("Keep First")
-        btn_keep_first.clicked.connect(self._select_keep_first)
-        btn_keep_oldest = QPushButton("Keep Oldest")
-        btn_keep_oldest.clicked.connect(self._select_keep_oldest)
-        btn_keep_newest = QPushButton("Keep Newest")
-        btn_keep_newest.clicked.connect(self._select_keep_newest)
-        btn_keep_shortest = QPushButton("Keep Shortest Path")
-        btn_keep_shortest.clicked.connect(self._select_keep_shortest)
+        for rule, label in KEEP_RULES.items():
+            if rule == "folder":
+                continue
+            button = QPushButton(label)
+            button.clicked.connect(lambda _=False, r=rule: self._apply_rule(r))
+            sel_row.addWidget(button)
         btn_select_all = QPushButton("Select All")
         btn_select_all.clicked.connect(lambda: self._set_all_checked(True))
         btn_deselect_all = QPushButton("Deselect All")
         btn_deselect_all.clicked.connect(lambda: self._set_all_checked(False))
-        sel_row.addWidget(btn_keep_first)
-        sel_row.addWidget(btn_keep_oldest)
-        sel_row.addWidget(btn_keep_newest)
-        sel_row.addWidget(btn_keep_shortest)
         sel_row.addWidget(btn_select_all)
         sel_row.addWidget(btn_deselect_all)
         sel_row.addStretch(1)
         layout.addLayout(sel_row)
 
         self.file_list = QListWidget()
+        self.file_list.setAccessibleName("Copies in this duplicate group")
         for index, path in enumerate(group.files):
             item = QListWidgetItem(path)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -108,8 +140,7 @@ class DuplicateFilesDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        # The dialog used to only advise keeping a copy. Nothing enforced it, so
-        # "Select All" followed by confirming removed every copy of the content.
+        # Advice alone was not enough: "Select All" then confirm removed every copy.
         self.file_list.itemChanged.connect(lambda _item: self._sync_keep_state())
         self._sync_keep_state()
 
@@ -130,8 +161,8 @@ class DuplicateFilesDialog(QDialog):
         self.recycle_button.setEnabled(keeps)
 
     def accept(self) -> None:
-        # Belt and braces: the button is disabled, but a programmatic accept must not
-        # be able to take the last copy either.
+        # The button is disabled too, but a programmatic accept must not take the
+        # last copy either.
         if not self._keeps_a_copy():
             self._sync_keep_state()
             return
@@ -143,75 +174,17 @@ class DuplicateFilesDialog(QDialog):
             if item is not None:
                 item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
-    def _select_keep_first(self):
-        for i in range(self.file_list.count()):
-            item = self.file_list.item(i)
-            if item is not None:
-                item.setCheckState(Qt.CheckState.Unchecked if i == 0 else Qt.CheckState.Checked)
-
-    def _select_keep_oldest(self):
-        import os
-
+    def _apply_rule(self, rule: str):
         paths = [
             self.file_list.item(i).text()
             for i in range(self.file_list.count())
             if self.file_list.item(i) is not None
         ]
-        if not paths:
-            return
-        mtimes = []
-        for p in paths:
-            try:
-                mtimes.append(os.path.getmtime(p))
-            except OSError:
-                mtimes.append(float("inf"))
-        oldest_idx = mtimes.index(min(mtimes))
+        keep = keep_index(paths, rule)
         for i in range(self.file_list.count()):
             item = self.file_list.item(i)
             if item is not None:
-                item.setCheckState(
-                    Qt.CheckState.Unchecked if i == oldest_idx else Qt.CheckState.Checked
-                )
-
-    def _select_keep_newest(self):
-        import os
-
-        paths = [
-            self.file_list.item(i).text()
-            for i in range(self.file_list.count())
-            if self.file_list.item(i) is not None
-        ]
-        if not paths:
-            return
-        mtimes = []
-        for p in paths:
-            try:
-                mtimes.append(os.path.getmtime(p))
-            except OSError:
-                mtimes.append(float("-inf"))
-        newest_idx = mtimes.index(max(mtimes))
-        for i in range(self.file_list.count()):
-            item = self.file_list.item(i)
-            if item is not None:
-                item.setCheckState(
-                    Qt.CheckState.Unchecked if i == newest_idx else Qt.CheckState.Checked
-                )
-
-    def _select_keep_shortest(self):
-        paths = [
-            self.file_list.item(i).text()
-            for i in range(self.file_list.count())
-            if self.file_list.item(i) is not None
-        ]
-        if not paths:
-            return
-        shortest_idx = min(range(len(paths)), key=lambda i: len(paths[i]))
-        for i in range(self.file_list.count()):
-            item = self.file_list.item(i)
-            if item is not None:
-                item.setCheckState(
-                    Qt.CheckState.Unchecked if i == shortest_idx else Qt.CheckState.Checked
-                )
+                item.setCheckState(Qt.CheckState.Unchecked if i == keep else Qt.CheckState.Checked)
 
     def targets(self) -> list[str]:
         """Checked copies, or nothing at all if that would leave no copy behind."""
@@ -225,12 +198,152 @@ class DuplicateFilesDialog(QDialog):
         return result
 
 
+class BulkKeepRulesDialog(QDialog):
+    """Apply one keep rule to every duplicate group, previewed before it runs.
+
+    The table behind this dialog renders only the first 150 groups; this works on
+    the whole list, so groups past the cut-off are still reachable.
+    """
+
+    #: Groups listed in the preview tree. A scan can return thousands of groups and
+    #: building a tree item per copy for all of them is what makes the dialog slow.
+    MAX_PREVIEW_GROUPS = 200
+
+    def __init__(self, groups, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Apply a Keep Rule to Every Group")
+        self.resize(820, 600)
+        self._groups = list(groups)
+        self._folder = ""
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(18, 16, 18, 16)
+
+        header = QFrame()
+        header.setProperty("card", "true")
+        head_lay = QVBoxLayout(header)
+        head_lay.setContentsMargins(14, 12, 14, 12)
+        title = QLabel(f"{len(self._groups)} duplicate group(s)")
+        title.setStyleSheet("font-size: 15px; font-weight: 700;")
+        head_lay.addWidget(title)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        head_lay.addWidget(self.summary)
+        layout.addWidget(header)
+
+        rule_row = QHBoxLayout()
+        rule_row.setSpacing(8)
+        rule_row.addWidget(QLabel("Rule:"))
+        self.rule_combo = QComboBox()
+        self.rule_combo.setAccessibleName("Keep rule applied to every group")
+        for rule, label in KEEP_RULES.items():
+            self.rule_combo.addItem(label, rule)
+        self.rule_combo.currentIndexChanged.connect(lambda _index: self._refresh())
+        rule_row.addWidget(self.rule_combo, 1)
+
+        self.folder_button = QPushButton("Choose folder…")
+        self.folder_button.setToolTip("The folder whose copy is kept when a group has one.")
+        self.folder_button.clicked.connect(self._choose_folder)
+        rule_row.addWidget(self.folder_button)
+        layout.addLayout(rule_row)
+
+        self.folder_label = QLabel()
+        self.folder_label.setWordWrap(True)
+        self.folder_label.setProperty("subtle", "true")
+        layout.addWidget(self.folder_label)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["File", "Outcome"])
+        self.tree.setAccessibleName("Copies this rule would recycle")
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.tree, 1)
+
+        buttons = QDialogButtonBox()
+        cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        cancel.setText("Cancel")
+        self.recycle_button = buttons.addButton(QDialogButtonBox.StandardButton.Ok)
+        self.recycle_button.setText("Move Selected to Recycle Bin")
+        self.recycle_button.setProperty("danger", "true")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._refresh()
+
+    def _rule(self) -> str:
+        return str(self.rule_combo.currentData())
+
+    def _choose_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Keep the copy inside this folder")
+        if folder:
+            self._folder = folder
+            index = self.rule_combo.findData("folder")
+            if index >= 0:
+                self.rule_combo.setCurrentIndex(index)
+            self._refresh()
+
+    def _refresh(self):
+        rule = self._rule()
+        self.folder_button.setVisible(rule == "folder")
+        self.folder_label.setVisible(rule == "folder")
+        if rule == "folder":
+            self.folder_label.setText(
+                f"Keeping the copy under: {self._folder}"
+                if self._folder
+                else "No folder chosen yet — groups with no copy there keep their first copy."
+            )
+
+        self.tree.clear()
+        total_targets = 0
+        reclaimed = 0
+        for position, group in enumerate(self._groups):
+            paths = list(group.files)
+            keep = keep_index(paths, rule, self._folder)
+            targets = [p for i, p in enumerate(paths) if i != keep]
+            total_targets += len(targets)
+            reclaimed += group.size * len(targets)
+            if position >= self.MAX_PREVIEW_GROUPS:
+                continue
+            parent = QTreeWidgetItem(self.tree)
+            parent.setText(0, f"{len(paths)} copies · {format_size(group.size)} each")
+            parent.setText(1, f"{len(targets)} to recycle")
+            for index, path in enumerate(paths):
+                child = QTreeWidgetItem(parent)
+                child.setText(0, path)
+                child.setText(1, "Kept" if index == keep else "Recycle")
+                child.setToolTip(0, path)
+
+        listed = min(len(self._groups), self.MAX_PREVIEW_GROUPS)
+        hidden = len(self._groups) - listed
+        hidden_note = (
+            f" {hidden} more group(s) follow the same rule but are not listed." if hidden else ""
+        )
+        self.summary.setText(
+            f"{total_targets} copy/copies would move to the Recycle Bin, freeing about "
+            f"{format_size(reclaimed)}. One copy is kept in every group. "
+            f"Showing {listed} group(s).{hidden_note}"
+        )
+        self.recycle_button.setEnabled(total_targets > 0)
+
+    def targets(self) -> list[str]:
+        """Every copy the chosen rule would recycle, across all groups."""
+        rule = self._rule()
+        result: list[str] = []
+        for group in self._groups:
+            paths = list(group.files)
+            keep = keep_index(paths, rule, self._folder)
+            result.extend(path for index, path in enumerate(paths) if index != keep)
+        return result
+
+
 class CleanupPreviewDialog(QDialog):
     """Every file a cleanup would remove, with each one deselectable.
 
-    `core/preview.py` has produced this manifest all along and only the CLI could
-    see it. Unticking a file here excludes that exact path from the cleanup, which
-    is the difference between a listing and a preview.
+    Unticking a file excludes that exact path from the cleanup, which is the
+    difference between a listing and a preview.
     """
 
     def __init__(self, categories, parent=None):
@@ -280,7 +393,6 @@ class CleanupPreviewDialog(QDialog):
 
         self._start(categories)
 
-    # -- building ---------------------------------------------------------
     def _start(self, categories):
         from crapcleaner.gui.workers import PreviewWorker
 
@@ -341,7 +453,6 @@ class CleanupPreviewDialog(QDialog):
         self.ok_button.setEnabled(True)
         self._update_summary()
 
-    # -- selection --------------------------------------------------------
     def _on_item_changed(self, item, _column):
         self.tree.blockSignals(True)
         if item.childCount():
@@ -464,7 +575,6 @@ class ConfirmCleanupDialog(QDialog):
             h_lay.addWidget(warning)
         layout.addWidget(header_card)
 
-        # Search filter for categories
         search_edit = QLineEdit()
         search_edit.setPlaceholderText("Filter categories...")
         search_edit.setClearButtonEnabled(True)
@@ -512,7 +622,6 @@ class ConfirmCleanupDialog(QDialog):
         opt_lay.addWidget(self.recycle_check)
         layout.addWidget(opt_card)
 
-        # The manifest has existed since 1.0.3 and only the CLI could see it.
         self.review_button = QPushButton("Review files…")
         self.review_button.setToolTip("List every file this cleanup would remove")
         self.review_button.clicked.connect(self._review_files)
@@ -595,6 +704,72 @@ class ReportDialog(QDialog):
         layout.addLayout(btn_row)
 
 
+class RestoreRunDialog(QDialog):
+    """Put back what one cleanup run recycled.
+
+    Neither the Windows Recycle Bin nor the FreeDesktop trash exposes an undo we can
+    drive from here, so this lists the exact paths and opens the bin rather than
+    claiming a restore it cannot perform.
+    """
+
+    def __init__(self, paths: list[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Restore This Run")
+        self.resize(760, 520)
+        self._paths = list(paths)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(18, 16, 18, 16)
+
+        card = QFrame()
+        card.setProperty("card", "true")
+        card_lay = QVBoxLayout(card)
+        card_lay.setContentsMargins(14, 12, 14, 12)
+        title = QLabel(f"{len(self._paths)} item(s) went to the Recycle Bin")
+        title.setStyleSheet("font-size: 15px; font-weight: 700;")
+        card_lay.addWidget(title)
+        explain = QLabel(
+            "CrapCleaner cannot put these back for you: the system Recycle Bin has no "
+            "restore we can call. Open it and use its own Restore command — these are "
+            "the exact paths the run removed, so you can find them there."
+        )
+        explain.setWordWrap(True)
+        card_lay.addWidget(explain)
+        layout.addWidget(card)
+
+        listing = QPlainTextEdit()
+        listing.setReadOnly(True)
+        listing.setPlainText("\n".join(self._paths))
+        listing.setAccessibleName("Paths this run removed")
+        layout.addWidget(listing, 1)
+
+        row = QHBoxLayout()
+        copy_btn = QPushButton("Copy Paths")
+        copy_btn.clicked.connect(lambda: QApplication.clipboard().setText("\n".join(self._paths)))
+        row.addWidget(copy_btn)
+        open_btn = QPushButton("Open Recycle Bin")
+        open_btn.clicked.connect(self._open_bin)
+        row.addWidget(open_btn)
+        row.addStretch(1)
+        close_btn = QPushButton("Close")
+        close_btn.setProperty("primary", "true")
+        close_btn.clicked.connect(self.accept)
+        row.addWidget(close_btn)
+        layout.addLayout(row)
+
+    def _open_bin(self):
+        import subprocess
+
+        try:
+            if os.name == "nt":
+                subprocess.Popen(["explorer", "shell:RecycleBinFolder"])
+            else:
+                subprocess.Popen(["xdg-open", "trash:///"])
+        except (OSError, subprocess.SubprocessError):
+            QApplication.beep()
+
+
 class ConfirmDeleteDialog(QDialog):
     def __init__(self, title: str, message: str, confirm_label: str = "Delete", parent=None):
         super().__init__(parent)
@@ -627,7 +802,7 @@ class ConfirmDeleteDialog(QDialog):
 
 
 class HelpSafetyDialog(QDialog):
-    """Modal dialog displaying comprehensive Help, Safety Philosophy, Technical Documentation, and FAQ."""
+    """Help, safety philosophy, technical documentation, and FAQ."""
 
     def __init__(self, main_window=None, parent=None):
         qparent = (

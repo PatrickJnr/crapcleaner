@@ -46,9 +46,8 @@ class AiDataItem:
 def _ai_roots() -> list[tuple[str, str]]:
     """Known local model stores, one entry per application that actually exists.
 
-    ComfyUI and text-generation-webui are cloned wherever the user likes, so only
-    the conventional locations are probed - a filesystem-wide hunt for model files
-    is not something a cleaner should do.
+    ComfyUI and text-generation-webui are cloned anywhere, so only conventional
+    locations are probed; a filesystem-wide hunt was rejected as too invasive.
     """
     user = get_user_profile()
     local = get_local_appdata()
@@ -149,6 +148,10 @@ def get_categories() -> list[CleanupCategory]:
                 group="AI",
                 description="Small cache folders from AI tools (LM Studio cache, Hugging Face metadata). Model weights are NEVER included.",
                 safety_level=SafetyLevel.REVIEW,
+                what_it_contains="LM Studio's cache folder and the Hugging Face hub metadata cache - catalogue listings, model cards, and download bookkeeping.",
+                why_it_grows="Browsing or searching for models stores a record of each one, and downloads leave their bookkeeping behind.",
+                why_safe_to_delete="The model weight directories are deliberately outside this category, so nothing you have downloaded is removed; only metadata about models is. The tools re-fetch that metadata from the network when you next browse, so an offline machine will show an empty catalogue until it can reach the hub again.",
+                regeneration_behavior="Rebuilt the next time you open the model browser or download something.",
                 targets=cache_targets,
             )
         )
@@ -160,6 +163,10 @@ def get_categories() -> list[CleanupCategory]:
             group="AI",
             description="Model weight data for Ollama, LM Studio, Hugging Face, Jan.ai, ComfyUI, and text-generation-webui. NEVER deleted automatically. Use the AI Data tab to inspect individual files.",
             safety_level=SafetyLevel.DANGEROUS,
+            what_it_contains="Model weight files - .gguf, .safetensors, checkpoints and blobs - stored by Ollama, LM Studio, Hugging Face, Jan.ai, ComfyUI, and text-generation-webui.",
+            why_it_grows="Each model is a separate download of several gigabytes, and every tool keeps every model and quantisation you have ever pulled.",
+            why_safe_to_delete="Nothing here is deleted by a cleanup: this category is never selected for you and is listed so you can see where the space went. Deleting a model is not free - it comes back only as a multi-gigabyte download, sometimes behind an account login or an access agreement, so review individual files in the AI Data tab and remove them yourself.",
+            regeneration_behavior="Nothing changes unless you delete a model yourself; a tool that needs a model you removed downloads it again on next use.",
             auto_selected=False,
             finder=find_ai_model_dirs,
             finder_args=(),

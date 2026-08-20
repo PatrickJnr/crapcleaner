@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QSizePolicy,
     QTableWidget,
@@ -48,6 +49,57 @@ from crapcleaner.utils.platform import (
 
 def _c(theme: str, name: str) -> str:
     return theme_color(theme, name)
+
+
+def offline_skip_note(what: str) -> str | None:
+    """Why `what` was not checked, or None when offline mode is off.
+
+    The updater owns the decision; the wording is per view, because its own reason
+    names GitHub and most of these views never talk to GitHub.
+    """
+    from crapcleaner.utils.updater import offline_skip_reason
+
+    if offline_skip_reason() is None:
+        return None
+    return (
+        f"{what} skipped: offline mode is on, so nothing was contacted. "
+        "Turn offline mode off in Settings to check."
+    )
+
+
+def delete_paths(parent, paths, on_finished, use_recycle_bin: bool = True, title: str = ""):
+    """Remove `paths` off the GUI thread, then hand the outcomes to `on_finished`.
+
+    Recycling validates and moves one path at a time, so a large selection used to
+    hold the event loop long enough for Windows to mark the window Not Responding.
+    Returns the worker so a caller (or a test) can wait on it.
+    """
+    from crapcleaner.gui.workers import DeleteWorker
+
+    paths = list(paths)
+    progress = QProgressDialog(f"Removing {len(paths)} item(s)…", "Cancel", 0, len(paths), parent)
+    progress.setWindowTitle(title or "Removing Files")
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.setMinimumDuration(0)
+    progress.setAutoClose(False)
+    progress.setAutoReset(False)
+
+    def advance(done: int, _total: int, path: str) -> None:
+        progress.setValue(done)
+        progress.setLabelText(path)
+
+    def finish(outcomes) -> None:
+        progress.close()
+        on_finished(outcomes)
+
+    worker = DeleteWorker(paths, use_recycle_bin, parent)
+    worker.progress.connect(advance)
+    progress.canceled.connect(worker.request_stop)
+    worker.done.connect(finish)
+    worker.failed.connect(lambda _message: finish([]))
+    worker.finished.connect(worker.deleteLater)
+    worker.start()
+    return worker
 
 
 def _safety_color(theme: str, safety: SafetyLevel) -> str:
@@ -289,7 +341,7 @@ class StorageDonut(QWidget):
     def set_usage(self, fraction: float, theme: str):
         self._fraction = max(0.0, min(1.0, fraction))
         self._theme = theme
-        # The figure is drawn, so it also has to be stated for anyone not seeing it.
+        # Painted rather than text, so the value has to be stated too.
         self.setAccessibleDescription(f"Drive usage: {self._fraction * 100:.0f} percent used")
         self.update()
 
@@ -302,7 +354,6 @@ class StorageDonut(QWidget):
         pen_width = 12.0
         rect = QRectF(self.rect()).adjusted(12, 12, -12, -12)
 
-        # Background track
         painter.setPen(
             QPen(
                 QColor(pal["border2"]),
@@ -328,7 +379,6 @@ class StorageDonut(QWidget):
             span = int(-self._fraction * 360 * 16)
             painter.drawArc(rect, 90 * 16, span)
 
-        # Centered text
         font = QFont(self.font())
         font.setPointSize(18)
         font.setBold(True)
@@ -408,8 +458,7 @@ class DriveCard(QFrame):
         open_action = menu.addAction(f"Open in {file_manager_name()}")
         action = menu.exec(self.mapToGlobal(pos))
         if action == open_action:
-            # A drive is named "C:" on Windows and needs the trailing separator to be a
-            # path; on Linux it is already a mount point.
+            # On Windows a drive is named "C:" and needs the trailing separator to be a path.
             target = f"{self.drive}\\" if is_windows() else self.drive
             reveal_in_file_manager(target, select=False)
 
@@ -536,7 +585,6 @@ class ContributorCard(QFrame):
         lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(12)
 
-        # Squircle Avatar
         initials = contributor.login[:2].upper() if contributor.login else "??"
         avatar = SquircleAvatarWidget(
             image_path=avatar_file or "",
@@ -547,7 +595,6 @@ class ContributorCard(QFrame):
         )
         lay.addWidget(avatar)
 
-        # Info Box (Username & Contribution Badge)
         info_lay = QVBoxLayout()
         info_lay.setSpacing(3)
         info_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
@@ -565,7 +612,6 @@ class ContributorCard(QFrame):
         lay.addLayout(info_lay)
         lay.addStretch(1)
 
-        # Compact profile button
         profile_btn = QPushButton("Profile ↗")
         profile_btn.setProperty("secondary", "true")
         profile_btn.setCursor(Qt.CursorShape.PointingHandCursor)

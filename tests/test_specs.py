@@ -143,7 +143,6 @@ def test_gui_about_and_specs_views():
     assert widget.width() == 100
     assert widget.height() == 100
 
-    # Test ContributorCard
     sample_contrib = ContributorInfo(
         login="Foxils",
         avatar_url="https://avatar.url",
@@ -156,7 +155,6 @@ def test_gui_about_and_specs_views():
     card.close()
     card.deleteLater()
 
-    # Test dummy main window object
     class DummyMain:
         def __init__(self):
             pass
@@ -174,8 +172,7 @@ def test_gui_about_and_specs_views():
     if hasattr(specs_view, "_worker") and specs_view._worker:
         specs_view._worker.wait(5000)
 
-    # Contributors are fetched on a worker now, so the view is built without one
-    # running and then handed the data it would have received.
+    # Contributors arrive on a worker, so hand the view the data directly instead.
     from crapcleaner.gui.workers import ContributorsWorker
 
     with patch.object(ContributorsWorker, "start", lambda self: None):
@@ -191,3 +188,38 @@ def test_gui_about_and_specs_views():
     widget.close()
     widget.deleteLater()
     app.processEvents()
+
+
+def test_a_failed_probe_is_logged_and_still_degrades(monkeypatch):
+    """A silent probe failure leaves a specs page with rows missing and no trace."""
+    from unittest.mock import patch
+
+    from crapcleaner.system import hardware
+
+    def boom(_drive):
+        raise OSError("drive gone")
+
+    monkeypatch.setattr(hardware, "get_drive_info", boom)
+    monkeypatch.setattr(hardware, "list_drives", lambda: ["Z:"])
+
+    with patch.object(hardware.logger, "debug") as debug:
+        assert hardware._get_drive_specs() == []
+
+    assert debug.called
+    assert "drive" in debug.call_args[0][0]
+
+
+def test_offline_mode_skips_the_hostname_lookup(monkeypatch):
+    """FEAT-15: gathering specs must not send a DNS query."""
+    from crapcleaner.system import hardware
+
+    lookups: list[str] = []
+    monkeypatch.setattr(hardware.socket, "gethostbyname", lambda h: lookups.append(h) or "10.0.0.5")
+
+    monkeypatch.setattr(hardware, "offline_mode", lambda: True)
+    assert hardware._get_network_specs()[0].ip_address == "127.0.0.1"
+    assert lookups == []
+
+    monkeypatch.setattr(hardware, "offline_mode", lambda: False)
+    assert hardware._get_network_specs()[0].ip_address == "10.0.0.5"
+    assert lookups

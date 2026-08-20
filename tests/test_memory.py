@@ -391,3 +391,30 @@ def test_standby_purge_reports_privilege_failure(monkeypatch):
     assert result.success is False
     assert "not held by this process token" in result.message
     assert "Run as administrator" not in result.message
+
+
+def test_drop_caches_falls_back_when_sync_fails(monkeypatch):
+    """run_command never raises, so the fallback has to check the result."""
+    from crapcleaner.utils.platform import CommandResult
+
+    synced: list[int] = []
+    monkeypatch.setattr(
+        cleaner_mod,
+        "run_command",
+        lambda *_a, **_k: CommandResult(returncode=-2, stderr="missing", error="missing"),
+    )
+    monkeypatch.setattr(cleaner_mod.os, "sync", lambda: synced.append(1), raising=False)
+
+    cleaner_mod._drop_caches()
+    assert synced == [1]
+
+
+def test_drop_caches_does_not_double_sync_when_the_command_works(monkeypatch):
+    from crapcleaner.utils.platform import CommandResult
+
+    synced: list[int] = []
+    monkeypatch.setattr(cleaner_mod, "run_command", lambda *_a, **_k: CommandResult(returncode=0))
+    monkeypatch.setattr(cleaner_mod.os, "sync", lambda: synced.append(1), raising=False)
+
+    cleaner_mod._drop_caches()
+    assert synced == []

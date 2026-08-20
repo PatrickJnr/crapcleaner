@@ -1,12 +1,10 @@
 """Generate the Windows version resource for the packaged executable.
 
-The shipped .exe had an empty Properties -> Details tab: no product name, no
-version, no company. Combined with an unsigned binary that is the profile
-SmartScreen treats least generously, and a user who wants to check what they
-downloaded has nothing to read.
+Without it the .exe ships with an empty Properties -> Details tab, which on an
+unsigned binary is the profile SmartScreen treats least generously.
 
-The resource is generated from `crapcleaner.constants.VERSION`, so it cannot drift
-from the version the application reports.
+Generated from `crapcleaner.constants.VERSION`, so it cannot drift from the version
+the application reports.
 """
 
 from __future__ import annotations

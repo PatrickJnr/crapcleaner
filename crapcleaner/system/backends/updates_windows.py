@@ -8,6 +8,7 @@ import json
 import os
 from typing import TYPE_CHECKING
 
+from crapcleaner.config import offline_mode
 from crapcleaner.utils.platform import is_admin, run_command
 from crapcleaner.utils.windows_errors import explain_windows_error
 
@@ -18,6 +19,8 @@ _PS = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
 
 #: Shown when Get-HotFix does not record who installed an update.
 _DEFAULT_INSTALLER_ACCOUNT = "NT AUTHORITY\\SYSTEM"
+
+OFFLINE_MESSAGE = "Update scan skipped: offline mode is on, so Windows Update was not contacted."
 
 _PS_QUERY_UPDATES = (
     "$ErrorActionPreference = 'Stop'; "
@@ -176,8 +179,8 @@ def _collect_history(report: "SystemUpdateReport") -> None:
         else:
             installed_on = str(installed_on_val) if installed_on_val else ""
 
-        # Computed outside the f-string: a backslash inside an f-string expression is a
-        # syntax error before Python 3.12, and this project supports 3.10.
+        # Outside the f-string: a backslash in an f-string expression is a syntax
+        # error before Python 3.12, and this project supports 3.10.
         installed_by = item.get("InstalledBy") or _DEFAULT_INSTALLER_ACCOUNT
 
         report.installed_history.append(
@@ -202,7 +205,10 @@ def check(include_history: bool = True, timeout: float = 30.0) -> "SystemUpdateR
     from crapcleaner.system.system_updates import SystemUpdateReport
 
     report = SystemUpdateReport(backend="Windows Update", service_status=service_status())
-    _collect_available(report, timeout)
+    if offline_mode():
+        report.error = OFFLINE_MESSAGE
+    else:
+        _collect_available(report, timeout)
     if include_history:
         _collect_history(report)
     return report

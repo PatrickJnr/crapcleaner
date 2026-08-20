@@ -67,21 +67,21 @@ class AddStartupDialog(QDialog):
         desc.setWordWrap(True)
         lay.addWidget(desc)
 
-        # Name row
         name_row = QHBoxLayout()
         name_lbl = QLabel("App Name:")
         name_lbl.setFixedWidth(80)
         self.name_input = QLineEdit()
+        self.name_input.setAccessibleName("Startup entry name")
         self.name_input.setPlaceholderText("e.g. My Utility")
         name_row.addWidget(name_lbl)
         name_row.addWidget(self.name_input)
         lay.addLayout(name_row)
 
-        # Path row
         path_row = QHBoxLayout()
         path_lbl = QLabel("Executable:")
         path_lbl.setFixedWidth(80)
         self.path_input = QLineEdit()
+        self.path_input.setAccessibleName("Program to run at startup")
         self.path_input.setPlaceholderText(r"e.g. C:\Program Files\App\app.exe")
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self._browse_file)
@@ -90,11 +90,11 @@ class AddStartupDialog(QDialog):
         path_row.addWidget(browse_btn)
         lay.addLayout(path_row)
 
-        # Scope row
         scope_row = QHBoxLayout()
         scope_lbl = QLabel("Scope:")
         scope_lbl.setFixedWidth(80)
         self.scope_combo = QComboBox()
+        self.scope_combo.setAccessibleName("Where the entry is registered")
         self.scope_combo.addItems(
             ["Current User (User Registry)", "All Users (System Registry - Admin Required)"]
         )
@@ -174,7 +174,6 @@ class StartupView(QWidget):
         layout.setContentsMargins(0, 0, 8, 0)
         layout.setSpacing(14)
 
-        # 1. Top Hero Card
         self.hero_card = QFrame()
         self.hero_card.setProperty("card", "true")
         hero_lay = QVBoxLayout(self.hero_card)
@@ -218,7 +217,6 @@ class StartupView(QWidget):
         hero_top.addWidget(self.refresh_btn)
         hero_lay.addLayout(hero_top)
 
-        # Status & counts summary
         self.hero_title = QLabel("Startup Applications")
         self.hero_title.setStyleSheet(
             f"font-size: 20px; font-weight: 800; color: {_c(self._theme, 'text')};"
@@ -230,7 +228,6 @@ class StartupView(QWidget):
         self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
         hero_lay.addWidget(self.status_label)
 
-        # Result banner
         self.result_banner = QFrame()
         self.result_banner.setProperty("card", "true")
         self.result_banner.setVisible(False)
@@ -247,7 +244,6 @@ class StartupView(QWidget):
 
         layout.addWidget(self.hero_card)
 
-        # 2. Metric Cards Row
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(12)
         c1, self.total_card_val, self.total_card_sub = stat_card(
@@ -266,7 +262,6 @@ class StartupView(QWidget):
             metrics_row.addWidget(c)
         layout.addLayout(metrics_row)
 
-        # 3. Filter & Search Controls
         filter_card = QFrame()
         filter_card.setProperty("card", "true")
         f_lay = QHBoxLayout(filter_card)
@@ -278,6 +273,7 @@ class StartupView(QWidget):
         f_lay.addWidget(search_icon)
 
         self.search_input = QLineEdit()
+        self.search_input.setAccessibleName("Search startup applications")
         self.search_input.setPlaceholderText(
             "Search startup apps by name, publisher, location, or command..."
         )
@@ -285,6 +281,7 @@ class StartupView(QWidget):
         f_lay.addWidget(self.search_input, 2)
 
         self.scope_combo = QComboBox()
+        self.scope_combo.setAccessibleName("Filter by scope")
         self.scope_combo.addItems(
             ["All Scopes", "Current User (HKCU)", "All Users (HKLM)", "Startup Folders"]
         )
@@ -292,15 +289,16 @@ class StartupView(QWidget):
         f_lay.addWidget(self.scope_combo)
 
         self.state_combo = QComboBox()
+        self.state_combo.setAccessibleName("Filter by enabled state")
         self.state_combo.addItems(["All States", "Enabled Only", "Disabled Only"])
         self.state_combo.currentIndexChanged.connect(self._filter_items)
         f_lay.addWidget(self.state_combo)
 
         layout.addWidget(filter_card)
 
-        # 4. Startup Items Table
         self._populating = False  # Guard against reentrant itemClicked during sort
         self.table = CrapTable(0, 6)
+        self.table.setAccessibleName("Startup applications")
         self.table.setHorizontalHeaderLabels(
             [
                 "State",
@@ -390,7 +388,6 @@ class StartupView(QWidget):
 
         filtered = []
         for item in self._items:
-            # Query match
             if query:
                 match = (
                     query in item.name.lower()
@@ -401,7 +398,6 @@ class StartupView(QWidget):
                 if not match:
                     continue
 
-            # Scope match
             if "HKCU" in scope_filter and "HKCU" not in item.location_key:
                 continue
             if "HKLM" in scope_filter and "HKLM" not in item.location_key:
@@ -409,7 +405,6 @@ class StartupView(QWidget):
             if "Startup Folders" in scope_filter and "STARTUP" not in item.location_key:
                 continue
 
-            # State match
             if state_filter == "Enabled Only" and not item.enabled:
                 continue
             if state_filter == "Disabled Only" and item.enabled:
@@ -424,7 +419,7 @@ class StartupView(QWidget):
         def _impact_rank(impact: str) -> int:
             return {"High": 3, "Medium": 2, "Low": 1}.get(impact, 0)
 
-        # Build a fast id→item map for safe post-sort lookup
+        # id -> item map: sorting reorders the rows, so look up by id.
         self._item_map: dict[str, Any] = {it.id: it for it in items}
 
         self._populating = True
@@ -433,7 +428,6 @@ class StartupView(QWidget):
         self.table.setRowCount(len(items))
 
         for row, item in enumerate(items):
-            # Column 0: State (sortable + checkable)
             state_item = NumericItem(
                 "Enabled" if item.enabled else "Disabled", value=1 if item.enabled else 0
             )
@@ -449,11 +443,10 @@ class StartupView(QWidget):
                 state_item.setForeground(QColor(_c(self._theme, "safe")))
             else:
                 state_item.setForeground(QColor(_c(self._theme, "muted")))
-            # Store item id (a plain string) — safe across all Qt versions
+            # A plain string in UserRole is safe across every Qt version.
             state_item.setData(Qt.ItemDataRole.UserRole, item.id)
             self.table.setItem(row, 0, state_item)
 
-            # Column 1: Application Name
             name_item = QTableWidgetItem(item.name)
             name_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             if not item.file_exists:
@@ -461,16 +454,13 @@ class StartupView(QWidget):
             name_item.setData(Qt.ItemDataRole.UserRole, item.id)
             self.table.setItem(row, 1, name_item)
 
-            # Column 2: Publisher
             pub_item = QTableWidgetItem(item.publisher)
             pub_item.setForeground(QColor(_c(self._theme, "muted")))
             self.table.setItem(row, 2, pub_item)
 
-            # Column 3: Location
             loc_item = QTableWidgetItem(item.location)
             self.table.setItem(row, 3, loc_item)
 
-            # Column 4: Impact (numeric sort)
             impact_item = NumericItem(item.impact, value=_impact_rank(item.impact))
             if item.impact == "High":
                 impact_item.setForeground(QColor(_c(self._theme, "danger")))
@@ -480,7 +470,6 @@ class StartupView(QWidget):
                 impact_item.setForeground(QColor(_c(self._theme, "safe")))
             self.table.setItem(row, 4, impact_item)
 
-            # Column 5: Command Line
             cmd_item = QTableWidgetItem(item.command)
             cmd_item.setToolTip(item.command)
             cmd_item.setForeground(QColor(_c(self._theme, "muted")))

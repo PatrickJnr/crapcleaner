@@ -89,7 +89,6 @@ def get_categories() -> list[CleanupCategory]:
     )
     categories.extend(_electron_tool_categories("kiro", "Kiro", os.path.join(appdata, "Kiro")))
 
-    # GitHub Desktop Cache
     categories.append(
         CleanupCategory(
             id="github_desktop_cache",
@@ -109,7 +108,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Zed Editor
     categories.append(
         CleanupCategory(
             id="zed_cache",
@@ -126,7 +124,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Rust / Cargo package & git caches
     cargo_targets = [
         CacheTarget(path=os.path.join(user, ".cargo", "registry", "cache")),
         CacheTarget(path=os.path.join(user, ".cargo", "git", "db")),
@@ -148,7 +145,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Go build and module download caches
     go_targets = [
         CacheTarget(path=os.path.join(local, "go-build")),
         CacheTarget(path=os.path.join(user, "go", "pkg", "mod", "cache")),
@@ -169,7 +165,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Gradle / Maven build tool caches
     jvm_targets = [
         CacheTarget(path=os.path.join(user, ".gradle", "caches")),
         CacheTarget(path=os.path.join(user, ".m2", "repository")),
@@ -190,7 +185,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Unity Editor Caches
     unity_targets = [
         CacheTarget(path=os.path.join(local, "Unity", "cache")),
         CacheTarget(path=os.path.join(local, "Unity", "Editor", "ShaderCache")),
@@ -212,7 +206,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Godot Engine Caches
     godot_targets = [
         CacheTarget(path=os.path.join(appdata, "Godot", "app_userdata")),
         CacheTarget(path=os.path.join(local, "Godot", "shader_cache")),
@@ -233,7 +226,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Unreal Engine DDC
     categories.append(
         CleanupCategory(
             id="unreal_ddc",
@@ -252,7 +244,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # CMake temporary build leftovers
     cmake_targets = []
     for cand in (
         os.path.join(local, "CMake"),
@@ -277,7 +268,6 @@ def get_categories() -> list[CleanupCategory]:
             )
         )
 
-    # s&box
     sbox_root = os.path.join(local, "s&box")
     sbox_targets = [
         CacheTarget(path=os.path.join(sbox_root, "cachedata")),
@@ -299,7 +289,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # Bun Cache
     bun_root = os.path.join(user, ".bun", "install", "cache")
     if os.path.isdir(bun_root):
         categories.append(
@@ -318,7 +307,6 @@ def get_categories() -> list[CleanupCategory]:
             )
         )
 
-    # Android SDK & Gradle Daemon Logs
     android_targets = []
     for candidate in (
         os.path.join(user, ".android", "cache"),
@@ -344,7 +332,6 @@ def get_categories() -> list[CleanupCategory]:
             )
         )
 
-    # Compiler caches shared by every project on the machine
     sccache_dirs = (
         [os.path.join(local, "Mozilla", "sccache")]
         if is_windows()
@@ -385,7 +372,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # JetBrains IDE Caches
     jb_targets = []
     jb_local = os.path.join(local, "JetBrains")
     if os.path.isdir(jb_local):

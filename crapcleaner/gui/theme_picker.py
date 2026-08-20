@@ -40,7 +40,7 @@ from crapcleaner.gui.theme import (
 
 
 class SwatchBar(QWidget):
-    """Draws a compact row of color palette swatches with subtle borders."""
+    """A compact row of palette swatches."""
 
     def __init__(self, colors: list[str], parent: QWidget | None = None):
         super().__init__(parent)
@@ -70,14 +70,13 @@ class SwatchBar(QWidget):
 
             col = QColor(hex_code)
             painter.setBrush(QBrush(col))
-            # Subtle border around each swatch
             border_col = QColor(255, 255, 255, 60) if col.lightness() < 120 else QColor(0, 0, 0, 60)
             painter.setPen(QPen(border_col, 1))
             painter.drawRoundedRect(rect, 3.0, 3.0)
 
 
 class ThemeCard(QFrame):
-    """Interactive card representing a single theme with swatches, title, and active badge."""
+    """One theme: its name, category, description, and palette swatches."""
 
     clicked = Signal(str)
     delete_requested = Signal(str)
@@ -108,7 +107,6 @@ class ThemeCard(QFrame):
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(4)
 
-        # Header: Name + Badge
         header = QHBoxLayout()
         header.setSpacing(6)
 
@@ -138,14 +136,12 @@ class ThemeCard(QFrame):
 
         layout.addLayout(header)
 
-        # Description
         self.desc_label = QLabel(self._description)
         self.desc_label.setTextFormat(Qt.TextFormat.PlainText)
         self.desc_label.setStyleSheet("font-size: 11px; color: #8c8c8c;")
         self.desc_label.setWordWrap(False)
         layout.addWidget(self.desc_label)
 
-        # Swatch bar
         self.swatch_bar = SwatchBar(self._swatches, self)
         layout.addWidget(self.swatch_bar)
 
@@ -246,10 +242,7 @@ class ThemeCard(QFrame):
 
 
 class ThemeGalleryWidget(QWidget):
-    """Complete Theme Gallery component with search, category filtering,
-
-    active hero banner, and interactive swatch card grid.
-    """
+    """The theme gallery: hero banner, search, category chips, and a card grid."""
 
     theme_changed = Signal(str)
     open_studio_requested = Signal()
@@ -261,13 +254,13 @@ class ThemeGalleryWidget(QWidget):
         self._search_query = ""
         self._cards: dict[str, ThemeCard] = {}
 
-        # Backward compatibility combo box
+        # Kept for call sites that still read the theme by index; the gallery is the UI.
         self.theme_combo = QComboBox()
         for t_id in THEMES:
             self.theme_combo.addItem(theme_label(t_id), t_id)
         if self._current_theme in THEMES:
             self.theme_combo.setCurrentIndex(THEMES.index(self._current_theme))
-        self.theme_combo.setVisible(False)  # Hidden behind visual gallery
+        self.theme_combo.setVisible(False)
 
         self._build_ui()
         self.select_theme(self._current_theme, emit_signal=False)
@@ -277,7 +270,6 @@ class ThemeGalleryWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(10)
 
-        # 1. Active Theme Hero Banner
         self.hero_card = QFrame()
         self.hero_card.setObjectName("ActiveThemeHero")
         self.hero_card.setFrameShape(QFrame.Shape.StyledPanel)
@@ -317,7 +309,6 @@ class ThemeGalleryWidget(QWidget):
 
         hero_layout.addLayout(hero_left, 1)
 
-        # Quick action buttons
         actions_layout = QHBoxLayout()
         actions_layout.setSpacing(6)
 
@@ -345,7 +336,6 @@ class ThemeGalleryWidget(QWidget):
         hero_layout.addLayout(actions_layout)
         main_layout.addWidget(self.hero_card)
 
-        # 2. Search & Filter Bar
         search_filter_row = QHBoxLayout()
         search_filter_row.setSpacing(8)
 
@@ -362,7 +352,6 @@ class ThemeGalleryWidget(QWidget):
 
         main_layout.addLayout(search_filter_row)
 
-        # 3. Category Filter Tabs / Chips
         self.chips_layout = QHBoxLayout()
         self.chips_layout.setSpacing(6)
         self.chip_group = QButtonGroup(self)
@@ -383,7 +372,7 @@ class ThemeGalleryWidget(QWidget):
         ]
 
         for cat_id, cat_title in categories_def:
-            # Escape & as && so Qt does not render it as mnemonic accelerator / underscore
+            # Qt reads a bare & as a mnemonic accelerator.
             escaped_title = cat_title.replace("&", "&&")
             btn = QPushButton(escaped_title)
             btn.setCheckable(True)
@@ -396,7 +385,6 @@ class ThemeGalleryWidget(QWidget):
         self.chips_layout.addStretch(1)
         main_layout.addLayout(self.chips_layout)
 
-        # 4. Filter Status Label
         self.filter_status_label = QLabel(f"Showing all {len(THEMES)} themes:")
         self.filter_status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.filter_status_label.setStyleSheet(
@@ -404,7 +392,6 @@ class ThemeGalleryWidget(QWidget):
         )
         main_layout.addWidget(self.filter_status_label)
 
-        # 5. Scroll Area & Grid of Theme Cards
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -419,14 +406,12 @@ class ThemeGalleryWidget(QWidget):
         self.grid_layout.setColumnStretch(1, 1)
         self.grid_layout.setColumnStretch(2, 1)
 
-        # No results placeholder label
         self.no_results_label = QLabel("No themes found matching your search query.")
         self.no_results_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.no_results_label.setStyleSheet("font-size: 13px; color: #888888; padding: 30px;")
         self.no_results_label.setVisible(False)
         self.grid_layout.addWidget(self.no_results_label, 0, 0, 1, 3)
 
-        # Populate cards
         for theme_id in THEMES:
             card = ThemeCard(theme_id, grid_container)
             card.clicked.connect(self.select_theme)
@@ -439,11 +424,10 @@ class ThemeGalleryWidget(QWidget):
         main_layout.addWidget(scroll, 1)
 
     def refresh_themes(self) -> None:
-        """Rebuild the gallery after the theme registry changed.
+        """Rebuild the cards, chip counts and swatches from the current registry.
 
-        A theme saved in the Studio, or a file dropped into the theme directory,
-        appears here without restarting - so the cards, the chip counts and the
-        swatches all have to be rebuilt from the current registry.
+        A theme saved in the Studio, or dropped into the theme directory, appears
+        here without restarting.
         """
         container = self.grid_layout.parentWidget()
 
@@ -464,8 +448,7 @@ class ThemeGalleryWidget(QWidget):
             else:
                 existing.refresh_theme_data()
 
-        # The combo behind the gallery is addressed by index, so it has to be rebuilt
-        # rather than appended to.
+        # The combo is addressed by index, so it is rebuilt rather than appended to.
         self.theme_combo.blockSignals(True)
         self.theme_combo.clear()
         for theme_id in THEMES:
@@ -514,14 +497,13 @@ class ThemeGalleryWidget(QWidget):
             self.refresh_themes()
 
     def _relayout_cards(self) -> None:
-        """Re-arranges visible cards in a clean 3-column grid pinned to the top."""
+        """Re-arrange the cards matching the search and category into a 3-column grid."""
         query = self._search_query.strip().lower()
         active_cat = self._active_category
 
         visible_count = 0
         columns = 3
 
-        # Remove existing widgets from layout positions without destroying them
         for i in reversed(range(self.grid_layout.count())):
             item = self.grid_layout.itemAt(i)
             if item and item.widget() and item.widget() != self.no_results_label:
@@ -552,7 +534,6 @@ class ThemeGalleryWidget(QWidget):
             else:
                 card.setVisible(False)
 
-        # Pin grid to top and prevent rows from stretching vertically
         self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         total_rows = (len(self._cards) // columns) + 3
         for r in range(total_rows):
@@ -595,7 +576,6 @@ class ThemeGalleryWidget(QWidget):
 
         self._current_theme = theme_id
 
-        # Update backward-compatibility combo box
         if self.theme_combo.currentData() != theme_id:
             index = self.theme_combo.findData(theme_id)
             if index >= 0:
@@ -603,19 +583,16 @@ class ThemeGalleryWidget(QWidget):
                 self.theme_combo.setCurrentIndex(index)
                 self.theme_combo.blockSignals(False)
 
-        # Update cards
         for t_id, card in self._cards.items():
             if t_id == "custom":
                 card.refresh_theme_data()
             card.set_active(t_id == theme_id)
 
-        # Update Hero Banner
         self.hero_name_label.setText(theme_label(theme_id))
         self.hero_cat_badge.setText(get_theme_category_label(theme_id))
         self.hero_desc_label.setText(get_theme_description(theme_id))
         self.hero_swatches.set_colors(get_theme_swatches(theme_id))
 
-        # Dynamic styling for hero card based on selected theme
         pal = palette_for(theme_id)
         hero_bg = pal.get("panel", "#1c1c1c")
         hero_accent = pal.get("accent", "#3b82f6")

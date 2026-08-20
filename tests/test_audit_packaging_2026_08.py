@@ -4,15 +4,43 @@ Finding IDs refer to audit.md.
 """
 
 import os
+import re
 import struct
 import subprocess
 import sys
 
 import pytest
+import yaml
 
 from crapcleaner.constants import VERSION
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _workflow_yaml(name: str) -> dict:
+    with open(os.path.join(ROOT, ".github", "workflows", name), encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def _script(job: dict) -> str:
+    """Every shell line a job runs, as one blob."""
+    return "\n".join(step.get("run") or "" for step in job["steps"])
+
+
+def _released_files(job: dict) -> list[str]:
+    """Asset paths the job attaches to a GitHub release."""
+    return [
+        line.strip()
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("softprops/action-gh-release@")
+        for line in (step.get("with", {}).get("files") or "").splitlines()
+        if line.strip()
+    ]
 
 
 class TestFrozenLauncherHonoursArguments:
@@ -187,31 +215,242 @@ class TestReleaseVersionGate:
 
 
 class TestReleaseWorkflowIntegrity:
-    """PKG-05, PKG-06: rebuilt assets and dispatch runs."""
-
-    def _workflow(self, name: str) -> str:
-        with open(os.path.join(ROOT, ".github", "workflows", name), encoding="utf-8") as fh:
-            return fh.read()
+    """PKG-05, PKG-06, REL-01, REL-03: what the release path actually runs."""
 
     def test_release_checkouts_use_the_requested_tag(self):
-        workflow = self._workflow("release.yml")
+        workflow = _workflow_yaml("release.yml")
+        checkouts = [
+            step
+            for job in workflow["jobs"].values()
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        ]
 
-        assert workflow.count("actions/checkout@v7") == workflow.count(
-            "ref: ${{ github.event.inputs.target_tag || github.ref }}"
-        )
+        assert len(checkouts) == len(workflow["jobs"]), "a job checks out nothing, or twice"
+        for step in checkouts:
+            assert step["with"]["ref"] == "${{ github.event.inputs.target_tag || github.ref }}"
 
     def test_release_verifies_the_version_before_building(self):
-        assert "scripts/check_release_version.py" in self._workflow("release.yml")
+        workflow = _workflow_yaml("release.yml")
 
-    def test_rebuilt_releases_get_fresh_checksums(self):
-        workflow = self._workflow("batch-rebuild-releases.yml")
+        assert "scripts/check_release_version.py" in _script(workflow["jobs"]["verify"])
+        for job in ("build-windows-exe", "build-linux-bin"):
+            assert workflow["jobs"][job]["needs"] == "verify"
 
-        assert "Recompute Checksums" in workflow
-        assert "checksums-windows.txt" in workflow
-        assert "checksums-linux.txt" in workflow
+    def test_release_lints_and_type_checks_before_building(self):
+        """REL-03: a tag can be cut from a commit that never reached master, and ci.yml
+        does not fire on tags, so these gates have to exist here too."""
+        script = _script(_workflow_yaml("release.yml")["jobs"]["verify"])
+
+        assert "ruff check crapcleaner tests scripts" in script
+        assert "ruff format --check crapcleaner tests scripts" in script
+        assert "mypy crapcleaner" in script
+
+    def test_the_published_linux_binary_is_executed_before_release(self):
+        """REL-01: the smoke test was gated to Windows, so no Linux binary ever ran."""
+        workflow = _workflow_yaml("release.yml")
+        script = _script(workflow["jobs"]["build-linux-bin"])
+
+        assert "./dist/crapcleaner-linux-x86_64 --version" in script
+        assert "constants import VERSION" in script, "the reported version is not checked"
+        assert set(workflow["jobs"]["publish-release"]["needs"]) == {
+            "build-windows-exe",
+            "build-linux-bin",
+        }
+
+    def test_the_published_windows_binary_is_executed_before_release(self):
+        script = _script(_workflow_yaml("release.yml")["jobs"]["build-windows-exe"])
+
+        assert "./dist/CrapCleaner.exe --version" in script
+        assert "constants import VERSION" in script
+
+    def test_the_release_notes_step_does_not_swallow_a_failure(self):
+        """REL-05: `|| echo` published the newest notes under whatever tag was asked for."""
+        script = _script(_workflow_yaml("release.yml")["jobs"]["publish-release"])
+
+        assert "extract_changelog.py" in script
+        assert "||" not in script, "a fallback here substitutes the wrong release's notes"
 
     def test_ci_exercises_the_built_binary(self):
-        workflow = self._workflow("ci.yml")
+        script = _script(_workflow_yaml("ci.yml")["jobs"]["test"])
 
-        assert "--version" in workflow, "CI only checked that the file exists"
-        assert "requirements-dev.txt" in workflow, "CI installs unpinned tools"
+        assert "--version" in script, "CI only checked that the file exists"
+
+
+class TestBatchRebuildIntegrity:
+    """REL-02, REL-04: rebuilds republished binaries unverified, over stale checksums."""
+
+    def test_the_canonical_checksums_file_is_regenerated(self):
+        """README tells users to verify against checksums.txt; per-OS files are not it."""
+        publish = _workflow_yaml("batch-rebuild-releases.yml")["jobs"]["publish"]
+
+        assert any(name.endswith("checksums.txt") for name in _released_files(publish))
+        assert "> checksums.txt" in _script(publish), "checksums.txt is uploaded but never rebuilt"
+
+    def test_every_asset_of_a_release_is_replaced_together(self):
+        publish = _workflow_yaml("batch-rebuild-releases.yml")["jobs"]["publish"]
+
+        assert {os.path.basename(p) for p in _released_files(publish)} == {
+            "CrapCleaner.exe",
+            "crapcleaner-linux-x86_64",
+            "crapcleaner-linux-x86_64.tar.gz",
+            "checksums.txt",
+        }
+
+    def test_the_rebuilt_binary_must_report_the_tag_it_claims(self):
+        script = _script(_workflow_yaml("batch-rebuild-releases.yml")["jobs"]["build"])
+
+        assert "--version" in script, "the rebuilt binary is never run"
+        assert "matrix.tag" in script, "the reported version is not compared to the tag"
+
+    def test_only_the_publishing_job_may_write_to_releases(self):
+        workflow = _workflow_yaml("batch-rebuild-releases.yml")
+
+        assert workflow["jobs"]["build"]["permissions"] == {"contents": "read"}
+        assert workflow["jobs"]["publish"]["permissions"]["contents"] == "write"
+        assert workflow["jobs"]["publish"]["needs"] == "build"
+
+
+class TestBuildToolingIsPinned:
+    """SUP-01: shipped binaries were bundled against whatever pip resolved that morning."""
+
+    @staticmethod
+    def _pins() -> dict[str, str]:
+        pins = {}
+        with open(os.path.join(ROOT, "requirements-build.txt"), encoding="utf-8") as fh:
+            for line in fh:
+                entry = line.split("#")[0].strip()
+                if entry:
+                    name, _, version = entry.partition("==")
+                    pins[name.lower()] = version
+        return pins
+
+    def test_the_build_requirements_are_exact_versions(self):
+        pins = self._pins()
+
+        assert set(pins) == {"pyside6", "pyinstaller"}
+        for name, version in pins.items():
+            assert re.fullmatch(r"\d+(\.\d+)+", version), f"{name} is a range, not a pin"
+
+    def test_every_job_that_runs_pyinstaller_installs_the_pins(self):
+        for name in ("ci.yml", "release.yml", "batch-rebuild-releases.yml"):
+            jobs = _workflow_yaml(name)["jobs"]
+            builders = {
+                job_name: _script(job)
+                for job_name, job in jobs.items()
+                if "pyinstaller --noconfirm" in _script(job)
+            }
+
+            assert builders, f"{name} no longer builds a binary"
+            for job_name, script in builders.items():
+                where = f"{name}:{job_name}"
+                assert re.search(r"-r requirements-(build|dev)\.txt", script), where
+                assert not re.search(r"pip install\s+pyinstaller\b", script), where
+
+
+class TestBuildProvenance:
+    """DIST-05: a published binary had no verifiable link to the commit that built it."""
+
+    def test_the_publishing_job_attests_every_binary(self):
+        publish = _workflow_yaml("release.yml")["jobs"]["publish-release"]
+        attestations = [
+            step
+            for step in publish["steps"]
+            if str(step.get("uses", "")).startswith("actions/attest-build-provenance@")
+        ]
+
+        assert len(attestations) == 1
+        subjects = attestations[0]["with"]["subject-path"].split()
+        assert {os.path.basename(path) for path in subjects} == {
+            "CrapCleaner.exe",
+            "crapcleaner-linux-x86_64",
+            "crapcleaner-linux-x86_64.tar.gz",
+        }
+
+    def test_the_publishing_job_holds_the_tokens_attestation_needs(self):
+        permissions = _workflow_yaml("release.yml")["jobs"]["publish-release"]["permissions"]
+
+        assert permissions["id-token"] == "write"
+        assert permissions["attestations"] == "write"
+        assert permissions["contents"] == "write"
+
+
+class TestDistributionMetadata:
+    """DIST-03: pyproject carried name, version and description, and nothing publishable."""
+
+    @staticmethod
+    def _project() -> dict:
+        with open(os.path.join(ROOT, "pyproject.toml"), "rb") as fh:
+            return tomllib.load(fh)["project"]
+
+    def test_the_package_describes_itself(self):
+        project = self._project()
+
+        assert project["readme"] == "README.md"
+        assert project["license"] == "MIT"
+        assert project["license-files"] == ["LICENSE"]
+        assert project["authors"]
+        assert project["keywords"]
+
+    def test_the_classifiers_cover_the_tested_pythons(self):
+        classifiers = self._project()["classifiers"]
+
+        for minor in (10, 11, 12):
+            assert f"Programming Language :: Python :: 3.{minor}" in classifiers
+        # PEP 639: a license expression and a license classifier must not both appear.
+        assert not any(entry.startswith("License ::") for entry in classifiers)
+
+    def test_the_python_bound_matches_what_ci_actually_tests(self):
+        matrix = _workflow_yaml("ci.yml")["jobs"]["test"]["strategy"]["matrix"]["python-version"]
+
+        assert matrix == ["3.10", "3.11", "3.12"]
+        assert self._project()["requires-python"] == ">=3.10,<3.14"
+
+    def test_the_urls_point_at_the_repository(self):
+        urls = self._project()["urls"]
+
+        assert set(urls) == {"Homepage", "Repository", "Issues", "Changelog"}
+        for url in urls.values():
+            assert url.startswith("https://github.com/PatrickJnr/crapcleaner")
+
+    def test_a_gui_launch_gets_a_windowless_entry_point(self):
+        """A console entry point opens a terminal behind the window on Windows."""
+        project = self._project()
+
+        assert project["gui-scripts"] == {"crapcleaner-gui": "crapcleaner.app:main"}
+        assert project["scripts"] == {"crapcleaner": "crapcleaner.app:main"}
+
+
+def test_every_workflow_job_declares_its_permissions():
+    """Code scanning flagged five jobs inheriting the default token scope."""
+    import pathlib
+
+    import yaml
+
+    offenders = []
+    for path in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if data.get("permissions") is not None:
+            continue
+        for job, body in (data.get("jobs") or {}).items():
+            if (body or {}).get("permissions") is None:
+                offenders.append(f"{path.name}:{job}")
+    assert not offenders, f"jobs inheriting the default token scope: {offenders}"
+
+
+def test_only_publishing_jobs_may_write():
+    import pathlib
+
+    import yaml
+
+    writers = []
+    for path in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job, body in (data.get("jobs") or {}).items():
+            perms = (body or {}).get("permissions") or {}
+            if perms.get("contents") == "write":
+                writers.append(job)
+    assert writers, "something must be able to publish a release"
+    assert all("publish" in job for job in writers), (
+        f"non-publishing job with write access: {writers}"
+    )

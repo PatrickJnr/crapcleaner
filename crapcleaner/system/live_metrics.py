@@ -74,10 +74,9 @@ class RamVitals:
 class GpuVitals:
     """Live GPU readings. A metric that could not be read stays ``None``.
 
-    Vendors expose wildly different subsets - NVML gives everything, amdgpu sysfs
-    gives load and often temperature, a plain Windows display adapter gives only a
-    name and VRAM size - so every field is optional and rendered as "N/A" when
-    missing rather than as a fabricated zero.
+    Vendors expose different subsets (NVML everything, amdgpu sysfs load and
+    usually temperature, a plain Windows adapter only name and VRAM), so a
+    missing field renders as "N/A" rather than a fabricated zero.
     """
 
     available: bool = False
@@ -370,9 +369,8 @@ class LiveMetricsCollector:
             if self._sysfs_gpu is not None:
                 self._gpu_name = self._sysfs_gpu.name
         elif is_windows():
-            # A display adapter with no vendor telemetry library still has a name and
-            # a VRAM size worth showing. The query talks to WMI, so it runs off the
-            # sampling path and only fills in once it answers.
+            # An adapter with no vendor telemetry still has a name and VRAM size.
+            # The query talks to WMI, so keep it off the sampling path.
             threading.Thread(target=self._load_adapter_gpu, daemon=True).start()
 
     def _load_adapter_gpu(self) -> None:
@@ -715,7 +713,6 @@ class LiveMetricsCollector:
         return uptime_str, power_str
 
 
-# Global singleton instance
 _collector: LiveMetricsCollector | None = None
 
 

@@ -1,9 +1,8 @@
 """Refuse to publish a release whose tag disagrees with the tree it was cut from.
 
 The version lives in three files and the release notes in a fourth, all kept in step
-by hand. Nothing checked them, so tagging a tree that had not been bumped would
-publish binaries whose About page, window title and `--version` all report the
-previous release.
+by hand. Tagging an unbumped tree published binaries whose About page, window title
+and `--version` all reported the previous release.
 
     python scripts/check_release_version.py v1.0.11.1
 

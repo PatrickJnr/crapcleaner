@@ -47,11 +47,6 @@ def _text_of(view) -> str:
     return "\n".join(p for p in parts if p)
 
 
-# ---------------------------------------------------------------------------
-# Startup view
-# ---------------------------------------------------------------------------
-
-
 def test_startup_view_speaks_windows_on_windows():
     with force_platform("windows"):
         view = StartupView(None)
@@ -69,11 +64,6 @@ def test_startup_view_speaks_xdg_on_linux():
     assert "XDG autostart" in text
     assert "Windows" not in text
     view.deleteLater()
-
-
-# ---------------------------------------------------------------------------
-# Services view
-# ---------------------------------------------------------------------------
 
 
 def test_services_view_speaks_windows_on_windows():
@@ -111,11 +101,6 @@ def test_services_view_startup_menu_matches_the_platform():
     linux_view.deleteLater()
 
 
-# ---------------------------------------------------------------------------
-# System updates view
-# ---------------------------------------------------------------------------
-
-
 def test_updates_view_speaks_windows_update_on_windows():
     with force_platform("windows"):
         view = SystemUpdatesView(None)
@@ -140,11 +125,6 @@ def test_updates_view_speaks_package_manager_on_linux():
 
 def test_updates_view_alias_is_the_same_class():
     assert WindowsUpdateView is SystemUpdatesView
-
-
-# ---------------------------------------------------------------------------
-# Memory Cleaner
-# ---------------------------------------------------------------------------
 
 
 @contextmanager
@@ -194,11 +174,6 @@ def test_memory_view_hides_windows_actions_on_linux():
     for token in ("EmptyWorkingSet", "SetProcessWorkingSetSize", "standby"):
         assert token not in text
     view.deleteLater()
-
-
-# ---------------------------------------------------------------------------
-# Command isolation
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

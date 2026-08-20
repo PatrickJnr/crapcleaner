@@ -1,14 +1,12 @@
 """Scheduled, non-destructive scans, run by the operating system's own scheduler.
 
-This module used to define a config dataclass and a run function that nothing
-called - no CLI flag, no setting, no interface. It is now the real thing, built on
-the rule the original docstring set: **a scheduled run never deletes anything.** It
-scans, writes the result where the application can find it, and says so.
+**A scheduled run never deletes anything.** It scans, writes the result where the
+application can find it, and says so.
 
-Scheduling belongs to the OS rather than to a background service of ours: Task
-Scheduler on Windows, a systemd user timer on Linux. Nothing of ours runs between
-scans, the schedule is visible in the tools people already use to audit what runs
-on their machine, and removing the application does not leave a daemon behind.
+Scheduling is delegated to the OS - Task Scheduler on Windows, a systemd user timer
+on Linux - rather than a background service of ours: nothing of ours runs between
+scans, the schedule is visible in the tools people already use to audit what runs on
+their machine, and uninstalling leaves no daemon behind.
 """
 
 from __future__ import annotations
@@ -91,9 +89,7 @@ def _valid_time(at: str) -> str:
 def launch_command() -> list[str]:
     """How the scheduler should invoke this application.
 
-    A frozen build is one executable and is launched directly. From source it is
-    the interpreter plus `-m crapcleaner`, which is what a developer's schedule
-    should run.
+    A frozen build is launched directly; from source it needs the interpreter.
     """
     if getattr(sys, "frozen", False):
         return [sys.executable, "scheduled-scan"]
@@ -278,8 +274,7 @@ def _enable_linux(at: str, frequency: str) -> tuple[bool, str]:
 def run_scheduled_scan(config: ScheduleConfig | None = None) -> dict:
     """Scan, record the result, and notify if it is worth the interruption.
 
-    Never cleans. The whole point of an unattended run is that it cannot delete
-    anything without a person having looked at it.
+    Never cleans: an unattended run must not delete without a person having looked.
     """
     from crapcleaner.config import load_settings
     from crapcleaner.core.scanner import ScanEngine
@@ -342,8 +337,7 @@ def notify(reclaimable_bytes: int) -> bool:
             ["notify-send", "-a", "CrapCleaner", "CrapCleaner", message], timeout=10.0
         ).ok
     if is_windows() and shutil.which("msg.exe"):
-        # msg is present on Pro editions and is the only notification path that
-        # needs nothing installed. A failure here is not worth reporting.
+        # Pro editions only, but the one notification path needing nothing installed.
         run_command(["msg.exe", "*", "/TIME:60", f"CrapCleaner: {message}"], timeout=10.0)
     logger.info("Scheduled scan: %s", message)
     return True

@@ -1,8 +1,57 @@
 """Unit tests for expanded CLI commands in CrapCleaner 1.0.3."""
 
+import json
+from datetime import datetime
 from unittest.mock import patch
 
 from crapcleaner.cli import run
+from crapcleaner.core.manifest import MANIFEST_VERSION
+from crapcleaner.history import append, clear
+from crapcleaner.models.history import HistoryEntry
+
+
+def test_cli_diagnostics_writes_a_bundle(tmp_path, capsys):
+    destination = tmp_path / "bundle.txt"
+
+    assert run(["diagnostics", "--output", str(destination)]) == 0
+    assert "bundle.txt" in capsys.readouterr().out
+    assert destination.read_text(encoding="utf-8").strip()
+
+
+def test_cli_diagnostics_defaults_beside_the_log(capsys):
+    from crapcleaner.config import config_dir
+
+    assert run(["diagnostics"]) == 0
+    assert config_dir() in capsys.readouterr().out
+
+
+def test_cli_history_manifest_lists_what_a_run_removed(tmp_path, capsys):
+    manifest = tmp_path / "run.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": MANIFEST_VERSION,
+                "started": "2024-03-04T10:00:00",
+                "items": [{"path": "/tmp/leftover.tmp", "size": 2048}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    clear()
+    entry = HistoryEntry(kind="cleanup", started=datetime(2024, 3, 4, 10, 0))
+    entry.manifest_path = str(manifest)
+    append(entry)
+
+    assert run(["history", "--manifest", "1"]) == 0
+    assert "leftover.tmp" in capsys.readouterr().out
+
+
+def test_cli_history_manifest_says_when_a_run_kept_none(capsys):
+    clear()
+    append(HistoryEntry(kind="cleanup", started=datetime(2024, 3, 4, 10, 0)))
+
+    assert run(["history", "--manifest", "1"]) == 1
+    assert "manifest" in capsys.readouterr().err.lower()
 
 
 def test_cli_protected_paths():

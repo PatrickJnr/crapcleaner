@@ -201,8 +201,7 @@ def remove(kind: str, loc_key: str, entry_name: str) -> tuple[bool, str]:
     is_system = "COMMON" in loc_key
 
     if is_system:
-        # /etc is root-owned and shared by every user; hide it for this user instead
-        # of deleting a file the package manager owns.
+        # /etc is package-manager-owned; hide it for this user instead of deleting.
         source = os.path.join(SYSTEM_AUTOSTART_DIR, entry_name)
         ok, err = _write_flags(_override_path(entry_name), source, False)
         if not ok:

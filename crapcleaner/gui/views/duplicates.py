@@ -24,10 +24,11 @@ from PySide6.QtWidgets import (
 )
 
 from crapcleaner.gui.dialogs import (
+    BulkKeepRulesDialog,
     DuplicateFilesDialog,
 )
 from crapcleaner.gui.icons import icon as material_icon
-from crapcleaner.gui.views.common import CrapTable, NumericItem, _c, page_header
+from crapcleaner.gui.views.common import CrapTable, NumericItem, _c, delete_paths, page_header
 from crapcleaner.utils.format import (
     format_size,
 )
@@ -71,9 +72,9 @@ class DuplicatesView(QWidget):
         folder_box.addWidget(QLabel("Folders to scan for duplicates:"))
         self.folder_list = QListWidget()
         self.folder_list.setFixedHeight(90)
+        self.folder_list.setAccessibleName("Folders to scan for duplicates")
         folder_box.addWidget(self.folder_list)
 
-        # Quick preset folders
         preset_row = QHBoxLayout()
         preset_row.setSpacing(6)
         for label, name in [
@@ -114,8 +115,19 @@ class DuplicatesView(QWidget):
         self.min_size.setRange(1, 102400)
         self.min_size.setValue(1)
         self.min_size.setSuffix(" MB")
+        self.min_size.setAccessibleName("Minimum file size to consider")
         min_row.addWidget(self.min_size)
         min_row.addStretch(1)
+
+        self.bulk_button = QPushButton("Apply Keep Rule to All Groups...")
+        self.bulk_button.setToolTip(
+            "Pick one rule and apply it across every duplicate group found, "
+            "including groups the table does not show."
+        )
+        self.bulk_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bulk_button.setEnabled(False)
+        self.bulk_button.clicked.connect(self._apply_bulk_rule)
+        min_row.addWidget(self.bulk_button)
 
         self.scan_button = QPushButton("Find Duplicates")
         self.scan_button.setProperty("primary", "true")
@@ -150,6 +162,7 @@ class DuplicatesView(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
         self.table.itemDoubleClicked.connect(self._open_group)
+        self.table.setAccessibleName("Duplicate file groups")
         self._empty_message = "Add one or more folders and scan for duplicates."
         self.table.set_empty_text(self._theme, self._empty_message)
         table_lay.addWidget(self.table)
@@ -192,6 +205,7 @@ class DuplicatesView(QWidget):
             self._empty_message = "Scan complete. No duplicate files were found in these folders."
             self.table.set_empty_text(self._theme, self._empty_message)
         self._groups = groups
+        self.bulk_button.setEnabled(bool(groups))
         self.table.setRowCount(0)
         shown_groups = groups[:_MAX_DUPLICATE_GROUP_ROWS]
         for group in shown_groups:
@@ -217,9 +231,16 @@ class DuplicatesView(QWidget):
         self.table.resizeColumnToContents(1)
         self.table.resizeColumnToContents(2)
         total = sum(g.reclaimable for g in groups)
+        hidden = len(groups) - len(shown_groups)
+        hidden_note = (
+            f" {hidden} group(s) are not listed here — 'Apply Keep Rule to All Groups' covers them."
+            if hidden
+            else ""
+        )
         self.status_label.setText(
             f"Found {len(groups)} duplicate group(s) — up to {format_size(total)} reclaimable "
-            f"(showing top {len(shown_groups)} groups). Double-click any row to review and recycle duplicate copies."
+            f"(showing the top {len(shown_groups)}). Double-click any row to review and recycle "
+            f"duplicate copies.{hidden_note}"
         )
 
     def _open_group(self, item):
@@ -239,14 +260,30 @@ class DuplicatesView(QWidget):
                 "left a copy behind.",
             )
             return
-        # Every deletion in the application goes through the same validated helper, so
-        # a protected path cannot be removed from here either.
-        from crapcleaner.core.cleaner import remove_selected_paths
+        return delete_paths(self, targets, self._after_recycle, title="Recycling Duplicate Copies")
 
-        outcomes = remove_selected_paths(targets, use_recycle_bin=True)
+    def _apply_bulk_rule(self):
+        if not self._groups:
+            return
+        dialog = BulkKeepRulesDialog(self._groups, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        targets = dialog.targets()
+        if not targets:
+            QMessageBox.information(
+                self,
+                "Duplicates",
+                "That rule left nothing to recycle.",
+            )
+            return
+        return delete_paths(self, targets, self._after_recycle, title="Recycling Duplicate Copies")
+
+    def _after_recycle(self, outcomes):
         moved = [o for o in outcomes if o.removed]
         refused = [o for o in outcomes if not o.removed]
-        self._groups = [g for g in self._groups if g is not group]
+        gone = {o.path for o in moved}
+        # A group with one copy left is no longer a duplicate group.
+        self._groups = [g for g in self._groups if len(set(g.files) - gone) > 1]
         self.show_groups(self._groups)
         if not refused:
             QMessageBox.information(

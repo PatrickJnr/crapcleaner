@@ -19,33 +19,45 @@ def _stat_entries(root: str) -> list[os.DirEntry]:
 def is_reparse_point(st) -> bool:
     """Whether a stat result describes a link the traversal must not follow.
 
-    POSIX symlinks are reported through `S_ISLNK`. Windows directory junctions are not:
-    `S_ISLNK`, `os.path.islink`, and `is_dir(follow_symlinks=False)` all report a
-    junction as an ordinary directory, so the only reliable signal is the reparse tag.
+    `S_ISLNK`, `os.path.islink` and `is_dir(follow_symlinks=False)` all report a
+    Windows junction as an ordinary directory, so the reparse tag is the only signal.
 
-    Following one is worse than slow. A junction loop recurses until the file budget
-    runs out, the same files get counted through several paths, and a junction pointing
-    outside the scan root (a `%TEMP%` entry aimed at Documents, say) would present the
-    user's own documents as reclaimable junk.
+    Following one double-counts files through several paths, and a junction pointing
+    outside the scan root would offer the user's own documents as reclaimable junk.
     """
     if stat.S_ISLNK(st.st_mode):
         return True
     return bool(getattr(st, "st_reparse_tag", 0))
 
 
-def _compile_patterns(patterns: tuple[str, ...]):
-    """Precompile suffix + fnmatch-regex per pattern for fast matching."""
-    compiled = []
+_WILDCARDS = re.compile(r"[*?\[]")
+
+
+def _compile_patterns(patterns: tuple[str, ...]) -> list[tuple[str, "re.Pattern[str] | None"]]:
+    """Per pattern, a literal suffix when `*rest` has no further wildcard, else a regex.
+
+    The suffix form has to agree with `fnmatch` exactly: the cleanup deletes by
+    `fnmatch`, so anything the scan counts that `fnmatch` would refuse is space the
+    scan promises and the cleanup never frees.
+    """
+    compiled: list[tuple[str, re.Pattern[str] | None]] = []
     for p in patterns or ():
         lower = p.lower()
-        compiled.append((lower.lstrip("*."), re.compile(fnmatch.translate(lower))))
+        rest = lower[1:] if lower.startswith("*") else ""
+        if rest and not _WILDCARDS.search(rest):
+            compiled.append((rest, None))
+        else:
+            compiled.append(("", re.compile(fnmatch.translate(lower))))
     return compiled
 
 
 def _matches(entry_name: str, compiled) -> bool:
     lower = entry_name.lower()
     for suffix, regex in compiled:
-        if lower.endswith(suffix) or regex.match(lower):
+        if regex is None:
+            if lower.endswith(suffix):
+                return True
+        elif regex.match(lower):
             return True
     return False
 
@@ -78,8 +90,7 @@ def compute_dir_size(
         invalidate_settings_exclusions,
     )
 
-    # One config read per scanned target, so exclusions edited in Preferences apply to
-    # the next scan without costing a read per file.
+    # One config read per scanned target rather than one per file.
     invalidate_settings_exclusions()
 
     def walk(directory: str, guard) -> None:
@@ -127,7 +138,6 @@ def compute_dir_size(
             if count % 500 == 0 and progress_cb is not None:
                 progress_cb(count, total, directory)
 
-    # The root is resolved once; every directory beneath it derives its guard lexically.
     root_guard = DirectoryGuard(root)
     if not root_guard.directory_allowed:
         return 0, 0, 0

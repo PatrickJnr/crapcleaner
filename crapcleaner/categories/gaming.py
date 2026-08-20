@@ -19,12 +19,10 @@ from crapcleaner.utils.platform import (
 
 
 def _linux_steam_roots(home: str) -> list[str]:
-    """Where a Linux Steam install actually lives.
+    """Native, legacy ~/.steam, and Flatpak Steam roots.
 
-    On Linux `get_local_appdata()` maps to ~/.cache, so the Windows paths this module
-    builds resolve to ~/.cache/Steam - which does not exist. The result was a Gaming
-    section that always reported zero while the real caches, routinely several GB,
-    were invisible.
+    The Windows paths this module builds resolve to ~/.cache/Steam on Linux, which
+    never exists, so the Gaming group always reported zero.
     """
     return [
         os.path.join(home, ".local", "share", "Steam"),
@@ -120,7 +118,6 @@ def get_categories() -> list[CleanupCategory]:
 
     categories: list[CleanupCategory] = []
 
-    # 1. Steam Caches & Temporary Downloads
     steam_roots = [
         os.path.join(prog_x86, "Steam"),
         os.path.join(local, "Steam"),
@@ -152,7 +149,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 3. Epic Games Launcher Caches
     epic_targets = [
         CacheTarget(path=os.path.join(local, "Epic Games Launcher", "Saved", "webcache")),
         CacheTarget(path=os.path.join(local, "Epic Games Launcher", "Saved", "Cache")),
@@ -175,7 +171,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 4. EA Desktop & Origin Caches
     ea_targets = [
         CacheTarget(path=os.path.join(local, "Electronic Arts", "EA Desktop", "Cache")),
         CacheTarget(path=os.path.join(local, "Electronic Arts", "EA Desktop", "Logs")),
@@ -198,7 +193,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 5. Ubisoft Connect Caches
     ubi_targets = [
         CacheTarget(path=os.path.join(local, "Ubisoft Game Launcher", "cache")),
         CacheTarget(path=os.path.join(local, "Ubisoft Game Launcher", "logs")),
@@ -219,7 +213,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 6. Riot Games & Valorant Logs
     riot_targets = [
         CacheTarget(path=os.path.join(local, "Riot Games", "Riot Client", "Logs")),
         CacheTarget(path=os.path.join(local, "Riot Games", "Riot Client", "Data", "Crashes")),
@@ -242,7 +235,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 7. Battle.net Launcher Caches
     bnet_targets = [
         CacheTarget(path=os.path.join(program_data, "Battle.net", "Agent", "Cache")),
         CacheTarget(path=os.path.join(local, "Battle.net", "BrowserCache")),
@@ -266,7 +258,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 8. GOG Galaxy Caches
     gog_targets = [
         CacheTarget(path=os.path.join(program_data, "GOG.com", "Galaxy", "webcache")),
         CacheTarget(path=os.path.join(program_data, "GOG.com", "Galaxy", "logs")),
@@ -288,7 +279,6 @@ def get_categories() -> list[CleanupCategory]:
         )
     )
 
-    # 9. FiveM Caches
     fivem_root = os.path.join(local, "FiveM", "FiveM.app")
     fivem_targets = [
         CacheTarget(path=os.path.join(fivem_root, sub))

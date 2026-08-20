@@ -40,7 +40,6 @@ class AboutView(QWidget):
         root_lay.setContentsMargins(28, 24, 28, 24)
         root_lay.setSpacing(16)
 
-        # Header
         header = QVBoxLayout()
         header.setSpacing(4)
         h1 = QLabel("About CrapCleaner")
@@ -51,7 +50,6 @@ class AboutView(QWidget):
         header.addWidget(sub)
         root_lay.addLayout(header)
 
-        # Scrollable content area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -62,7 +60,6 @@ class AboutView(QWidget):
         c_lay.setContentsMargins(0, 0, 0, 0)
         c_lay.setSpacing(16)
 
-        # 1. Creator Hero Card with Squircle Avatar
         hero_card = QFrame()
         hero_card.setProperty("card", "true")
         hero_card.setStyleSheet("border-radius: 12px; padding: 12px;")
@@ -134,11 +131,9 @@ class AboutView(QWidget):
         h_lay.addLayout(info_box, 1)
         c_lay.addWidget(hero_card)
 
-        # 2. Application Specs & Transparency Grid
         grid_lay = QHBoxLayout()
         grid_lay.setSpacing(14)
 
-        # App Card
         app_card = QFrame()
         app_card.setProperty("card", "true")
         app_lay = QVBoxLayout(app_card)
@@ -164,7 +159,6 @@ class AboutView(QWidget):
 
         grid_lay.addWidget(app_card, 1)
 
-        # Safety Card
         safety_card = QFrame()
         safety_card.setProperty("card", "true")
         s_lay = QVBoxLayout(safety_card)
@@ -224,7 +218,6 @@ class AboutView(QWidget):
         grid_lay.addWidget(safety_card, 1)
         c_lay.addLayout(grid_lay)
 
-        # 3. Contributors & Credits Card (Responsive Grid Layout)
         contrib_card = QFrame()
         contrib_card.setProperty("card", "true")
         contrib_lay = QVBoxLayout(contrib_card)
@@ -277,7 +270,6 @@ class AboutView(QWidget):
         contrib_lay.addLayout(self.contrib_grid)
         c_lay.addWidget(contrib_card)
 
-        # 4. Sponsor & Support Card (Interactive FUNDING links)
         sponsor_card = QFrame()
         sponsor_card.setProperty("card", "true")
         sponsor_lay = QVBoxLayout(sponsor_card)
@@ -369,9 +361,21 @@ class AboutView(QWidget):
         blocking avatar download per contributor - from the page constructor, so
         opening About froze the whole window until every request finished or timed out.
         """
+        from crapcleaner.config import offline_mode
         from crapcleaner.gui.workers import ContributorsWorker, is_worker_running
 
         if is_worker_running(getattr(self, "_contrib_worker", None)):
+            return
+
+        if offline_mode():
+            self._clear_contributor_grid()
+            note = QLabel(
+                "Offline mode is on, so the contributor list was not fetched from GitHub. "
+                "Turn offline mode off in Settings to load it."
+            )
+            note.setWordWrap(True)
+            note.setProperty("subtle", "true")
+            self.contrib_grid.addWidget(note, 0, 0)
             return
 
         self._clear_contributor_grid()
@@ -450,8 +454,13 @@ class AboutView(QWidget):
     def _check_updates(self):
         """Ask GitHub for the latest release without blocking the window."""
         from crapcleaner.gui.workers import UpdateCheckWorker, is_worker_running
+        from crapcleaner.utils.updater import offline_skip_reason
 
         if is_worker_running(getattr(self, "_update_worker", None)):
+            return
+        skipped = offline_skip_reason()
+        if skipped:
+            QMessageBox.information(self, "Check for Updates", skipped)
             return
         worker = UpdateCheckWorker(parent=self)
         self._update_worker = worker

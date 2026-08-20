@@ -28,7 +28,15 @@ from PySide6.QtWidgets import (
 )
 
 from crapcleaner.gui.icons import icon as material_icon
-from crapcleaner.gui.views.common import CrapTable, _c, badge, page_header, section_label, stat_card
+from crapcleaner.gui.views.common import (
+    CrapTable,
+    _c,
+    badge,
+    offline_skip_note,
+    page_header,
+    section_label,
+    stat_card,
+)
 from crapcleaner.system.capabilities import (
     SYSTEM_UPDATES,
     get_capability,
@@ -78,7 +86,6 @@ class SystemUpdatesView(QWidget):
         layout.setContentsMargins(0, 0, 8, 0)
         layout.setSpacing(14)
 
-        # 1. Hero Card
         self.hero_card = QFrame()
         self.hero_card.setProperty("card", "true")
         hero_lay = QVBoxLayout(self.hero_card)
@@ -140,7 +147,6 @@ class SystemUpdatesView(QWidget):
         self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
         hero_lay.addWidget(self.status_label)
 
-        # Result banner
         self.result_banner = QFrame()
         self.result_banner.setProperty("card", "true")
         self.result_banner.setVisible(False)
@@ -163,7 +169,6 @@ class SystemUpdatesView(QWidget):
 
         layout.addWidget(self.hero_card)
 
-        # 2. Metric Cards Row
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(12)
         c1, self.avail_card_val, self.avail_card_sub = stat_card(
@@ -182,9 +187,9 @@ class SystemUpdatesView(QWidget):
             metrics_row.addWidget(c)
         layout.addLayout(metrics_row)
 
-        # 3. Available Updates Section
         layout.addWidget(section_label(f"Available {self._capability.title}"))
         self.avail_table = CrapTable(0, 5)
+        self.avail_table.setAccessibleName("Available updates")
         # Windows identifies updates by KB article; package managers use the package
         # version, so the second column is labelled per platform.
         self.avail_table.setHorizontalHeaderLabels(
@@ -213,12 +218,10 @@ class SystemUpdatesView(QWidget):
         self.avail_table.setMinimumHeight(180)
         layout.addWidget(self.avail_table)
 
-        # 4. Installed Update History Section
         layout.addWidget(
             section_label(self._terms.get("history_label", "Installed Update History"))
         )
 
-        # Filter bar for history
         hist_filter_card = QFrame()
         hist_filter_card.setProperty("card", "true")
         hf_lay = QHBoxLayout(hist_filter_card)
@@ -228,6 +231,7 @@ class SystemUpdatesView(QWidget):
         h_icon.setPixmap(material_icon("search", _c(self._theme, "muted")).pixmap(16, 16))
         hf_lay.addWidget(h_icon)
         self.hist_search = QLineEdit()
+        self.hist_search.setAccessibleName("Filter installed update history")
         self.hist_search.setPlaceholderText(
             f"Filter installed {self._history_noun}s by identifier or description..."
         )
@@ -236,6 +240,7 @@ class SystemUpdatesView(QWidget):
         layout.addWidget(hist_filter_card)
 
         self.hist_table = CrapTable(0, 4)
+        self.hist_table.setAccessibleName("Installed update history")
         self.hist_table.setHorizontalHeaderLabels(
             [
                 "HotFix ID" if self._capability.platform == "windows" else "Transaction",
@@ -262,6 +267,10 @@ class SystemUpdatesView(QWidget):
         root.addWidget(scroll)
 
     def refresh(self):
+        skipped = offline_skip_note(f"{self._update_noun.title()} check")
+        if skipped:
+            self._show_offline(skipped)
+            return
         self.status_label.setText(
             f"Checking for {self._update_noun}s and recent {self._history_noun} history..."
         )
@@ -289,13 +298,12 @@ class SystemUpdatesView(QWidget):
         self._report = report
         self.check_btn.setEnabled(True)
 
-        # Backend badge - the Windows Update service, or the detected package manager.
+        # Backend badge: the Windows Update service, or the detected package manager.
         svc_status = report.service_status.upper()
         healthy = any(token in svc_status for token in ("RUNNING", "ACTIVE", "AVAILABLE"))
         self.service_badge.setText(svc_status)
         self.service_badge.setProperty("level", "safe" if healthy else "warning")
 
-        # Counts & metrics
         avail = report.available_updates
         hist = report.installed_history
         total_size = sum(u.size_bytes for u in avail)
@@ -338,6 +346,15 @@ class SystemUpdatesView(QWidget):
         else:
             self.result_banner.setVisible(False)
 
+    def _show_offline(self, message: str):
+        self.check_btn.setEnabled(True)
+        self.hero_badge.setText("OFFLINE MODE")
+        self.hero_badge.setProperty("level", "warning")
+        self.status_label.setText(message)
+        self.result_label.setText(message)
+        self.result_icon.setPixmap(material_icon("info", _c(self._theme, "info")).pixmap(18, 18))
+        self.result_banner.setVisible(True)
+
     def _on_failed(self, msg: str):
         # explain_windows_error passes non-Windows messages through untouched, so it is
         # safe to run on every platform.
@@ -357,19 +374,16 @@ class SystemUpdatesView(QWidget):
         self.avail_table.setRowCount(len(items))
 
         for row, item in enumerate(items):
-            # Title
             t_item = QTableWidgetItem(item.title)
             t_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             if item.description:
                 t_item.setToolTip(item.description)
             self.avail_table.setItem(row, 0, t_item)
 
-            # KB
             kb_str = ", ".join(item.kb_numbers) if item.kb_numbers else "--"
             kb_item = QTableWidgetItem(kb_str)
             self.avail_table.setItem(row, 1, kb_item)
 
-            # Severity
             sev_item = QTableWidgetItem(item.severity)
             if item.severity in ("Critical", "Important"):
                 sev_item.setForeground(QColor(_c(self._theme, "danger")))
@@ -377,12 +391,10 @@ class SystemUpdatesView(QWidget):
                 sev_item.setForeground(QColor(_c(self._theme, "warning")))
             self.avail_table.setItem(row, 2, sev_item)
 
-            # Size
             size_str = format_size(item.size_bytes) if item.size_bytes > 0 else "Dynamic"
             s_item = QTableWidgetItem(size_str)
             self.avail_table.setItem(row, 3, s_item)
 
-            # Category
             cat_str = ", ".join(item.categories) if item.categories else "General"
             cat_item = QTableWidgetItem(cat_str)
             cat_item.setForeground(QColor(_c(self._theme, "muted")))
@@ -531,10 +543,6 @@ class AppUpdatesView(QWidget):
         self._update_map: dict = {}
         self._build()
 
-    # ------------------------------------------------------------------
-    # Build
-    # ------------------------------------------------------------------
-
     def _build(self):
         from crapcleaner.system.package_managers import detect_managers
 
@@ -556,7 +564,6 @@ class AppUpdatesView(QWidget):
         layout.setContentsMargins(0, 0, 8, 0)
         layout.setSpacing(14)
 
-        # --- Hero card ---
         hero_card = QFrame()
         hero_card.setProperty("card", "true")
         hero_lay = QVBoxLayout(hero_card)
@@ -613,7 +620,6 @@ class AppUpdatesView(QWidget):
 
         layout.addWidget(hero_card)
 
-        # --- Result banner ---
         self.result_banner = QFrame()
         self.result_banner.setProperty("infoCard", "true")
         result_lay = QHBoxLayout(self.result_banner)
@@ -635,7 +641,6 @@ class AppUpdatesView(QWidget):
         self.result_banner.setVisible(False)
         layout.addWidget(self.result_banner)
 
-        # --- Filter bar ---
         filter_card = QFrame()
         filter_card.setProperty("card", "true")
         f_lay = QHBoxLayout(filter_card)
@@ -643,22 +648,24 @@ class AppUpdatesView(QWidget):
         f_lay.setSpacing(8)
 
         self.search_input = QLineEdit()
+        self.search_input.setAccessibleName("Search packages")
         self.search_input.setPlaceholderText("Search packages...")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._filter)
         f_lay.addWidget(self.search_input, 1)
 
         self.mgr_combo = QComboBox()
+        self.mgr_combo.setAccessibleName("Package manager filter")
         self.mgr_combo.addItem("All Managers")
         self.mgr_combo.currentIndexChanged.connect(self._filter)
         f_lay.addWidget(self.mgr_combo)
 
         layout.addWidget(filter_card)
 
-        # --- Updates table ---
         # Source is folded into the Manager column: for winget/choco/snap the two
         # always match, and a dedicated column just repeats itself down the view.
         self.table = CrapTable(0, 4)
+        self.table.setAccessibleName("Package updates")
         self.table.setHorizontalHeaderLabels(
             ["Package", "Current Version", "Available Version", "Manager"]
         )
@@ -688,11 +695,16 @@ class AppUpdatesView(QWidget):
         scroll.setWidget(container)
         root.addWidget(scroll)
 
-    # ------------------------------------------------------------------
-    # Refresh / data loading
-    # ------------------------------------------------------------------
-
     def refresh(self):
+        skipped = offline_skip_note("Package update check")
+        if skipped:
+            self.refresh_btn.setEnabled(True)
+            self.update_all_btn.setEnabled(False)
+            self.update_selected_btn.setEnabled(False)
+            self.hero_badge.setText("OFFLINE MODE")
+            self.status_label.setText(skipped)
+            self.result_banner.setVisible(False)
+            return
         self.status_label.setText("Scanning package managers for available updates...")
         self.refresh_btn.setEnabled(False)
         self.update_all_btn.setEnabled(False)
@@ -732,7 +744,6 @@ class AppUpdatesView(QWidget):
         self.last_check_badge.setText(f"CHECKED AT {ts}")
         self.update_all_btn.setEnabled(total > 0)
 
-        # Repopulate manager combo
         self.mgr_combo.blockSignals(True)
         self.mgr_combo.clear()
         self.mgr_combo.addItem("All Managers")
@@ -782,10 +793,6 @@ class AppUpdatesView(QWidget):
         self._filtered = filtered
         self._populate_table(filtered)
 
-    # ------------------------------------------------------------------
-    # Table
-    # ------------------------------------------------------------------
-
     def _populate_table(self, updates: list):
         self._update_map = {(u.manager, u.id): u for u in updates}
 
@@ -795,25 +802,21 @@ class AppUpdatesView(QWidget):
         self.table.setRowCount(len(updates))
 
         for row, u in enumerate(updates):
-            # Package name
             name_item = QTableWidgetItem(u.name)
             name_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             name_item.setToolTip(f"Package ID: {u.id}")
             name_item.setData(Qt.ItemDataRole.UserRole, (u.manager, u.id))
             self.table.setItem(row, 0, name_item)
 
-            # Current version
             cur_item = QTableWidgetItem(u.current_version or "\u2014")
             cur_item.setForeground(QColor(_c(self._theme, "muted")))
             self.table.setItem(row, 1, cur_item)
 
-            # Available version (highlighted)
             av_item = QTableWidgetItem(u.available_version)
             av_item.setForeground(QColor(_c(self._theme, "safe")))
             av_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             self.table.setItem(row, 2, av_item)
 
-            # Manager (with the source appended only when it adds information)
             label = u.manager
             if u.source and u.source.lower() != u.manager.lower():
                 label = f"{u.manager} \u00b7 {u.source}"
@@ -846,10 +849,6 @@ class AppUpdatesView(QWidget):
         self.update_selected_btn.setText(
             f"Update Selected ({count})" if count else "Update Selected"
         )
-
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
 
     def _on_double_click(self, table_item):
         if self._populating:
@@ -975,10 +974,6 @@ class AppUpdatesView(QWidget):
         copy_ver = menu.addAction("Copy Available Version")
         copy_ver.triggered.connect(lambda: QApplication.clipboard().setText(u.available_version))
         menu.exec(self.table.viewport().mapToGlobal(pos))
-
-    # ------------------------------------------------------------------
-    # Housekeeping
-    # ------------------------------------------------------------------
 
     def closeEvent(self, event):
         from crapcleaner.gui.workers import stop_worker

@@ -36,11 +36,9 @@ class MemoryActionResult:
     success: bool = False
     message: str = ""
     dry_run: bool = False
-    #: Change in system-wide available memory across the action. Everything else on
-    #: the machine allocated and freed during the same window, so this is not a
-    #: measure of what the action itself released and it is not clamped at zero -
-    #: available memory genuinely falls sometimes, and hiding that would be the same
-    #: trick every "RAM optimiser" plays.
+    #: Change in system-wide available memory across the action, not a measure of
+    #: what the action released. Never clamped at zero: available memory genuinely
+    #: falls sometimes.
     available_delta_bytes: int = 0
     measurable: bool = True
     before: MemoryStats = field(default_factory=MemoryStats)
@@ -56,8 +54,7 @@ class MemoryActionResult:
 def _platform_text(windows: str, linux: str, fallback: str = "") -> str:
     """Pick the wording for the running platform.
 
-    Descriptions name the exact system call being made, so showing every platform's
-    mechanism at once would tell the user about calls this machine will never issue.
+    Descriptions name the exact system call made, so only this platform's applies.
     """
     if is_windows():
         return windows
@@ -195,9 +192,8 @@ def _all_actions() -> list[MemoryAction]:
 def available_actions(include_unsupported: bool = False) -> list[MemoryAction]:
     """Actions the running platform can actually perform.
 
-    Actions belonging to another operating system are omitted rather than shown
-    disabled - there is nothing the user can do about a kernel interface this system
-    does not have. Pass ``include_unsupported`` for diagnostics that need the full set.
+    Other platforms' actions are omitted rather than shown disabled; the user
+    cannot install a kernel interface. ``include_unsupported`` returns the full set.
     """
     actions = _all_actions()
     if include_unsupported:
@@ -208,8 +204,8 @@ def available_actions(include_unsupported: bool = False) -> list[MemoryAction]:
 def get_action(action_id: str) -> MemoryAction | None:
     """Look up an action by id, including ones this platform cannot run.
 
-    Resolving unsupported ids keeps `run_action` able to explain *why* an action is
-    unavailable instead of reporting an unknown action id.
+    Resolving unsupported ids lets `run_action` explain *why* one is unavailable
+    instead of reporting an unknown id.
     """
     for action in _all_actions():
         if action.id == action_id:
@@ -227,10 +223,8 @@ def _trim_process_working_sets() -> tuple[bool, str]:
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
             psapi = ctypes.WinDLL("psapi", use_last_error=True)
 
-            # A system-wide modified-page-list flush used to run here. It is not what
-            # this action says it does, it needs a privilege this path does not
-            # request, and its result was discarded - so it is gone rather than
-            # documented. "Flush all available memory" is where system-wide work goes.
+            # No system-wide flush here: it needs a privilege this path never
+            # requests. That work lives in "Flush all available memory".
 
             PROCESS_QUERY_INFORMATION = 0x0400
             PROCESS_SET_QUOTA = 0x0100
@@ -261,7 +255,7 @@ def _trim_process_working_sets() -> tuple[bool, str]:
             count = cb_needed.value // ctypes.sizeof(wintypes.DWORD)
             trimmed_count = 0
 
-            # 2 passes ensure secondary background worker allocations are also cleaned
+            # Second pass catches background worker allocations made during the first.
             for _ in range(2):
                 for i in range(count):
                     pid = pids[i]
@@ -301,9 +295,8 @@ def _trim_process_working_sets() -> tuple[bool, str]:
 def _flush_all() -> tuple[bool, str]:
     """Run every applicable step, and report success only if one of them worked.
 
-    This used to return True unconditionally, so a run in which every step failed
-    still reported "Memory flush completed." Steps that are skipped for lack of
-    elevation are reported as skipped rather than counted either way.
+    Returning True unconditionally reported "Memory flush completed." for runs in
+    which every step failed. Steps skipped for lack of elevation count as neither.
     """
     done: list[str] = []
     failed: list[str] = []
@@ -497,7 +490,6 @@ def _purge_standby_list() -> tuple[bool, str]:
         SystemMemoryListInformation = 80
         ntdll = ctypes.windll.ntdll
 
-        # 1. Flush modified page list
         cmd_flush_mod = ctypes.c_int(3)
         ntdll.NtSetSystemInformation(
             SystemMemoryListInformation,
@@ -505,7 +497,6 @@ def _purge_standby_list() -> tuple[bool, str]:
             ctypes.sizeof(cmd_flush_mod),
         )
 
-        # 2. Empty all system working sets
         cmd_empty_ws = ctypes.c_int(2)
         ntdll.NtSetSystemInformation(
             SystemMemoryListInformation,
@@ -513,7 +504,6 @@ def _purge_standby_list() -> tuple[bool, str]:
             ctypes.sizeof(cmd_empty_ws),
         )
 
-        # 3. Purge all priority standby lists (0-7)
         cmd_purge_standby = ctypes.c_int(4)
         status = ntdll.NtSetSystemInformation(
             SystemMemoryListInformation,
@@ -521,7 +511,6 @@ def _purge_standby_list() -> tuple[bool, str]:
             ctypes.sizeof(cmd_purge_standby),
         )
 
-        # 4. Purge low priority standby
         cmd_purge_low = ctypes.c_int(5)
         ntdll.NtSetSystemInformation(
             SystemMemoryListInformation,
@@ -529,7 +518,6 @@ def _purge_standby_list() -> tuple[bool, str]:
             ctypes.sizeof(cmd_purge_low),
         )
 
-        # 5. Trim Windows System File Cache
         try:
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
             kernel32.SetSystemFileCacheSize.argtypes = [
@@ -550,9 +538,8 @@ def _purge_standby_list() -> tuple[bool, str]:
 
 
 def _drop_caches() -> tuple[bool, str]:
-    try:
-        run_command(["sync"], timeout=30.0)
-    except Exception:
+    # run_command reports failure in the result; it never raises.
+    if not run_command(["sync"], timeout=30.0).ok:
         getattr(os, "sync", lambda: None)()
     try:
         with open("/proc/sys/vm/drop_caches", "w", encoding="ascii") as fh:

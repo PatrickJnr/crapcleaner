@@ -44,15 +44,12 @@ def test_explain_hresult_access_denied_0x80070005():
 
 
 def test_explain_heuristic_categories_for_unlisted_codes():
-    # 0x80244999 -> server error category
     exp_server = explain_windows_error("0x80244999")
     assert "Update Server Error" in exp_server
 
-    # 0x80248999 -> datastore category
     exp_ds = explain_windows_error("0x80248999")
     assert "Datastore Error" in exp_ds
 
-    # 0x80072999 -> network timeout category
     exp_net = explain_windows_error("0x80072999")
     assert "Network" in exp_net or "Timeout" in exp_net
 

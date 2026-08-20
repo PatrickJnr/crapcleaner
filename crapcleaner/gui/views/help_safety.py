@@ -1,10 +1,14 @@
 """Help and safety documentation view."""
 
+import os
+from datetime import datetime
+
 from PySide6.QtCore import (
     Qt,
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -17,14 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crapcleaner.config import load_settings
 from crapcleaner.gui.icons import icon as material_icon
 from crapcleaner.gui.views.common import _c, badge, page_header
-from crapcleaner.registry import get_all_categories
-from crapcleaner.utils.platform import (
-    is_admin,
-    list_drives,
-)
 
 
 class HelpSafetyView(QWidget):
@@ -42,7 +40,6 @@ class HelpSafetyView(QWidget):
         root_lay.setContentsMargins(24, 20, 24, 16)
         root_lay.setSpacing(12)
 
-        # Header with Copy Diagnostics Action
         header_row = QHBoxLayout()
         header_row.addWidget(
             page_header(
@@ -59,9 +56,18 @@ class HelpSafetyView(QWidget):
         diag_btn.clicked.connect(self._copy_diagnostics)
         header_row.addWidget(diag_btn)
 
+        self.bundle_button = QPushButton("Save Diagnostics Bundle...")
+        self.bundle_button.setProperty("secondary", "true")
+        self.bundle_button.setIcon(material_icon("file_download", _c(self._theme, "text")))
+        self.bundle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bundle_button.setToolTip(
+            "Write a support bundle to a file. Every path in it is reduced to its root."
+        )
+        self.bundle_button.clicked.connect(self._save_diagnostics_bundle)
+        header_row.addWidget(self.bundle_button)
+
         root_lay.addLayout(header_row)
 
-        # Filter Chips & Search Bar
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
 
@@ -90,12 +96,12 @@ class HelpSafetyView(QWidget):
         self.search_edit.setPlaceholderText("Search documentation & FAQs (Ctrl+F)...")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setFixedWidth(260)
+        self.search_edit.setAccessibleName("Search documentation and FAQs")
         self.search_edit.textChanged.connect(self._apply_search)
         toolbar.addWidget(self.search_edit)
 
         root_lay.addLayout(toolbar)
 
-        # Scrollable Cards Container
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -145,7 +151,6 @@ class HelpSafetyView(QWidget):
         return card
 
     def _build_content_cards(self):
-        # 1. Core Philosophy
         self.cards_layout.addWidget(
             self._make_card(
                 "1. Core Philosophy & Design Principles",
@@ -166,7 +171,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 2. Strict Prohibition on Registry Cleaning
         self.cards_layout.addWidget(
             self._make_card(
                 "2. Absolute Strict Prohibition on Registry Cleaning",
@@ -187,7 +191,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 3. Performance & Placebo Disclaimer
         self.cards_layout.addWidget(
             self._make_card(
                 "3. Performance & Placebo Disclaimer",
@@ -199,7 +202,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 4. Understanding File Types
         self.cards_layout.addWidget(
             self._make_card(
                 "4. Understanding File Types & Regeneration Behavior",
@@ -222,7 +224,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 5. Centralized Safety Layer & Protected Paths
         self.cards_layout.addWidget(
             self._make_card(
                 "5. Centralized Protected Paths Safety Layer",
@@ -246,7 +247,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 6. Exclusions Manager
         self.cards_layout.addWidget(
             self._make_card(
                 "6. Cleanup Exclusions Manager",
@@ -259,7 +259,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 7. Safety Model: Recycle Bin & Dry Run
         self.cards_layout.addWidget(
             self._make_card(
                 "7. Recycle Bin Safety Model & Dry-Run Simulation",
@@ -271,7 +270,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 8. Complete FAQ Section
         faq_html = (
             "<b>Q: What can CrapCleaner safely remove?</b><br>"
             "A: Web caches, package manager caches (npm, pip, cargo, go), temporary files, crash dumps, old installers, and shader caches.<br><br>"
@@ -307,7 +305,6 @@ class HelpSafetyView(QWidget):
             )
         )
 
-        # 9. Troubleshooting & Common Issues
         self.cards_layout.addWidget(
             self._make_card(
                 "9. Troubleshooting & Permissions Guide",
@@ -344,33 +341,49 @@ class HelpSafetyView(QWidget):
             card.setVisible(match_filter and match_search)
 
     def _copy_diagnostics(self):
-        import platform
+        # Same text the saved bundle carries, so the two cannot drift apart.
+        from crapcleaner.system.diagnostics import build_diagnostics_text
 
-        from crapcleaner import __version__
-
-        settings = load_settings()
-        excl_count = len(settings.get("excluded_paths", []))
-        cats = get_all_categories()
-        drives = list_drives()
-
-        diag_text = (
-            f"=== CrapCleaner System Diagnostics ===\n"
-            f"Version:       v{__version__}\n"
-            f"OS:            {platform.system()} {platform.release()} ({platform.machine()})\n"
-            f"Python:        {platform.python_version()}\n"
-            f"Admin Rights:  {'Yes' if is_admin() else 'No'}\n"
-            f"Drives:        {', '.join(drives)}\n"
-            f"Categories:    {len(cats)} loaded\n"
-            f"Exclusions:    {excl_count} active rules\n"
-            f"====================================="
-        )
-        clipboard = QApplication.clipboard()
-        clipboard.setText(diag_text)
+        QApplication.clipboard().setText(build_diagnostics_text())
         QMessageBox.information(
             self,
             "Diagnostics Copied",
             "System diagnostics copied to clipboard.",
         )
+
+    def _save_diagnostics_bundle(self):
+        default = os.path.join(
+            os.path.expanduser("~"),
+            f"crapcleaner-diagnostics-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt",
+        )
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Save Diagnostics Bundle", default, "Text (*.txt)"
+        )
+        if not dest:
+            return
+        from crapcleaner.gui.workers import DiagnosticsWorker
+
+        self.bundle_button.setEnabled(False)
+        worker = DiagnosticsWorker(dest, self)
+        self._bundle_worker = worker
+        worker.done.connect(self._bundle_written)
+        worker.failed.connect(self._bundle_failed)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        return worker
+
+    def _bundle_written(self, path: str):
+        self.bundle_button.setEnabled(True)
+        QMessageBox.information(
+            self,
+            "Diagnostics Bundle",
+            f"Saved to:\n{path}\n\nEvery path inside it is reduced to its root before "
+            "being written, so it is safe to attach to a bug report.",
+        )
+
+    def _bundle_failed(self, message: str):
+        self.bundle_button.setEnabled(True)
+        QMessageBox.warning(self, "Diagnostics Bundle", f"Could not write the bundle:\n{message}")
 
     def apply_theme(self, theme: str):
         self._theme = theme

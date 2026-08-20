@@ -104,7 +104,6 @@ class TestGetCategories:
         assert all(c.has_targets for c in cats)
 
     def test_default_scan_roots(self, tmp_path):
-        # empty scan_roots should still produce defaults (no crash)
         cats = get_categories(scan_roots=[])
         assert len(cats) > 0
 

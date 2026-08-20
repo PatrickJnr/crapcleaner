@@ -23,7 +23,6 @@ def test_find_crash_dumps(tmp_path):
             with patch(
                 "crapcleaner.analysis.crash_dumps.get_windows_dir", return_value=str(tmp_path)
             ):
-                # Make CrashDumps subfolder
                 crash_dir = tmp_path / "CrashDumps"
                 crash_dir.mkdir()
                 (crash_dir / "notepad.exe.500.dmp").write_bytes(b"\x00" * 1024)

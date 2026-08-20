@@ -1,25 +1,21 @@
 """Download, verify, and install a new release, then start it again.
 
-Telling someone a new version exists and leaving them to download it, close the
-application, replace a file and reopen it is most of the work. This does that part,
-with the constraint that matters: **the running application is only replaced once a
-new one has been downloaded and verified.**
-
-The sequence is:
+The constraint that matters: **the running application is only replaced once a new
+one has been downloaded and verified.**
 
 1. Find the asset for this platform on the release.
 2. Download it beside the current executable, as a temporary file.
-3. Verify its SHA-256 against the ``checksums.txt`` published with the release, and
-   check it looks like an executable for this platform.
-4. Hand a small script the current process id, the verified file, and the path to
-   replace. The script waits for this process to exit, keeps the old binary as
-   ``.bak``, moves the new one into place, starts it, and removes the backup.
-5. If the move fails, the script puts the backup back and starts that instead, so a
-   failed update leaves a working application rather than a broken one.
+3. Verify its SHA-256 against the release's ``checksums.txt``, and that it looks
+   like an executable for this platform.
+4. Hand a script this process id, the verified file, and the path to replace. It
+   waits for this process to exit, keeps the old binary as ``.bak``, moves the new
+   one in, starts it, and removes the backup.
+5. If either move fails it puts back what was there, starts it, and writes why to
+   the application log, so a failed update never leaves the user with nothing.
 
-Only frozen one-file builds can replace themselves this way. A source checkout is
-told to use git or pip, and a one-folder build is told to download the release,
-because swapping one file inside it would leave the folder inconsistent.
+Only frozen one-file builds can replace themselves this way; swapping one file
+inside a one-folder build would leave the folder inconsistent, and a copy owned by
+a package manager must be updated through that manager.
 """
 
 from __future__ import annotations
@@ -36,7 +32,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from crapcleaner import __version__
-from crapcleaner.utils.logs import get_logger
+from crapcleaner.utils.logs import get_logger, log_path
 from crapcleaner.utils.platform import is_windows
 
 logger = get_logger("self_update")
@@ -81,8 +77,38 @@ def install_kind() -> str:
     return "onefile"
 
 
+#: Path fragments that mean a package manager owns this copy, and the command that
+#: manager expects. Replacing the file behind its back leaves its recorded version
+#: and hash pointing at something that is no longer installed.
+_MANAGER_FRAGMENTS: tuple[tuple[str, str], ...] = (
+    ("winget/packages", "winget upgrade CrapCleaner"),
+    ("scoop/apps", "scoop update crapcleaner"),
+    ("chocolatey/lib", "choco upgrade crapcleaner"),
+)
+_MANAGER_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("/app/", "flatpak update"),
+    ("/snap/", "snap refresh"),
+)
+
+
+def package_manager_command() -> str | None:
+    """The upgrade command of the package manager that owns this copy, if any."""
+    path = sys.executable.replace("\\", "/")
+    lowered = path.lower()
+    for fragment, command in _MANAGER_FRAGMENTS:
+        if fragment in lowered:
+            return command
+    for prefix, command in _MANAGER_PREFIXES:
+        if path.startswith(prefix):
+            return command
+    return None
+
+
 def can_self_update() -> tuple[bool, str]:
     """Whether this copy can replace itself, and why not when it cannot."""
+    managed = package_manager_command()
+    if managed is not None:
+        return False, f"This copy is installed by a package manager. Update it with: {managed}"
     kind = install_kind()
     if kind == "source":
         return False, (
@@ -232,6 +258,7 @@ setlocal
 set "TARGET={target}"
 set "NEW={new}"
 set "BACKUP={target}.bak"
+set "LOG={log}"
 
 rem Wait for the running application to exit, then swap the file.
 :wait
@@ -243,10 +270,19 @@ if not errorlevel 1 (
 
 if exist "%BACKUP%" del /F /Q "%BACKUP%"
 move /Y "%TARGET%" "%BACKUP%" >nul
+if errorlevel 1 (
+    rem The application is still where it was; say so instead of failing silently.
+    >>"%LOG%" echo Update abandoned: "%TARGET%" could not be moved aside. The installed version was left in place.
+    start "" "%TARGET%"
+    del /F /Q "%NEW%"
+    del /F /Q "%~f0"
+    exit /b 1
+)
 move /Y "%NEW%" "%TARGET%" >nul
 if errorlevel 1 (
     rem Put the working version back rather than leaving nothing behind.
     move /Y "%BACKUP%" "%TARGET%" >nul
+    >>"%LOG%" echo Update abandoned: the new build could not be moved into place. The installed version was restored.
     start "" "%TARGET%"
     del /F /Q "%~f0"
     exit /b 1
@@ -263,6 +299,7 @@ _POSIX_SCRIPT = """#!/bin/sh
 TARGET='{target}'
 NEW='{new}'
 BACKUP='{target}.bak'
+LOG='{log}'
 
 # Wait for the running application to exit.
 while kill -0 {pid} 2>/dev/null; do
@@ -270,10 +307,18 @@ while kill -0 {pid} 2>/dev/null; do
 done
 
 rm -f "$BACKUP"
-mv "$TARGET" "$BACKUP" || exit 1
+if ! mv "$TARGET" "$BACKUP"; then
+    # The application is still where it was; say so instead of failing silently.
+    echo "Update abandoned: $TARGET could not be moved aside. The installed version was left in place." >>"$LOG"
+    "$TARGET" &
+    rm -f "$NEW"
+    rm -f "$0"
+    exit 1
+fi
 if ! mv "$NEW" "$TARGET"; then
     # Put the working version back rather than leaving nothing behind.
     mv "$BACKUP" "$TARGET"
+    echo "Update abandoned: the new build could not be moved into place. The installed version was restored." >>"$LOG"
     "$TARGET" &
     rm -f "$0"
     exit 1
@@ -296,6 +341,7 @@ def write_installer_script(update: DownloadedUpdate, relaunch_args: str = "") ->
         new=update.path,
         pid=os.getpid(),
         relaunch_args=relaunch_args,
+        log=log_path(),
     )
     handle, path = tempfile.mkstemp(prefix="crapcleaner-install-", suffix=suffix)
     with os.fdopen(handle, "w", encoding="utf-8", newline="") as fh:
@@ -305,15 +351,39 @@ def write_installer_script(update: DownloadedUpdate, relaunch_args: str = "") ->
     return path
 
 
+def _verify_replaceable(target: str) -> None:
+    """Rename the target aside and back, so a doomed swap fails while the app is alive.
+
+    The installer script only runs after this process exits; a first move that fails
+    there leaves the user with no application and nobody to tell.
+    """
+    probe = f"{target}.swap-check"
+    try:
+        os.replace(target, probe)
+    except OSError as exc:
+        raise UpdateError(
+            f"{target} cannot be replaced ({exc}), so the update was not started and "
+            "the application is untouched. Close any other copy, or exclude the folder "
+            "from antivirus, and try again."
+        ) from exc
+    try:
+        os.replace(probe, target)
+    except OSError as exc:
+        raise UpdateError(
+            f"The application could not be renamed back and is now {probe}. "
+            f"Rename it to {os.path.basename(target)} before starting it again."
+        ) from exc
+
+
 def apply_update(update: DownloadedUpdate, relaunch_args: str = "") -> str:
     """Start the installer and hand control to it. The caller must then exit.
 
-    Returns the script path so a caller can report or test it. The application must
-    quit promptly afterwards - the script is waiting on this process id, and until
-    it exits nothing has been replaced.
+    Returns the script path. The application must quit promptly: the script waits
+    on this process id, and until it exits nothing has been replaced.
     """
     if not os.path.isfile(update.path):
         raise UpdateError("The downloaded update is no longer available.")
+    _verify_replaceable(update.target)
 
     script = write_installer_script(update, relaunch_args=relaunch_args)
     try:

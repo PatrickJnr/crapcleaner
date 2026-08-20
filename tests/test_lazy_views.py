@@ -86,8 +86,14 @@ def test_theme_change_does_not_force_pages_into_existence(window):
 def test_all_themes_apply_across_all_pages(window):
     for key in window._PAGE_KEYS:
         window.navigate(key)
+    themed = [key for key, view in window._views.items() if hasattr(view, "_theme")]
+    assert themed
+
     for theme in THEMES:
         window._apply_theme_to_views(theme)
+        assert window._theme == theme
+        for key in themed:
+            assert window._views[key]._theme == theme, f"{key} kept an older theme"
 
 
 def test_unavailable_capability_pages_resolve_to_none():

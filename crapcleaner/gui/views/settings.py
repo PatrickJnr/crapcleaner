@@ -56,7 +56,6 @@ class SettingsView(QWidget):
         root.setSpacing(12)
         self.settings = load_settings()
 
-        # 1. Header with Page Title + Global Action Buttons
         header_row = QHBoxLayout()
         header_row.setSpacing(12)
         header_text = page_header(
@@ -65,7 +64,6 @@ class SettingsView(QWidget):
         )
         header_row.addWidget(header_text, 1)
 
-        # Quick Save and Reset Actions in Header
         actions_box = QHBoxLayout()
         actions_box.setSpacing(8)
 
@@ -86,7 +84,6 @@ class SettingsView(QWidget):
         header_row.addLayout(actions_box)
         root.addLayout(header_row)
 
-        # 2. Horizontal Sub-Navigation Tab Bar (Segmented Tabs)
         nav_row = QHBoxLayout()
         nav_row.setSpacing(6)
 
@@ -114,10 +111,8 @@ class SettingsView(QWidget):
         nav_row.addStretch(1)
         root.addLayout(nav_row)
 
-        # 3. Stack of Tab Pages
         self.tab_stack = QStackedWidget()
 
-        # --- PAGE 0: Theme Gallery ---
         page_themes_scroll = QScrollArea()
         page_themes_scroll.setWidgetResizable(True)
         page_themes_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -126,7 +121,6 @@ class SettingsView(QWidget):
         lay_themes.setContentsMargins(0, 4, 8, 4)
         lay_themes.setSpacing(14)
 
-        # 1. Visual Theme Gallery
         current_theme = self.settings.get("theme", "dark")
         self.theme_gallery = ThemeGalleryWidget(current_theme, page_themes_container)
         self.theme_combo = self.theme_gallery.theme_combo
@@ -136,7 +130,6 @@ class SettingsView(QWidget):
         )
         lay_themes.addWidget(self.theme_gallery)
 
-        # 2. Motion & Transitions
         motion_card = QFrame()
         motion_card.setProperty("card", "true")
         motion_lay = QVBoxLayout(motion_card)
@@ -150,12 +143,21 @@ class SettingsView(QWidget):
         self.reduce_motion_check.setChecked(bool(self.settings.get("reduce_motion", False)))
         self.reduce_motion_check.toggled.connect(self._save_reduce_motion)
         motion_lay.addWidget(self.reduce_motion_check)
+
+        self.high_contrast_check = QCheckBox(
+            "High contrast (raise text in every theme to WCAG AAA)"
+        )
+        self.high_contrast_check.setToolTip(
+            "Applies to whichever theme is active, not just the High Contrast palette."
+        )
+        self.high_contrast_check.setChecked(bool(self.settings.get("high_contrast", False)))
+        self.high_contrast_check.toggled.connect(self._save_high_contrast)
+        motion_lay.addWidget(self.high_contrast_check)
         lay_themes.addWidget(motion_card)
 
         page_themes_scroll.setWidget(page_themes_container)
         self.tab_stack.addWidget(page_themes_scroll)
 
-        # --- PAGE 1: Custom Theme Studio ---
         page_studio_scroll = QScrollArea()
         page_studio_scroll.setWidgetResizable(True)
         page_studio_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -167,14 +169,12 @@ class SettingsView(QWidget):
         self.custom_builder = CustomThemeBuilderWidget(page_studio_container)
         self.custom_builder.theme_applied.connect(self._on_custom_theme_applied)
         self.custom_builder.theme_saved.connect(self._on_custom_theme_saved)
-        # The Studio takes the height it is given. A trailing stretch here was
-        # what left the bottom half of the page empty.
+        # No trailing stretch here: it left the bottom half of the page empty.
         lay_studio.addWidget(self.custom_builder, 1)
 
         page_studio_scroll.setWidget(page_studio_container)
         self.tab_stack.addWidget(page_studio_scroll)
 
-        # --- PAGE 1: Safety & Protection ---
         page_safety = QWidget()
         lay_safety = QVBoxLayout(page_safety)
         lay_safety.setContentsMargins(0, 4, 0, 0)
@@ -210,12 +210,17 @@ class SettingsView(QWidget):
             "Show command preview before running external operations (Docker / WSL)"
         )
         self.cmd_preview_check.setChecked(bool(self.settings.get("show_command_preview", True)))
+        self.offline_check = QCheckBox(
+            "Offline mode (never contact the network: no update checks, no contributor list)"
+        )
+        self.offline_check.setChecked(bool(self.settings.get("offline_mode", False)))
 
         sc_lay.addWidget(self.dry_run_check)
         sc_lay.addWidget(self.confirm_check)
         sc_lay.addWidget(self.recycle_check)
         sc_lay.addWidget(self.auto_rescan_check)
         sc_lay.addWidget(self.cmd_preview_check)
+        sc_lay.addWidget(self.offline_check)
         lay_safety.addWidget(safety_card)
 
         guide_card = QFrame()
@@ -275,7 +280,6 @@ class SettingsView(QWidget):
 
         self.tab_stack.addWidget(page_safety)
 
-        # --- PAGE 2: Exclusions & Roots ---
         page_excl = QWidget()
         lay_excl = QHBoxLayout(page_excl)
         lay_excl.setContentsMargins(0, 4, 0, 0)
@@ -296,6 +300,7 @@ class SettingsView(QWidget):
         ce_lay.addWidget(ce_sub)
 
         self.exclusions_list = QListWidget()
+        self.exclusions_list.setAccessibleName("Folders excluded from every scan")
         for excl_path in self.settings.get("excluded_paths", []):
             self.exclusions_list.addItem(excl_path)
         ce_lay.addWidget(self.exclusions_list, 1)
@@ -329,6 +334,7 @@ class SettingsView(QWidget):
         cr_lay.addWidget(self.all_drives_check)
 
         self.roots_list = QListWidget()
+        self.roots_list.setAccessibleName("Extra folders to scan")
         for root_path in self.settings.get("scan_roots", []):
             self.roots_list.addItem(root_path)
         cr_lay.addWidget(self.roots_list, 1)
@@ -348,7 +354,6 @@ class SettingsView(QWidget):
 
         self.tab_stack.addWidget(page_excl)
 
-        # --- PAGE 3: Scan Performance ---
         page_perf = QWidget()
         lay_perf = QVBoxLayout(page_perf)
         lay_perf.setContentsMargins(0, 4, 0, 0)
@@ -367,6 +372,7 @@ class SettingsView(QWidget):
         row_files = QHBoxLayout()
         row_files.addWidget(QLabel("Max Files Scanned per Run:"))
         self.max_files_spin = QSpinBox()
+        self.max_files_spin.setAccessibleName("Maximum files scanned")
         self.max_files_spin.setRange(5000, 2000000)
         self.max_files_spin.setSingleStep(10000)
         self.max_files_spin.setSuffix(" files")
@@ -388,6 +394,7 @@ class SettingsView(QWidget):
         row_ttl = QHBoxLayout()
         row_ttl.addWidget(QLabel("Scan Cache TTL (Seconds):"))
         self.cache_ttl_spin = QSpinBox()
+        self.cache_ttl_spin.setAccessibleName("Scan cache lifetime")
         self.cache_ttl_spin.setRange(0, 3600)
         self.cache_ttl_spin.setSuffix(" s")
         self.cache_ttl_spin.setValue(int(self.settings.get("scan_cache_ttl", 300)))
@@ -403,9 +410,8 @@ class SettingsView(QWidget):
 
         lay_perf.addWidget(perf_card)
 
-        # Scheduled scans. The schedule belongs to the operating system - Task
-        # Scheduler or a systemd user timer - so this reports what is registered
-        # rather than keeping a setting that might not match reality.
+        # The schedule belongs to the operating system - Task Scheduler or a systemd
+        # timer - so this reports what is registered rather than storing a setting.
         sched_card = QFrame()
         sched_card.setProperty("card", "true")
         sc_lay = QVBoxLayout(sched_card)
@@ -480,7 +486,6 @@ class SettingsView(QWidget):
         self.tab_stack.addWidget(page_perf)
         self._refresh_schedule_state()
 
-        # --- PAGE 4: Category Rules ---
         page_rules = QWidget()
         lay_rules = QVBoxLayout(page_rules)
         lay_rules.setContentsMargins(0, 4, 0, 0)
@@ -509,13 +514,13 @@ class SettingsView(QWidget):
         rc_lay.addLayout(r_header)
 
         self.cat_list = QListWidget()
+        self.cat_list.setAccessibleName("Cleanup categories to offer")
         self._rebuild_cat_list()
         rc_lay.addWidget(self.cat_list, 1)
         lay_rules.addWidget(rules_card)
 
         self.tab_stack.addWidget(page_rules)
 
-        # --- PAGE 5: Backup & Sync ---
         page_backup = QWidget()
         lay_backup = QVBoxLayout(page_backup)
         lay_backup.setContentsMargins(0, 4, 0, 0)
@@ -564,9 +569,6 @@ class SettingsView(QWidget):
 
         root.addWidget(self.tab_stack, 1)
 
-    # ------------------------------------------------------------------
-    # Scheduled scans
-    # ------------------------------------------------------------------
     def _refresh_schedule_state(self):
         """Ask the operating system what is registered, and show that."""
         from datetime import datetime
@@ -722,6 +724,15 @@ class SettingsView(QWidget):
         if folder and not self.exclusions_list.findItems(folder, Qt.MatchFlag.MatchExactly):
             self.exclusions_list.addItem(folder)
 
+    def _save_high_contrast(self, enabled: bool):
+        from crapcleaner.gui.theme import set_high_contrast
+
+        self.settings["high_contrast"] = enabled
+        save_settings({"high_contrast": enabled})
+        # The palette layer holds the flag in memory, so it has to be told directly.
+        set_high_contrast(enabled)
+        self._main.apply_settings()
+
     def _save_reduce_motion(self, enabled: bool):
         self.settings["reduce_motion"] = enabled
         save_settings({"reduce_motion": enabled})
@@ -762,8 +773,7 @@ class SettingsView(QWidget):
         self.settings["theme"] = "custom"
         self.settings["custom_theme"] = custom_cfg
         save_settings({"theme": "custom", "custom_theme": custom_cfg})
-        # The gallery only needs telling the first time; rebuilding its selection
-        # on every edit is work nobody sees.
+        # The gallery only needs telling the first time.
         if not already_custom and hasattr(self, "theme_gallery"):
             self.theme_gallery.select_theme("custom", emit_signal=False)
         switch = getattr(self._main, "switch_theme", None)
@@ -799,7 +809,6 @@ class SettingsView(QWidget):
         if hasattr(self, "theme_gallery"):
             self.theme_gallery.select_theme(theme, emit_signal=False)
 
-        # Update tab button icons and styles
         accent_col = theme_color(theme, "accent")
         muted_col = theme_color(theme, "muted")
 
@@ -830,6 +839,8 @@ class SettingsView(QWidget):
         settings = {
             "theme": self.theme_combo.currentData(),
             "reduce_motion": self.reduce_motion_check.isChecked(),
+            "high_contrast": self.high_contrast_check.isChecked(),
+            "offline_mode": self.offline_check.isChecked(),
             "dry_run_default": self.dry_run_check.isChecked(),
             "confirm_cleanup": self.confirm_check.isChecked(),
             "use_recycle_bin": self.recycle_check.isChecked(),
@@ -861,6 +872,8 @@ class SettingsView(QWidget):
             )
             self.cmd_preview_check.setChecked(bool(self.settings.get("show_command_preview", True)))
             self.reduce_motion_check.setChecked(bool(self.settings.get("reduce_motion", False)))
+            self.high_contrast_check.setChecked(bool(self.settings.get("high_contrast", False)))
+            self.offline_check.setChecked(bool(self.settings.get("offline_mode", False)))
             self.max_files_spin.setValue(int(self.settings.get("max_scan_files", 200000)))
             self.all_drives_check.setChecked(bool(self.settings.get("scan_all_drives", True)))
             self.cache_ttl_spin.setValue(int(self.settings.get("scan_cache_ttl", 300)))
@@ -898,6 +911,8 @@ class SettingsView(QWidget):
             )
             self.cmd_preview_check.setChecked(bool(self.settings.get("show_command_preview", True)))
             self.reduce_motion_check.setChecked(bool(self.settings.get("reduce_motion", False)))
+            self.high_contrast_check.setChecked(bool(self.settings.get("high_contrast", False)))
+            self.offline_check.setChecked(bool(self.settings.get("offline_mode", False)))
             self.max_files_spin.setValue(int(self.settings.get("max_scan_files", 200000)))
             self.all_drives_check.setChecked(bool(self.settings.get("scan_all_drives", True)))
             self.cache_ttl_spin.setValue(int(self.settings.get("scan_cache_ttl", 300)))

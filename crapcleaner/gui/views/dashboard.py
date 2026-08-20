@@ -79,7 +79,6 @@ class DashboardView(QWidget):
             )
         )
 
-        # Top row: Hero banner & Storage Donut
         content = QHBoxLayout()
         content.setSpacing(14)
 
@@ -96,8 +95,7 @@ class DashboardView(QWidget):
         hero_top.addWidget(self.status_badge)
         hero_lay.addLayout(hero_top)
 
-        # The headline figure counts up when a scan lands - the single most satisfying
-        # moment in the app, and the one place motion earns its keep.
+        # Counting up on a scan result is the one place motion earns its keep.
         self.reclaimable_label = AnimatedNumber(formatter=format_size)
         self.reclaimable_label.setText("Not scanned yet")
         self.reclaimable_label.setProperty("heroValue", "true")
@@ -184,12 +182,10 @@ class DashboardView(QWidget):
 
         layout.addLayout(content)
 
-        # Live System Vitals Row (RAM, CPU, GPU & Thermals, Network)
         layout.addWidget(section_label("Live System Vitals"))
         vitals_row = QHBoxLayout()
         vitals_row.setSpacing(12)
 
-        # 1. RAM Vitals Card
         self.ram_card = ClickableCard()
         self.ram_card.setProperty("card", "true")
         self.ram_card.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -233,7 +229,6 @@ class DashboardView(QWidget):
         rc_lay.addWidget(self.ram_sub)
         vitals_row.addWidget(self.ram_card, 1)
 
-        # 2. CPU Vitals Card
         self.cpu_card = QFrame()
         self.cpu_card.setProperty("card", "true")
         cpu_lay = QVBoxLayout(self.cpu_card)
@@ -273,7 +268,6 @@ class DashboardView(QWidget):
         cpu_lay.addWidget(self.cpu_sub)
         vitals_row.addWidget(self.cpu_card, 1)
 
-        # 3. GPU / Graphics & Thermals Card
         self.gpu_card = QFrame()
         self.gpu_card.setProperty("card", "true")
         gpu_lay = QVBoxLayout(self.gpu_card)
@@ -313,7 +307,6 @@ class DashboardView(QWidget):
         gpu_lay.addWidget(self.gpu_sub)
         vitals_row.addWidget(self.gpu_card, 1)
 
-        # 4. Network Throughput Card
         self.net_card = QFrame()
         self.net_card.setProperty("card", "true")
         net_lay = QVBoxLayout(self.net_card)
@@ -358,12 +351,10 @@ class DashboardView(QWidget):
 
         layout.addLayout(vitals_row)
 
-        # Setup Vitals Live Polling Timer (1.2s smooth polling)
         self._vitals_timer = QTimer(self)
         self._vitals_timer.setInterval(1200)
         self._vitals_timer.timeout.connect(self._update_live_vitals)
 
-        # Middle: 4 Quick Stat Cards
         layout.addWidget(section_label("System Metrics & Categories"))
         stats_row = QHBoxLayout()
         stats_row.setSpacing(12)
@@ -387,7 +378,6 @@ class DashboardView(QWidget):
         stats_row.addWidget(self.c4)
         layout.addLayout(stats_row)
 
-        # Bottom: Drives carousel
         layout.addWidget(section_label("Drives & Partitions"))
 
         self.drives = [d.rstrip("\\") if is_windows() else d for d in list_drives()]
@@ -417,8 +407,7 @@ class DashboardView(QWidget):
         cards_scroll.setWidget(cards_container)
         layout.addWidget(cards_scroll)
 
-        # Reclaimable breakdown - fills the space below the drives, and previews the
-        # categories a scan would check so the panel is never blank before a first run.
+        # Previews the categories a scan would check, so this is never blank before a first run.
         layout.addWidget(section_label("Reclaimable Breakdown"))
         self.breakdown_card = QFrame()
         self.breakdown_card.setProperty("card", "true")
@@ -475,7 +464,6 @@ class DashboardView(QWidget):
             f"color: {_c(self._theme, 'success' if is_admin() else 'muted')}; font-size: 12px;"
         )
 
-        # Update metrics
         self.c3_val.setText(f"{len(self.drives)} Drives")
         self.c3_sub.setText(f"Active: {self._selected_drive}")
 
@@ -521,13 +509,8 @@ class DashboardView(QWidget):
             self.drive_detail.setText(f"{drive}<br>Unavailable")
         self.drive_detail.setStyleSheet(f"color: {_c(self._theme, 'muted')};")
 
-    # ------------------------------------------------------------------
-    # Reclaimable breakdown
-    # ------------------------------------------------------------------
-
     #: Safety level -> palette token, so a row is coloured by how risky it is to clean.
-    # `safe` and `success` are the same green in most palettes, which made SAFE and
-    # LOW_RISK indistinguishable in the bar. LOW_RISK takes the info token instead.
+    # `safe` and `success` are the same green in most palettes, so LOW_RISK takes `info`.
     _BREAKDOWN_TOKENS = {
         "SAFE": "safe",
         "LOW_RISK": "info",
@@ -606,8 +589,7 @@ class DashboardView(QWidget):
                 self._breakdown_row("faint", name, "not scanned", dim=True)
             )
 
-        # The rows above are groups, so the summary counts groups too - counting
-        # categories here read as a mismatch against the five rows shown.
+        # Count groups, not categories: the rows above are groups.
         summary = f"{len(categories)} categories across {len(groups)} groups ready to scan"
         self.breakdown_rows.addWidget(self._breakdown_row("faint", summary, "", dim=True))
 
@@ -740,7 +722,6 @@ class DashboardView(QWidget):
             snap = sample_live_metrics()
             self._push_sparklines(snap)
 
-            # 1. Update RAM
             ram_pct = int(snap.ram.percent_used)
             self.ram_val.setText(f"{snap.ram.used_str} / {snap.ram.total_str} ({ram_pct}%)")
             self._animate_bar(self.ram_bar, ram_pct, "_ram_anim")
@@ -777,7 +758,6 @@ class DashboardView(QWidget):
                 self.ram_bar.style().unpolish(self.ram_bar)
                 self.ram_bar.style().polish(self.ram_bar)
 
-            # 2. Update CPU
             cpu_pct = int(snap.cpu.percent_used)
             self.cpu_val.setText(f"{snap.cpu.percent_used:.1f}% Load")
             self._animate_bar(self.cpu_bar, cpu_pct, "_cpu_anim")
@@ -793,7 +773,6 @@ class DashboardView(QWidget):
                 self.cpu_bar.style().unpolish(self.cpu_bar)
                 self.cpu_bar.style().polish(self.cpu_bar)
 
-            # 3. Update GPU & Thermals
             if snap.gpu.available:
                 self.gpu_val.setText(f"{snap.gpu.name} · {snap.gpu.temp_str}")
                 gpu_load = int(snap.gpu.utilization_pct or 0)
@@ -833,7 +812,6 @@ class DashboardView(QWidget):
                 self.gpu_badge.setText("READY")
                 self.gpu_sub.setText(f"System: {snap.uptime_str} · {snap.power_str}")
 
-            # 4. Update Network
             self.net_in_label.setText(f"↓ {snap.network.in_rate_str}")
             self.net_out_label.setText(f"↑ {snap.network.out_rate_str}")
             self.net_sub.setText(
@@ -905,7 +883,7 @@ class DashboardView(QWidget):
             f"font-size: 18px; font-weight: 800; color: {_c(theme, 'text')};"
         )
         glow(self.scan_button, theme)
-        # Rebuild the breakdown rows so their swatches and text pick up the new palette.
+        # Rebuild the breakdown rows so their swatches pick up the new palette.
         if self._last_report is not None:
             self._show_breakdown_results(self._last_report)
         else:

@@ -62,7 +62,6 @@ def render_svg_to_png(svg_path: str, png_path: str, width: int = 1280, height: i
         except Exception as exc:
             print(f"Browser rasterization warning: {exc}, falling back to PySide6...")
 
-    # PySide6 Fallback
     try:
         from PySide6.QtCore import QByteArray, QSize
         from PySide6.QtGui import QColor, QImage, QPainter

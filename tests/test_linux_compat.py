@@ -19,7 +19,6 @@ from crapcleaner.utils.platform import get_drive_info, is_linux, is_windows, lis
 
 
 def test_platform_helpers():
-    # Verify platform checks return boolean
     assert isinstance(is_windows(), bool)
     assert isinstance(is_linux(), bool)
 
@@ -76,7 +75,6 @@ def test_linux_app_caches_cover_every_install_method(mock_win, mock_linux):
 @patch("crapcleaner.categories.browsers.is_linux", return_value=True)
 @patch("crapcleaner.categories.browsers.is_windows", return_value=False)
 def test_linux_browser_categories(mock_win, mock_linux):
-    # Mocking user profile with browser directories
     cats = get_browser_categories()
     assert isinstance(cats, list)
 

@@ -1,6 +1,7 @@
 """Unit tests for the platform-neutral Service Manager and both of its backends."""
 
 import json
+import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -37,11 +38,6 @@ def force_platform(name: str):
                 clear_services_cache()
 
 
-# ---------------------------------------------------------------------------
-# Shared model
-# ---------------------------------------------------------------------------
-
-
 def test_service_item_to_dict():
     item = ServiceItem(
         name="wuauserv",
@@ -60,11 +56,6 @@ def test_service_item_to_dict():
     assert d["startup_type"] == "Manual"
     assert d["pid"] == 1234
     assert d["scope"] == "system"
-
-
-# ---------------------------------------------------------------------------
-# Windows backend
-# ---------------------------------------------------------------------------
 
 
 def test_critical_services_detection_windows():
@@ -172,10 +163,6 @@ def test_windows_startup_types_exposed():
         assert "Disabled" in startup_types()
 
 
-# ---------------------------------------------------------------------------
-# Linux backend
-# ---------------------------------------------------------------------------
-
 _UNITS_SAMPLE = (
     "ssh.service           loaded active   running OpenBSD Secure Shell server\n"
     "cups.service          loaded inactive dead    CUPS Scheduler\n"
@@ -264,11 +251,6 @@ def test_linux_reports_missing_elevation_helper():
     assert "pkexec" in msg or "root" in msg.lower()
 
 
-# ---------------------------------------------------------------------------
-# Unsupported platform
-# ---------------------------------------------------------------------------
-
-
 def test_unsupported_platform_refuses_gracefully():
     with patch("crapcleaner.system.capabilities.is_windows", return_value=False):
         with patch("crapcleaner.system.capabilities.is_linux", return_value=False):
@@ -292,3 +274,52 @@ def test_linux_without_systemd_is_unsupported():
                 assert ok is False
                 assert "systemd" in msg.lower()
                 clear_services_cache()
+
+
+def test_opening_the_systemd_gui_does_not_wait_for_it():
+    """XP-05: run_command waited, timed out, killed the GUI, then claimed success."""
+    launched: list[list[str]] = []
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("a GUI launch must not be waited on")
+
+    with patch.object(
+        services_linux.shutil,
+        "which",
+        side_effect=lambda t: "/usr/bin/systemadm" if t == "systemadm" else None,
+    ):
+        with patch.object(services_linux, "run_command", explode):
+            with patch.object(
+                services_linux.subprocess, "Popen", side_effect=lambda a, **_k: launched.append(a)
+            ):
+                ok, message = services_linux.open_console()
+
+    assert ok is True
+    assert launched == [["systemadm"]]
+    assert "systemadm" in message
+
+
+def test_a_failed_systemd_gui_launch_is_not_reported_as_success():
+    with patch.object(
+        services_linux.shutil,
+        "which",
+        side_effect=lambda t: "/usr/bin/systemadm" if t == "systemadm" else None,
+    ):
+        with patch.object(services_linux.subprocess, "Popen", side_effect=OSError("denied")):
+            ok, message = services_linux.open_console()
+
+    assert ok is False
+    assert "denied" in message
+
+
+def test_services_console_is_launched_without_a_shell():
+    """The console path must be explicit, not resolved through PATH and the CWD."""
+    opened: list[str] = []
+
+    with patch.object(services_windows.os, "startfile", opened.append, create=True):
+        ok, _message = services_windows.open_console()
+
+    assert ok is True
+    assert len(opened) == 1
+    assert opened[0].lower().endswith(os.path.join("system32", "services.msc"))
+    assert os.path.isabs(opened[0])

@@ -63,7 +63,6 @@ class MemoryView(QWidget):
         layout.setContentsMargins(0, 0, 8, 0)
         layout.setSpacing(14)
 
-        # 1. Top Hero Card: Status, Usage Gauge & Quick Flush Action
         self.hero_card = QFrame()
         self.hero_card.setProperty("card", "true")
         hero_lay = QVBoxLayout(self.hero_card)
@@ -129,7 +128,6 @@ class MemoryView(QWidget):
         hero_sub_row.addWidget(self.pressure_label)
         hero_lay.addLayout(hero_sub_row)
 
-        # Embedded result banner
         self.result_banner = QFrame()
         self.result_banner.setProperty("card", "true")
         self.result_banner.setVisible(False)
@@ -146,12 +144,10 @@ class MemoryView(QWidget):
 
         layout.addWidget(self.hero_card)
 
-        # 2. Hardware & Memory Breakdown Cards (RAM 4-metric grid, Swap Card, GPU VRAM Card)
         layout.addWidget(section_label("Memory Allocation & Hardware VRAM"))
         vitals_grid = QHBoxLayout()
         vitals_grid.setSpacing(12)
 
-        # RAM Breakdown Card
         self.ram_group = QFrame()
         self.ram_group.setProperty("card", "true")
         rc_lay = QVBoxLayout(self.ram_group)
@@ -176,11 +172,9 @@ class MemoryView(QWidget):
         rc_lay.addLayout(metrics_grid)
         vitals_grid.addWidget(self.ram_group, 5)
 
-        # Side Column for Swap & GPU VRAM
         side_col = QVBoxLayout()
         side_col.setSpacing(10)
 
-        # Swap Card
         self.swap_group = QFrame()
         self.swap_group.setProperty("card", "true")
         sc_lay = QVBoxLayout(self.swap_group)
@@ -208,7 +202,6 @@ class MemoryView(QWidget):
         sc_lay.addWidget(self.swap_label)
         side_col.addWidget(self.swap_group)
 
-        # GPU VRAM Card
         self.gpu_group = QFrame()
         self.gpu_group.setProperty("card", "true")
         self.gpu_layout = QVBoxLayout(self.gpu_group)
@@ -224,7 +217,6 @@ class MemoryView(QWidget):
         vitals_grid.addLayout(side_col, 4)
         layout.addLayout(vitals_grid)
 
-        # 3. Reclamation Actions Section
         layout.addWidget(section_label("Reclamation & Optimization Actions"))
         actions_grid = QGridLayout()
         actions_grid.setSpacing(10)

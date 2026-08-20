@@ -2,10 +2,12 @@
 
 import ctypes
 import os
+import re
 import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,10 +27,10 @@ def resolve_paths(paths: list[str]) -> list[str]:
 
 
 def _windows_volume_info(root: str) -> tuple[str, str]:
-    """(label, filesystem) for a Windows volume, or empty strings if unreadable.
+    """(label, filesystem) for a Windows volume.
 
-    Drives that have no label, or that fail the query (an empty card reader, a
-    disconnected network drive), report "" rather than a placeholder.
+    An unlabelled drive, an empty card reader or a disconnected network drive
+    reports "" rather than a placeholder.
     """
     label_buf = ctypes.create_unicode_buffer(261)
     fs_buf = ctypes.create_unicode_buffer(261)
@@ -55,9 +57,8 @@ def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
         target = f"{drive}\\" if not drive.endswith(("\\", "/")) else drive
         total, used, free = shutil.disk_usage(target)
         label, filesystem = _windows_volume_info(target)
-        # The same keys on both platforms. Returning a different shape per platform
-        # pushed `is_windows()` checks into the views, which is the opposite of what
-        # this module is for.
+        # Same keys on both platforms; a per-platform shape pushed is_windows()
+        # checks into the views.
         return {
             "total": total,
             "used": used,
@@ -325,9 +326,8 @@ def _elevation_args() -> str:
 def relaunch_as_admin(argv: list[str] | None = None) -> bool:
     """Restart this application with administrative rights.
 
-    Kept as a name for callers that use it; the behaviour is :func:`elevate`. The two
-    used to be separate implementations that disagreed - this one asked ShellExecute
-    to `runas` `argv[0]`, which is a .py file when running from source.
+    Alias for :func:`elevate`; the old separate implementation ran `runas` on
+    `argv[0]`, which is a .py file when running from source.
     """
     return elevate()
 
@@ -383,10 +383,9 @@ def which(program: str) -> str | None:
 class CommandResult:
     """Outcome of one external command.
 
-    Mapping access (``result["stdout"]`` / ``result.get("returncode")``) is kept so
-    the many existing call sites keep working, but attribute access is typed.
-    A command that never ran carries `error` and a negative `returncode`, so a
-    failure can never be mistaken for empty-but-successful output.
+    Mapping access (``result["stdout"]``) is kept for existing call sites.
+    A command that never ran carries `error` and a negative `returncode`, so
+    failure is never mistaken for empty-but-successful output.
     """
 
     returncode: int
@@ -449,3 +448,12 @@ def run_command(
 
 def is_frozen() -> bool:
     return getattr(sys, "frozen", False)
+
+
+# A root-privileged apt-get/pacman reads an id beginning with a dash as an option.
+_PACKAGE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:@/-]*$")
+
+
+def safe_package_ids(ids: Iterable[str]) -> list[str]:
+    """The subset of `ids` that may be handed to an elevated package manager."""
+    return [candidate for candidate in ids if candidate and _PACKAGE_ID.match(candidate)]

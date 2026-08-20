@@ -14,10 +14,6 @@ import random
 import re
 from functools import lru_cache
 
-# ---------------------------------------------------------------------------
-# Conversions & Math
-# ---------------------------------------------------------------------------
-
 
 @lru_cache(maxsize=4096)
 def normalize_hex(hex_str: str | None) -> str:
@@ -64,11 +60,6 @@ def hsl_to_hex(h: float, s: float, lightness: float) -> str:
     l_norm = max(0.0, min(1.0, lightness))
     r_f, g_f, b_f = colorsys.hls_to_rgb(h_norm, l_norm, s_norm)
     return rgb_to_hex(r_f * 255, g_f * 255, b_f * 255)
-
-
-# ---------------------------------------------------------------------------
-# WCAG 2.1 Relative Luminance & Contrast
-# ---------------------------------------------------------------------------
 
 
 @lru_cache(maxsize=4096)
@@ -133,10 +124,9 @@ def ensure_contrast(
     dark_bg = bg_lum < 0.25 if is_dark_bg is None else is_dark_bg
     h, s, lum = hex_to_hsl(fg_hex)
 
-    # Try the direction the background suggests first, then the other one. A
-    # mid-tone background - #3b82f6 sits at 0.22 luminance, just inside "dark" -
-    # cannot be fixed by lightening a foreground that is already white, and
-    # giving up there returned white unchanged: still 3.68:1, still failing.
+    # Try both directions: a mid-tone background (#3b82f6 is 0.22 luminance, just
+    # inside "dark") cannot be fixed by lightening an already-white foreground, and
+    # trying only the suggested direction left white unchanged at 3.68:1.
     preferred = 0.04 if dark_bg else -0.04
     best: tuple[float, str] | None = None
     for step in (preferred, -preferred):
@@ -152,28 +142,24 @@ def ensure_contrast(
     if best is not None:
         return best[1]
 
-    return "#ffffff" if dark_bg else "#0f172a"
-
-
-# ---------------------------------------------------------------------------
-# Perceptual Chroma & Lightness Utilities
-# ---------------------------------------------------------------------------
+    # Nothing reaches the ratio. The extreme is only an improvement when it actually
+    # reads better than what we were given - white on a mid blue is worse than the
+    # dark ink already there.
+    extreme = "#ffffff" if dark_bg else "#0f172a"
+    if contrast_ratio(extreme, bg_hex) > contrast_ratio(fg_hex, bg_hex):
+        return extreme
+    return fg_hex
 
 
 def hue_lightness_bias(h: float) -> float:
-    """Calculate perceptual lightness bias based on hue angle (0..360).
+    """Perceptual lightness bias for a hue angle (0..360).
 
-    Yellow/Green (~60-120 deg) have higher perceived brightness for same L,
-    while Blue/Purple (~240-280 deg) have lower perceived brightness.
+    Yellow/green (~60-120 deg) look brighter than blue/purple (~240-280 deg) at
+    the same L, so the cosine peaks at 60 deg and bottoms out at 240 deg.
     """
     rad = math.radians(h - 60.0)
-    # Cosine peaked at 60 deg (yellow) and lowest at 240 deg (blue)
     return 0.5 + 0.5 * math.cos(rad)
 
-
-# ---------------------------------------------------------------------------
-# Palette Generator with Moods
-# ---------------------------------------------------------------------------
 
 MOOD_STYLES = ("cohesive", "vibrant", "muted", "oled", "pastel", "minimal")
 
@@ -196,17 +182,14 @@ def generate_custom_palette(
     primary = normalize_hex(primary_color)
     h, s, lum = hex_to_hsl(primary)
 
-    # Clamp tuning factors
     s_contrast = max(0.6, min(1.4, float(surface_contrast)))
     a_intensity = max(0.4, min(1.6, float(accent_intensity)))
     bg_factor = max(0.6, min(1.4, float(bg_darkness)))
     mood_key = mood.lower() if mood.lower() in MOOD_STYLES else "cohesive"
 
-    # Normalized contrast & vibrancy scales (0.0 to 1.0)
     contrast_scale = (s_contrast - 0.6) / 0.8  # 0.0 at 60%, 1.0 at 140%
     vibrancy_scale = (a_intensity - 0.4) / 1.2  # 0.0 at 40%, 1.0 at 160%
 
-    # Mood-specific saturation & tint scaling
     if mood_key == "vibrant":
         tint_s_scale = 0.24
         accent_s_boost = 1.25
@@ -226,19 +209,17 @@ def generate_custom_palette(
         tint_s_scale = 0.14
         accent_s_boost = 1.00
 
-    # Effective accent saturation: scales smoothly with vibrancy slider
     effective_s = max(0.10, min(1.0, s * (0.35 + 0.95 * vibrancy_scale) * accent_s_boost))
 
-    # Perceptual accent lightness tuning
     h_bias = hue_lightness_bias(h)
     if is_dark:
-        # Lower vibrancy gives a calmer/deeper tone; higher vibrancy gives an illuminated neon punch
+        # Vibrancy raises lightness: calm and deep at the low end, neon at the high.
         target_accent_l = 0.44 + (0.18 * vibrancy_scale) + (0.06 * (1.0 - h_bias))
         accent_l = max(0.40, min(0.72, target_accent_l))
         hover_l = min(0.84, accent_l + 0.08)
         pressed_l = max(0.32, accent_l - 0.08)
     else:
-        # Light mode: darker accent for crisp readability, higher vibrancy increases contrast
+        # On light canvases the accent darkens instead, for the same readability.
         target_accent_l = 0.50 - (0.18 * vibrancy_scale) - (0.06 * h_bias)
         accent_l = max(0.26, min(0.56, target_accent_l))
         hover_l = max(0.20, accent_l - 0.07)
@@ -250,11 +231,9 @@ def generate_custom_palette(
     r_a, g_a, b_a = hex_to_rgb(accent)
     accent_soft = f"rgba({r_a}, {g_a}, {b_a}, {0.10 + 0.12 * vibrancy_scale:.2f})"
 
-    # Base tint for background and surfaces
     tint_s = min(0.28, max(0.01, s * tint_s_scale * (0.6 + 0.6 * vibrancy_scale)))
 
     if is_oled:
-        # OLED True Black canvas with dynamic contrast steps
         window = "#000000"
         panel = hsl_to_hex(h, tint_s * 0.5, 0.020 + 0.030 * contrast_scale)
         surface = hsl_to_hex(h, tint_s, 0.040 + 0.060 * contrast_scale)
@@ -274,7 +253,6 @@ def generate_custom_palette(
         info = "#38bdf8"
 
     elif is_dark:
-        # Dark mode surface stratification with dynamic contrast
         base_bg_l = max(0.025, min(0.085, (0.070 / bg_factor) - (0.020 * contrast_scale)))
         window_l = base_bg_l
         panel_l = window_l + 0.020 + (0.040 * contrast_scale)
@@ -292,12 +270,10 @@ def generate_custom_palette(
         border = hsl_to_hex(h, tint_s, border_l)
         border2 = hsl_to_hex(h, tint_s, border2_l)
 
-        # High-contrast text
         text = hsl_to_hex(h, min(0.06, tint_s), 0.96)
         muted = hsl_to_hex(h, min(0.10, tint_s), 0.70)
         faint = hsl_to_hex(h, min(0.10, tint_s), 0.50)
 
-        # Vibrant semantic colors for dark surfaces
         success = "#34d399"
         warning = "#fbbf24"
         danger = "#f87171"
@@ -305,7 +281,6 @@ def generate_custom_palette(
         info = "#38bdf8"
 
     else:
-        # Light mode surface stratification
         window_l = max(0.92, min(0.985, (0.975 * bg_factor) - (0.030 * contrast_scale)))
         panel_l = 1.0 if mood_key == "minimal" else max(0.97, min(1.0, 0.99))
         surface_l = max(0.86, min(0.96, window_l - (0.025 + 0.065 * contrast_scale)))
@@ -321,19 +296,17 @@ def generate_custom_palette(
         border = hsl_to_hex(h, tint_s, border_l)
         border2 = hsl_to_hex(h, tint_s, border2_l)
 
-        # High-contrast text on light surfaces
         text = hsl_to_hex(h, min(0.12, tint_s), 0.11)
         muted = hsl_to_hex(h, min(0.12, tint_s), 0.38)
         faint = hsl_to_hex(h, min(0.10, tint_s), 0.58)
 
-        # Crisp semantic colors for light surfaces
         success = "#059669"
         warning = "#d97706"
         danger = "#dc2626"
         review = "#ea580c"
         info = "#0284c7"
 
-    # Strict WCAG compliance enforcement
+    # WCAG 2.1: AAA for body text, AA for secondary.
     text = ensure_contrast(text, window, min_ratio=7.0, is_dark_bg=is_dark)
     muted = ensure_contrast(muted, surface, min_ratio=4.5, is_dark_bg=is_dark)
 
@@ -357,9 +330,8 @@ def generate_custom_palette(
         "accent_pressed": accent_pressed,
         "accent_soft": accent_soft,
         "success": success,
-        # Labels the interface draws on a colour rather than on a surface: the
-        # text on a coloured button, and the text on a soft badge. Derived from
-        # what they sit on, because nothing else sets them.
+        # Labels drawn on a colour rather than on a surface. Derived from what they
+        # sit on, because nothing else sets them.
         "on_accent": ensure_contrast("#ffffff", accent, min_ratio=4.5),
         "on_danger": ensure_contrast("#ffffff", danger, min_ratio=4.5),
         "on_accent_soft": ensure_contrast(accent, flatten_alpha(accent_soft, surface), 4.5),
@@ -384,11 +356,6 @@ def generate_custom_palette(
         "selection": accent,
         "safe": success,
     }
-
-
-# ---------------------------------------------------------------------------
-# Color Harmony Algorithms & Magic Generator
-# ---------------------------------------------------------------------------
 
 
 def generate_color_harmonies(base_hex: str) -> dict[str, list[str]]:
@@ -419,7 +386,6 @@ def generate_color_harmonies(base_hex: str) -> dict[str, list[str]]:
 
 def generate_magic_palette() -> dict:
     """Generate a random aesthetically balanced custom theme configuration."""
-    # Curated vibrant hues
     curated_hues = [
         0,
         15,
@@ -452,11 +418,6 @@ def generate_magic_palette() -> dict:
         "accent_intensity": round(random.uniform(0.9, 1.25), 2),
         "bg_darkness": round(random.uniform(0.95, 1.1), 2),
     }
-
-
-# ---------------------------------------------------------------------------
-# Theme JSON Import / Export
-# ---------------------------------------------------------------------------
 
 
 def export_custom_theme_json(custom_config: dict) -> str:

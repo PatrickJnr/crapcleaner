@@ -82,7 +82,6 @@ def _get_windows_recycle_bin_info() -> RecycleBinInfo:
     except Exception:
         pass
 
-    # Quick bounded inspection of user-accessible recycle bin items
     items: list[TrashItem] = []
     oldest: datetime | None = None
     newest: datetime | None = None
@@ -155,7 +154,6 @@ def _get_linux_trash_info() -> RecycleBinInfo:
                 mtime = datetime.fromtimestamp(st.st_mtime)
                 orig_path = ""
 
-                # Parse .trashinfo if present
                 info_file = os.path.join(trash_info_dir, f"{entry.name}.trashinfo")
                 if os.path.isfile(info_file):
                     try:

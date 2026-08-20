@@ -4,6 +4,7 @@ import os
 import sys
 import time
 
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -110,10 +111,9 @@ class MainWindow(QMainWindow):
         self.sidebar.help_requested.connect(self.show_help_dialog)
         root_layout.addWidget(self.sidebar)
 
-        # Pages are built on first use. Constructing all sixteen up front cost roughly
-        # two seconds of Qt widget assembly before the window could be shown, and most
-        # of them are never opened in a given session. Each stack slot starts as an
-        # empty placeholder and is swapped for the real view when it is first needed.
+        # Pages are built on first use: assembling all sixteen up front cost about two
+        # seconds before the window could be shown, and most are never opened. Each
+        # slot holds an empty placeholder until the real view is needed.
         self.stack = QStackedWidget()
         self._views: dict[str, QWidget] = {}
         self._placeholders: dict[str, QWidget] = {}
@@ -127,7 +127,6 @@ class MainWindow(QMainWindow):
 
         self._theme = self._settings.get("theme", "dark")
 
-        # Themes are files now, so editing one should not mean restarting.
         self._theme_watcher = ThemeWatcher(self)
         self._theme_watcher.themes_changed.connect(self._on_themes_changed)
 
@@ -138,17 +137,13 @@ class MainWindow(QMainWindow):
         self.sidebar.apply_theme(self._theme)
         self.stack.setCurrentIndex(self._PAGE_KEYS.index("dashboard"))
         self.sidebar.set_active("dashboard")
-        # load_settings() ran during __init__; if it had to move a damaged file aside
-        # the user needs to hear about it rather than silently losing their exclusions.
+        # If load_settings() had to move a damaged file aside, say so rather than let
+        # the user silently lose their exclusions.
         notice = take_recovery_notice()
         if notice:
             self.statusBar().showMessage(notice, 20000)
         else:
             self.statusBar().showMessage("Ready", 3000)
-
-    # ------------------------------------------------------------------
-    # Lazy page construction
-    # ------------------------------------------------------------------
 
     #: attribute name -> (page key, factory). Attribute access builds the view, so
     #: every existing `self.cleanup_view` style call site keeps working unchanged.
@@ -202,8 +197,8 @@ class MainWindow(QMainWindow):
         view = factory(self)
         self._views[key] = view
 
-        # Swap the placeholder out, keeping the slot at its original index so page
-        # order, shortcuts, and navigation indices all stay valid.
+        # Keep the slot at its original index so page order, shortcuts and navigation
+        # indices all stay valid.
         index = self._PAGE_KEYS.index(key)
         placeholder = self._placeholders.pop(key, None)
         self.stack.insertWidget(index, view)
@@ -215,7 +210,7 @@ class MainWindow(QMainWindow):
         if apply is not None:
             apply(getattr(self, "_theme", "dark"))
 
-        # Deferred first-load work that used to run inline during startup.
+        # First-load work, deferred out of start-up along with the view itself.
         if key == "cleanup":
             view.populate(self._categories)
             view.set_scan_delta(self._settings.get("last_scan_snapshot", {}), None)
@@ -234,27 +229,22 @@ class MainWindow(QMainWindow):
         return None
 
     def _setup_shortcuts(self):
-        # Ctrl+1..9,0 for tab switching. Only the first ten pages get a shortcut:
-        # wrapping round would bind Ctrl+1 twice, which Qt treats as ambiguous and
-        # refuses to fire at all.
+        # Only the first ten pages get Ctrl+N: wrapping round would bind Ctrl+1 twice,
+        # which Qt treats as ambiguous and refuses to fire at all.
         for i, key in enumerate(self._PAGE_KEYS[:10]):
             key_num = (i + 1) % 10
             sc = QShortcut(QKeySequence(f"Ctrl+{key_num}"), self)
             sc.activated.connect(lambda k=key: self.navigate(k))
 
-        # F1 for Help & Safety Dialog
         help_sc = QShortcut(QKeySequence("F1"), self)
         help_sc.activated.connect(self.show_help_dialog)
 
-        # Ctrl+R to start scan
         scan_sc = QShortcut(QKeySequence("Ctrl+R"), self)
         scan_sc.activated.connect(self.start_scan)
 
-        # F5 to refresh active view
         refresh_sc = QShortcut(QKeySequence("F5"), self)
         refresh_sc.activated.connect(self._refresh_active_view)
 
-        # Escape to cancel scan
         esc_sc = QShortcut(QKeySequence("Escape"), self)
         esc_sc.activated.connect(self.cancel_active_scan)
 
@@ -327,11 +317,9 @@ class MainWindow(QMainWindow):
     def _on_themes_changed(self):
         """A theme file changed on disk: restyle now, and refresh the gallery.
 
-        The theme that is on screen is the one to reapply. `self._settings` is the
-        snapshot taken at start-up and is not updated when the theme is switched, so
-        reading it here swapped the window to whatever was stored when it opened -
-        Custom, for anyone who had used the Studio - instead of the theme being
-        edited. `self._theme` is what is actually applied.
+        Reapplies `self._theme`, not `self._settings["theme"]` - the latter is the
+        start-up snapshot, so reading it here swapped the window to whatever was
+        stored when it opened instead of the theme being edited.
         """
         from crapcleaner.gui.theme import THEMES
 
@@ -353,7 +341,6 @@ class MainWindow(QMainWindow):
         settings_view = self._views.get("settings")
         if settings_view is not None and hasattr(settings_view, "refresh_theme_gallery"):
             settings_view.refresh_theme_gallery()
-            # Keep the gallery's idea of the active theme in step with the window's.
             gallery = getattr(settings_view, "theme_gallery", None)
             if gallery is not None and theme in THEMES:
                 gallery.select_theme(theme, emit_signal=False)
@@ -363,10 +350,10 @@ class MainWindow(QMainWindow):
     def _apply_theme_to_views(self, theme: str):
         # `_settings` is a snapshot; keep its theme in step with what is applied.
         self._settings["theme"] = theme
-        # Only pages that exist are restyled. A page built later picks the theme up in
-        # _build_view, so nothing is forced into existence just to be recoloured.
         self._theme = theme
         self.sidebar.apply_theme(theme)
+        # Built pages only. One built later picks the theme up in _build_view, so
+        # nothing is forced into existence just to be recoloured.
         for view in self._built_views():
             apply = getattr(view, "apply_theme", None)
             if apply is not None:
@@ -374,10 +361,8 @@ class MainWindow(QMainWindow):
 
     #: What the dashboard was laid out for: every row fits, nothing is clipped.
     DEFAULT_SIZE = (1460, 1160)
-    #: The floor. Not the size above, which does not fit a 1080p screen once the
-    #: taskbar is taken off - a minimum that large would force the window taller
-    #: than the display. This is the largest that still fits a 1280x720 laptop,
-    #: which is the smallest screen worth supporting.
+    #: The largest floor that still fits a 1280x720 laptop. DEFAULT_SIZE cannot be the
+    #: minimum: it exceeds a 1080p screen once the taskbar is taken off.
     MINIMUM_SIZE = (1200, 660)
 
     def _set_default_geometry(self):
@@ -482,8 +467,8 @@ class MainWindow(QMainWindow):
 
     def _on_scan_progress(self, name, stage, state):
         self.cleanup_view.status_label.setText(f"Scanning: {name} ({stage})")
-        # Only repaint the tree highlight when the category actually changes —
-        # avoids a UI-thread backlog when 8 worker threads emit rapidly.
+        # Repaint the tree highlight only on a real change: 8 worker threads emitting
+        # rapidly otherwise backs up the UI thread.
         if name != self._last_highlighted:
             self._last_highlighted = name
             self.cleanup_view.highlight_category(name)
@@ -699,15 +684,18 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def closeEvent(self, event):
-        # Ask everything to stop first, then wait once against a shared deadline.
-        # Stopping and waiting per worker meant closing took up to a second for each
-        # one in turn, with the window unresponsive throughout - and the list is
-        # mutated by each worker's finished handler, so it is iterated as a copy.
+        # Stop everything first, then wait once against a shared deadline: stopping and
+        # waiting per worker cost up to a second each with the window frozen. Iterated
+        # as a copy because each worker's finished handler mutates the list.
         watcher = getattr(self, "_theme_watcher", None)
         if watcher is not None:
             watcher.stop()
 
         workers = list(self._workers)
+        try:
+            workers += [t for t in self.findChildren(QThread) if t not in workers]
+        except Exception:
+            pass
         for worker in workers:
             if hasattr(worker, "request_stop"):
                 worker.request_stop()
@@ -734,10 +722,9 @@ class NoDisplayError(RuntimeError):
 def _prepare_linux_qt_environment() -> None:
     """Pick a Qt platform plugin, or say plainly that there is no display.
 
-    Falling back to `offscreen` meant that running the GUI over SSH started a full
-    Qt application that rendered to nowhere and never appeared - indistinguishable
-    from a hang. Anything that genuinely wants offscreen rendering (the test suite,
-    CI) sets QT_QPA_PLATFORM itself, which is honoured above.
+    Falling back to `offscreen` made the GUI over SSH render to nowhere, which is
+    indistinguishable from a hang. Callers that genuinely want offscreen (tests, CI)
+    set QT_QPA_PLATFORM themselves and are honoured.
     """
     if not sys.platform.startswith("linux"):
         return

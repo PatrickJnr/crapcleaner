@@ -13,9 +13,11 @@ errata, and system packages. Per-application upgrades live in
 import os
 import re
 import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
-from crapcleaner.utils.platform import run_command
+from crapcleaner.config import offline_mode
+from crapcleaner.utils.platform import run_command, safe_package_ids
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from crapcleaner.system.system_updates import SystemUpdateReport
@@ -25,6 +27,8 @@ _MANAGERS = ("apt-get", "dnf", "yum", "pacman", "zypper")
 
 # Files whose presence means the running kernel or core libraries are stale.
 _REBOOT_MARKERS = ("/var/run/reboot-required", "/run/reboot-required")
+
+OFFLINE_MESSAGE = "Update check skipped: offline mode is on, so no repository was contacted."
 
 
 def detect_manager() -> str:
@@ -62,19 +66,17 @@ def _severity_for(source: str, name: str) -> str:
 
 
 def _check_apt() -> list[tuple[str, str, str, str]]:
-    """Return (package, current, available, source) rows from apt."""
-    res = run_command(
-        ["apt-get", "--just-print", "upgrade"],
-        timeout=30.0,
-    )
-    rows: list[tuple[str, str, str, str]] = []
-    # "Inst linux-image-generic [6.8.0-31] (6.8.0-40 Ubuntu:24.04/noble-security [amd64])"
-    pattern = re.compile(r"^Inst\s+(\S+)\s+\[([^\]]*)\]\s+\(([^\s)]+)\s+([^)]*)\)")
-    for line in str(res.get("stdout", "")).splitlines():
-        match = pattern.match(line.strip())
-        if match:
-            rows.append((match.group(1), match.group(2), match.group(3), match.group(4).strip()))
-    return rows
+    """Return (package, current, available, source) rows from apt.
+
+    Shares the one apt query with :mod:`crapcleaner.system.package_managers` so the
+    App Updates and System Updates views can never report different sets.
+    """
+    from crapcleaner.system.package_managers import _get_apt_updates
+
+    return [
+        (u.id, u.current_version, u.available_version, u.source)
+        for u in _get_apt_updates("apt-get").updates
+    ]
 
 
 def _check_dnf(manager: str) -> list[tuple[str, str, str, str]]:
@@ -224,11 +226,15 @@ def check(include_history: bool = True, timeout: float = 30.0) -> "SystemUpdateR
         report.error = "No supported system package manager was found."
         return report
 
-    try:
-        rows = _CHECKERS[manager](manager)
-    except Exception as exc:
-        report.error = f"Failed to query {manager} for updates: {exc}"
-        return report
+    if offline_mode():
+        report.error = OFFLINE_MESSAGE
+        rows: list[tuple[str, str, str, str]] = []
+    else:
+        try:
+            rows = _CHECKERS[manager](manager)
+        except Exception as exc:
+            report.error = f"Failed to query {manager} for updates: {exc}"
+            return report
 
     for name, current, available, source in rows:
         severity = _severity_for(source, name)
@@ -280,13 +286,14 @@ _INSTALL_COMMANDS = {
 }
 
 
-def _elevated(command: list[str], timeout: float):
+def elevated(command: list[str], timeout: float, env_extra: dict[str, str] | None = None):
+    """Run `command` as root via pkexec or `sudo -n`, never prompting for a password."""
     if getattr(os, "geteuid", lambda: 1)() == 0:
-        return run_command(command, timeout=timeout)
+        return run_command(command, timeout=timeout, env_extra=env_extra)
     if shutil.which("pkexec"):
-        return run_command(["pkexec"] + command, timeout=timeout)
+        return run_command(["pkexec"] + command, timeout=timeout, env_extra=env_extra)
     if shutil.which("sudo"):
-        return run_command(["sudo", "-n"] + command, timeout=timeout)
+        return run_command(["sudo", "-n"] + command, timeout=timeout, env_extra=env_extra)
     return {
         "returncode": -1,
         "stdout": "",
@@ -302,6 +309,11 @@ def install(update_ids: list[str] | None = None) -> tuple[bool, str]:
 
     command = list(_INSTALL_COMMANDS[manager])
     if update_ids:
+        # Runs as root: an id beginning with a dash would be read as an option.
+        rejected = [i for i in update_ids if i not in safe_package_ids(update_ids)]
+        update_ids = safe_package_ids(update_ids)
+        if rejected and not update_ids:
+            return False, f"Refusing unsafe package names: {', '.join(rejected)}"
         if manager == "pacman":
             command = ["pacman", "-S", "--noconfirm"] + list(update_ids)
         elif manager == "zypper":
@@ -310,7 +322,7 @@ def install(update_ids: list[str] | None = None) -> tuple[bool, str]:
             command = command + list(update_ids)
 
     # Distribution upgrades pull hundreds of packages; give them room to finish.
-    res = _elevated(command, timeout=7200.0)
+    res = elevated(command, timeout=7200.0)
 
     if res.get("error") == "no elevation helper":
         return False, (
@@ -344,9 +356,15 @@ _UPDATE_GUIS = (
 
 def open_settings() -> tuple[bool, str]:
     for candidate in _UPDATE_GUIS:
-        if shutil.which(candidate):
-            run_command([candidate], timeout=5.0)
-            return True, f"Opened {candidate}."
+        if not shutil.which(candidate):
+            continue
+        try:
+            # Detached: a GUI runs until the user closes it, so waiting on it would
+            # block, then time out, then kill the window that was just opened.
+            subprocess.Popen([candidate], start_new_session=True)
+        except OSError as exc:
+            return False, f"Could not start {candidate}: {exc}"
+        return True, f"Opened {candidate}."
     manager = detect_manager() or "your package manager"
     return False, f"No graphical update manager is installed. Use `{manager}` from a terminal."
 

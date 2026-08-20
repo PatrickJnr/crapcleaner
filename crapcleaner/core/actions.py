@@ -18,11 +18,6 @@ def register_action(name: str, description: str, requires_admin: bool = False):
     return decorator
 
 
-def describe_action(name: str) -> str | None:
-    entry = ACTION_REGISTRY.get(name)
-    return entry["description"] if entry else None
-
-
 def run_action(
     name: str,
     dry_run: bool = False,

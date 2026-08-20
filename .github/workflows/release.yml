@@ -17,6 +17,8 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest]
+    permissions:
+      contents: read
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -37,32 +39,33 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .
-          pip install pytest
+          pip install . -r requirements-dev.txt
       - name: Verify the tag matches the application version
         shell: bash
         run: |
           TAG="${{ github.event.inputs.target_tag || github.ref_name }}"
           python scripts/check_release_version.py "$TAG"
 
+      - name: Lint with Ruff
+        # One platform only: mypy resolves this codebase's sys.platform branches
+        # differently per OS, and Windows is the side CI gates on.
+        if: runner.os == 'Windows'
+        run: |
+          ruff check crapcleaner tests scripts
+          ruff format --check crapcleaner tests scripts
+      - name: Type check with mypy
+        if: runner.os == 'Windows'
+        run: mypy crapcleaner
+
       - name: Run Test Suite
         env:
           QT_QPA_PLATFORM: offscreen
         run: pytest -q
 
-      - name: Verify the built executable honours arguments
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          pip install pyinstaller
-          pyinstaller --noconfirm --clean CrapCleaner.spec
-          # The frozen launcher used to ignore argv entirely and open the GUI.
-          OUTPUT=$(./dist/CrapCleaner.exe --version)
-          echo "$OUTPUT"
-          echo "$OUTPUT" | grep -q "$(python -c "from crapcleaner.constants import VERSION; print(VERSION)")"
-
   build-windows-exe:
     needs: verify
+    permissions:
+      contents: read
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -77,11 +80,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .
-          pip install pyinstaller
+          pip install . -r requirements-build.txt
       - name: Build Standalone Windows Executable
         run: |
           pyinstaller --noconfirm --clean CrapCleaner.spec
+      - name: Verify the Built Executable Reports the Release Version
+        shell: bash
+        run: |
+          EXPECTED=$(python -c "from crapcleaner.constants import VERSION; print(VERSION)")
+          REPORTED=$(./dist/CrapCleaner.exe --version | tr -d '\r' | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1)
+          echo "reported $REPORTED, expected $EXPECTED"
+          test "$REPORTED" = "$EXPECTED"
       - name: Generate SHA-256 Checksum
         run: |
           cd dist
@@ -100,6 +109,8 @@ jobs:
     # Built on the oldest supported runner on purpose: a PyInstaller binary links
     # against the build machine's glibc, so building on ubuntu-latest would refuse
     # to start on any distro older than that runner.
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
@@ -125,12 +136,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .
-          pip install pyinstaller
+          pip install . -r requirements-build.txt
       - name: Build Standalone Linux Binary
         run: |
           pyinstaller --noconfirm --clean CrapCleaner.spec
           chmod +x dist/crapcleaner-linux-x86_64
+      - name: Verify the Built Binary Reports the Release Version
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          EXPECTED=$(python -c "from crapcleaner.constants import VERSION; print(VERSION)")
+          REPORTED=$(./dist/crapcleaner-linux-x86_64 --version | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1)
+          echo "reported $REPORTED, expected $EXPECTED"
+          test "$REPORTED" = "$EXPECTED"
       - name: Package Tarball and Checksum
         run: |
           cd dist
@@ -153,6 +171,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -178,6 +198,13 @@ jobs:
           cd release-assets
           sha256sum CrapCleaner.exe crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums.txt
           cat checksums.txt
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            release-assets/CrapCleaner.exe
+            release-assets/crapcleaner-linux-x86_64
+            release-assets/crapcleaner-linux-x86_64.tar.gz
       - name: Determine Target Tag
         id: tag_info
         run: |
@@ -189,12 +216,8 @@ jobs:
       - name: Extract Release Notes & Title from CHANGELOG.md
         id: release_meta
         run: |
-          python scripts/extract_changelog.py "${{ steps.tag_info.outputs.tag }}" -o release_notes.md -t release_title.txt || echo "Release ${{ steps.tag_info.outputs.tag }}" > release_notes.md
-          TITLE=$(cat release_title.txt 2>/dev/null || true)
-          if [ -z "$TITLE" ]; then
-            TITLE="${{ steps.tag_info.outputs.tag }}"
-          fi
-          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          python scripts/extract_changelog.py "${{ steps.tag_info.outputs.tag }}" -o release_notes.md -t release_title.txt
+          echo "title=$(cat release_title.txt)" >> $GITHUB_OUTPUT
           cat release_notes.md
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v3

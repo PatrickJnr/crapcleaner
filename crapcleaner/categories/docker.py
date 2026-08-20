@@ -123,6 +123,10 @@ def get_categories() -> list[CleanupCategory]:
             group="Docker",
             description="Runs 'docker system prune -af' - removes stopped containers, unused images, and networks. Volumes are NOT touched. Requires confirmation.",
             safety_level=SafetyLevel.REVIEW,
+            what_it_contains="Disk the Docker daemon holds: stopped containers with their writable layers, images no container is using, unused networks, and the build cache.",
+            why_it_grows="Every build produces new image layers and every stopped container keeps its own layer; Docker never reclaims either on its own.",
+            why_safe_to_delete="Volumes are not pruned, so database and named-volume data survives, and running containers and the images behind them are kept. Because this runs with -a, every image no container currently uses is removed - including images you built locally and never pushed, which can only come back by being rebuilt or re-pulled from a registry.",
+            regeneration_behavior="The next 'docker run' pulls its image again and the next build starts from an empty cache, so the first one after a prune is slow.",
             action="docker_system_prune",
         ),
         CleanupCategory(
@@ -131,6 +135,10 @@ def get_categories() -> list[CleanupCategory]:
             group="Docker",
             description="Runs 'docker builder prune -af' - clears the Docker build cache. Requires confirmation.",
             safety_level=SafetyLevel.REVIEW,
+            what_it_contains="The BuildKit cache the daemon keeps so an unchanged Dockerfile step can be reused instead of run again.",
+            why_it_grows="Every build writes new cache entries, and entries from old builds stay until they are pruned.",
+            why_safe_to_delete="Images, containers, and volumes are all kept - only cached build steps are reclaimed. The cost is real: with -a nothing is left to reuse, so your next 'docker build' runs every layer from scratch and re-downloads base images over the network.",
+            regeneration_behavior="The cache refills as you build again; the first build after the prune is the slow one.",
             action="docker_builder_prune",
         ),
         CleanupCategory(
@@ -139,6 +147,10 @@ def get_categories() -> list[CleanupCategory]:
             group="Docker",
             description="Runs 'docker buildx prune -af' - clears cached BuildKit layers for every buildx builder. Images and volumes are untouched. Requires confirmation.",
             safety_level=SafetyLevel.REVIEW,
+            what_it_contains="Cached BuildKit layers held by the buildx builders, including the separate cache each containerised or multi-platform builder keeps.",
+            why_it_grows="Builders cache per platform, so a multi-arch project stores several copies of the same work and keeps them across builds.",
+            why_safe_to_delete="Images, volumes, and the builder instances themselves are kept; only their cached layers are reclaimed. Every builder is emptied at once, so the next build for each platform runs from scratch and re-fetches base images over the network.",
+            regeneration_behavior="Builders rebuild their caches on the next build, one platform at a time.",
             action="docker_buildx_prune",
         ),
     ]

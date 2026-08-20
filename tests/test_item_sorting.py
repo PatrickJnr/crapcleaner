@@ -41,7 +41,6 @@ def test_size_sorted_item_sorts_name_and_size_columns():
 
 def test_numeric_item_with_overwritten_user_role():
     table = QTableWidget(3, 2)
-    # Row with numeric sort value and separate UserRole string ID
     item0 = NumericItem("Enabled", value=1)
     item0.setData(Qt.ItemDataRole.UserRole, "id_app_enabled")
     table.setItem(0, 0, item0)

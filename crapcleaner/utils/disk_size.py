@@ -1,15 +1,12 @@
 """Bytes a file occupies on disk, as opposed to the length of its contents.
 
-The storage analyzer sums `st_size`, which is what the file claims to contain. The
-free space the operating system reports is about something else: a 3 KB file in a
-4 KB cluster costs 4 KB, an NTFS-compressed file costs less than its length, and a
-sparse virtual disk can claim 80 GB while occupying 12 GB. On a drive full of small
-files those differences add up, and the treemap total then disagrees with the drive.
+`st_size` and the free space the OS reports diverge: a 3 KB file in a 4 KB cluster
+costs 4 KB, an NTFS-compressed file costs less, and a sparse virtual disk can claim
+80 GB while occupying 12 GB.
 
-Logical size stays the default because it is free - every listing already carries
-it. Allocated size costs one call per file on Windows, so it is opt-in there; on
-Linux `st_blocks` comes back with the stat that was already performed, so it is
-free either way.
+Logical size is the default because every listing already carries it. Allocated size
+costs one call per file on Windows, so it is opt-in there; on Linux `st_blocks`
+arrives with the stat already performed.
 """
 
 import ctypes
@@ -94,9 +91,8 @@ def allocated_size(path: str, st) -> int:
     except (AttributeError, OSError):
         return _round_up(int(st.st_size), cluster_size(path))
 
-    # 0xFFFFFFFF is the error return; the call also legitimately returns it for a
-    # file of that size, which GetLastError would disambiguate. Treating it as a
-    # failure costs nothing but the rounding fallback.
+    # 0xFFFFFFFF is the error return and also a legitimate size; treating it as a
+    # failure costs only the rounding fallback.
     if low == 0xFFFFFFFF:
         return _round_up(int(st.st_size), cluster_size(path))
 

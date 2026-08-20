@@ -36,11 +36,6 @@ def force_platform(name: str, tooling: bool = True):
 ALL_KEYS = (STARTUP, SERVICES, SYSTEM_UPDATES, APP_UPDATES)
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("key", ALL_KEYS)
 def test_every_capability_is_described_on_both_platforms(key):
     for platform in ("windows", "linux"):
@@ -106,11 +101,6 @@ def test_supported_capabilities_and_summary():
     assert summary[SERVICES]["supported"] is False
     assert summary[SERVICES]["reason"]
     assert set(summary) == set(ALL_KEYS)
-
-
-# ---------------------------------------------------------------------------
-# Navigation rail
-# ---------------------------------------------------------------------------
 
 
 def _page_keys():

@@ -4,7 +4,7 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-from crapcleaner.core.cleaner import clean_categories
+from crapcleaner.core.cleaner import clean_categories, remove_selected_paths
 from crapcleaner.core.scanner import ScanEngine
 
 _MAX_GUI_LARGE_FILES = 5000
@@ -12,7 +12,7 @@ _MAX_GUI_DUPLICATE_GROUPS = 1000
 
 
 def is_worker_running(worker: QThread | None) -> bool:
-    """Safely check if a Qt QThread/worker is alive and running without raising Shiboken RuntimeError."""
+    """Whether a worker is alive and running, tolerating a deleted Qt object."""
     if worker is None:
         return False
     try:
@@ -20,7 +20,7 @@ def is_worker_running(worker: QThread | None) -> bool:
 
         if not isValid(worker):
             return False
-    except ImportError:
+    except (ImportError, TypeError):
         pass
     try:
         return bool(worker.isRunning())
@@ -28,17 +28,46 @@ def is_worker_running(worker: QThread | None) -> bool:
         return False
 
 
-def stop_worker(worker: QThread | None, wait_ms: int = 2000) -> None:
-    """Safely quit and wait for a worker thread if it is still valid and running."""
+def stop_worker(worker: QThread | None, wait_ms: int = 150) -> None:
+    """Ask a worker to stop, then wait briefly, tolerating one already gone.
+
+    None of these workers runs an event loop, so quit() never reached them and the
+    wait was the entire cost. A stopped worker discards its result, so the wait only
+    has to cover a body that is about to return anyway.
+    """
     if is_worker_running(worker) and worker is not None:
         try:
-            worker.quit()
+            request_stop = getattr(worker, "request_stop", None)
+            if request_stop is not None:
+                request_stop()
+            else:
+                worker.quit()
             worker.wait(wait_ms)
         except (RuntimeError, AttributeError):
             pass
 
 
-class ScanWorker(QThread):
+class _Worker(QThread):
+    """Base for every worker here: cooperatively stoppable, and silent once stopped."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._stop = threading.Event()
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop.is_set()
+
+    def _emit(self, signal, *args) -> None:
+        """Drop a result the caller stopped caring about instead of delivering it late."""
+        if not self._stop.is_set():
+            signal.emit(*args)
+
+
+class ScanWorker(_Worker):
     progress = Signal(str, str, int)
     done = Signal(object)
     failed = Signal(str)
@@ -48,7 +77,8 @@ class ScanWorker(QThread):
         self._engine = engine
         self._max_files = max_files
 
-    def request_stop(self):
+    def request_stop(self) -> None:
+        super().request_stop()
         self._engine.request_stop()
 
     def run(self):
@@ -60,10 +90,10 @@ class ScanWorker(QThread):
             report = self._engine.run(progress_cb=cb, max_files=self._max_files)
             self.done.emit(report)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class CleanWorker(QThread):
+class CleanWorker(_Worker):
     progress = Signal(str, int, int)
     done = Signal(object)
     failed = Signal(str)
@@ -81,10 +111,6 @@ class CleanWorker(QThread):
         self._dry_run = dry_run
         self._use_recycle_bin = use_recycle_bin
         self._excluded_paths = set(excluded_paths or ())
-        self._stop = threading.Event()
-
-    def request_stop(self):
-        self._stop.set()
 
     def run(self):
         try:
@@ -102,10 +128,39 @@ class CleanWorker(QThread):
             )
             self.done.emit(report)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class LargeFilesWorker(QThread):
+class DeleteWorker(_Worker):
+    """Removes hand-picked paths off the GUI thread, reporting each one as it goes."""
+
+    progress = Signal(int, int, str)  # completed count, total, path just handled
+    done = Signal(list)  # list[PathRemoval], one per path attempted
+    failed = Signal(str)
+
+    def __init__(self, paths: list[str], use_recycle_bin: bool, parent=None):
+        super().__init__(parent)
+        self._paths = [p for p in paths if p]
+        self._use_recycle_bin = use_recycle_bin
+
+    def run(self):
+        total = len(self._paths)
+        outcomes = []
+        try:
+            for index, path in enumerate(self._paths, 1):
+                if self._stop.is_set():
+                    break
+                outcomes.extend(
+                    remove_selected_paths([path], use_recycle_bin=self._use_recycle_bin)
+                )
+                self.progress.emit(index, total, path)
+            # Emitted even when stopped: a partial list still records real deletions.
+            self.done.emit(outcomes)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._emit(self.failed, str(exc))
+
+
+class LargeFilesWorker(_Worker):
     progress = Signal(int)
     done = Signal(list)
     failed = Signal(str)
@@ -114,10 +169,6 @@ class LargeFilesWorker(QThread):
         super().__init__(parent)
         self._root = root
         self._threshold = threshold
-        self._stop = threading.Event()
-
-    def request_stop(self):
-        self._stop.set()
 
     def run(self):
         from crapcleaner.analysis.large_files import scan_large_files
@@ -130,12 +181,12 @@ class LargeFilesWorker(QThread):
                 progress_cb=lambda n: self.progress.emit(n),
                 max_results=_MAX_GUI_LARGE_FILES,
             )
-            self.done.emit(files)
+            self._emit(self.done, files)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class DuplicatesWorker(QThread):
+class DuplicatesWorker(_Worker):
     progress = Signal(int, int)
     done = Signal()
     failed = Signal(str)
@@ -144,11 +195,7 @@ class DuplicatesWorker(QThread):
         super().__init__(parent)
         self._folders = folders
         self._min_size = min_size
-        self._stop = threading.Event()
         self.result_groups = []
-
-    def request_stop(self):
-        self._stop.set()
 
     def run(self):
         from crapcleaner.analysis.duplicates import find_duplicates
@@ -161,65 +208,42 @@ class DuplicatesWorker(QThread):
                 progress_cb=lambda a, b: self.progress.emit(a, b),
                 max_groups=_MAX_GUI_DUPLICATE_GROUPS,
             )
-            self.done.emit()
+            self._emit(self.done)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class AiDataWorker(QThread):
+class AiDataWorker(_Worker):
     done = Signal(list)
     failed = Signal(str)
 
     def __init__(self, min_size, parent=None):
         super().__init__(parent)
         self._min_size = min_size
-        self._stop = threading.Event()
-
-    def request_stop(self):
-        self._stop.set()
 
     def run(self):
         from crapcleaner.categories.ai import get_ai_data
 
         try:
-            self.done.emit(get_ai_data(min_size=self._min_size))
+            self._emit(self.done, get_ai_data(min_size=self._min_size))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class DockerWorker(QThread):
+class DockerWorker(_Worker):
     done = Signal(object, list)
     failed = Signal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
 
     def run(self):
         from crapcleaner.categories.docker import docker_system_df, wsl_disk_report
 
         try:
-            self.done.emit(docker_system_df(), wsl_disk_report())
+            self._emit(self.done, docker_system_df(), wsl_disk_report())
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class DockerInfoWorker(QThread):
-    done = Signal(object, list)
-    failed = Signal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def run(self):
-        from crapcleaner.categories.docker import docker_system_df, wsl_disk_report
-
-        try:
-            self.done.emit(docker_system_df(), wsl_disk_report())
-        except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
-
-
-class DockerPruneWorker(QThread):
+class DockerPruneWorker(_Worker):
     done = Signal(object)
     failed = Signal(str)
 
@@ -231,24 +255,16 @@ class DockerPruneWorker(QThread):
         from crapcleaner.core.actions import run_action
 
         try:
-            self.done.emit(run_action(self._action_name, dry_run=False))
+            self._emit(self.done, run_action(self._action_name, dry_run=False))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-# ---------------------------------------------------------------------------
-# Non-blocking workers for slow system-info queries
-# ---------------------------------------------------------------------------
-
-
-class SpecsWorker(QThread):
+class SpecsWorker(_Worker):
     """Fetches system hardware specs + storage health off the main thread."""
 
     done = Signal(object, list)  # (HardwareSpecs, list[DiskHealthInfo])
     failed = Signal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
 
     def run(self):
         try:
@@ -260,12 +276,12 @@ class SpecsWorker(QThread):
                 health = get_storage_health_report()
             except Exception:
                 health = []
-            self.done.emit(specs, health)
+            self._emit(self.done, specs, health)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class HealthWorker(QThread):
+class HealthWorker(_Worker):
     """Fetches storage health diagnostics off the main thread."""
 
     done = Signal(list)  # list[DiskHealthInfo]
@@ -279,12 +295,12 @@ class HealthWorker(QThread):
         try:
             from crapcleaner.system.storage_health import get_storage_health_report
 
-            self.done.emit(get_storage_health_report(force_refresh=self._force_refresh))
+            self._emit(self.done, get_storage_health_report(force_refresh=self._force_refresh))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class StorageAnalysisWorker(QThread):
+class StorageAnalysisWorker(_Worker):
     """Runs the 4 storage analysis passes off the main thread.
 
     Signals fire as each section completes so the UI can update progressively.
@@ -307,15 +323,6 @@ class StorageAnalysisWorker(QThread):
         self._path = path
         self._depth = depth
         self._size_mode = size_mode
-        self._stop_event = threading.Event()
-
-    def request_stop(self) -> None:
-        """Ask the analysis to stop. Each pass checks this between entries."""
-        self._stop_event.set()
-
-    @property
-    def stop_requested(self) -> bool:
-        return self._stop_event.is_set()
 
     def _emit_progress(self, stage: str):
         # Throttled by the analyzers themselves, which report every 1000-1500 files.
@@ -328,9 +335,8 @@ class StorageAnalysisWorker(QThread):
             from crapcleaner.analysis.storage import StorageIndex, analyze_storage_hierarchy
             from crapcleaner.analysis.virtual_machines import detect_virtual_machine_storage
 
-            # One traversal, three consumers. These three passes used to walk the same
-            # tree in turn, paying the metadata cost three times over, and the second
-            # and third only started once the first had finished.
+            # One traversal, three consumers: separate passes paid the metadata cost
+            # three times and ran strictly in sequence.
             file_types = FileTypeCollector()
             old_files = OldFileCollector(min_age_days=90, max_results=200)
 
@@ -342,26 +348,25 @@ class StorageAnalysisWorker(QThread):
             root_node = analyze_storage_hierarchy(
                 self._path,
                 max_depth=self._depth,
-                stop_event=self._stop_event,
+                stop_event=self._stop,
                 progress_cb=self._emit_progress("Measuring directories"),
                 partial_cb=self.tree_partial.emit,
                 file_observer=observe,
                 index_out=index,
                 size_mode=self._size_mode,
             )
-            if self._stop_event.is_set():
+            if self._stop.is_set():
                 self.cancelled.emit()
                 return
             self.tree_done.emit(root_node)
             self.index_done.emit(index)
 
-            # Compare with the previous scan of this root before overwriting it, so
-            # the view can answer "what grew since last time".
+            # Compare before overwriting, so the view can answer "what grew".
             from crapcleaner.analysis.snapshots import compare, save_snapshot, sizes_from_index
 
             sizes = sizes_from_index(index)
             try:
-                self.changes_done.emit(compare(self._path, sizes))
+                self.changes_done.emit(compare(self._path, sizes, size_mode=self._size_mode))
                 save_snapshot(self._path, sizes, size_mode=self._size_mode)
             except Exception:  # pragma: no cover - a snapshot must never fail a scan
                 self.changes_done.emit(None)
@@ -370,17 +375,17 @@ class StorageAnalysisWorker(QThread):
             self.old_done.emit(old_files.results())
 
             vms = detect_virtual_machine_storage()
-            if self._stop_event.is_set():
+            if self._stop.is_set():
                 self.cancelled.emit()
                 return
             self.vms_done.emit(vms)
 
             self.finished_all.emit()
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class StorageExpandWorker(QThread):
+class StorageExpandWorker(_Worker):
     """Measures one subtree on demand, so the first view does not pay for the whole disk."""
 
     done = Signal(str, object)  # requested path, StorageNode
@@ -390,10 +395,6 @@ class StorageExpandWorker(QThread):
         super().__init__(parent)
         self._path = path
         self._depth = depth
-        self._stop_event = threading.Event()
-
-    def request_stop(self) -> None:
-        self._stop_event.set()
 
     def run(self):
         try:
@@ -402,15 +403,15 @@ class StorageExpandWorker(QThread):
             node = analyze_storage_hierarchy(
                 self._path,
                 max_depth=self._depth,
-                stop_event=self._stop_event,
+                stop_event=self._stop,
             )
-            if not self._stop_event.is_set():
+            if not self._stop.is_set():
                 self.done.emit(self._path, node)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class PreviewWorker(QThread):
+class PreviewWorker(_Worker):
     """Builds the pre-cleanup manifest off the GUI thread.
 
     Enumerating candidate files walks every target, which is exactly the work that
@@ -425,10 +426,6 @@ class PreviewWorker(QThread):
         super().__init__(parent)
         self._categories = categories
         self._max_items = max_items
-        self._stop = threading.Event()
-
-    def request_stop(self):
-        self._stop.set()
 
     def run(self):
         try:
@@ -441,17 +438,16 @@ class PreviewWorker(QThread):
                 progress_cb=lambda name, index, total: self.progress.emit(name, index, total),
                 resolve_finders=True,
             )
-            self.done.emit(preview)
+            self._emit(self.done, preview)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class ContributorsWorker(QThread):
+class ContributorsWorker(_Worker):
     """Fetches the contributor list and their avatars off the GUI thread.
 
-    The About page used to do this inline in its constructor: a 3 s call for the
-    list followed by a blocking download per contributor, all on the UI thread, so
-    opening the page froze the whole window on a slow or captive network.
+    Done inline in the About page's constructor, this was a 3 s call plus a
+    blocking download per contributor, freezing the window on a slow network.
     """
 
     #: list of (ContributorInfo, avatar file path or "")
@@ -472,11 +468,10 @@ class ContributorsWorker(QThread):
                 timeout_seconds=3.0, force_refresh=self._force_refresh
             )
             if not contributors:
-                self.done.emit([])
+                self._emit(self.done, [])
                 return
 
-            # Avatars are independent downloads; fetching them one after another was
-            # most of the wait.
+            # Independent downloads; serialising them was most of the wait.
             with ThreadPoolExecutor(max_workers=min(6, len(contributors))) as pool:
                 avatars = list(
                     pool.map(
@@ -484,12 +479,12 @@ class ContributorsWorker(QThread):
                         contributors,
                     )
                 )
-            self.done.emit([(c, avatar or "") for c, avatar in zip(contributors, avatars)])
+            self._emit(self.done, [(c, avatar or "") for c, avatar in zip(contributors, avatars)])
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class UpdateCheckWorker(QThread):
+class UpdateCheckWorker(_Worker):
     """Asks GitHub for the latest release without blocking the window."""
 
     done = Signal(object)  # UpdateInfo | None
@@ -499,12 +494,12 @@ class UpdateCheckWorker(QThread):
         try:
             from crapcleaner.utils.updater import check_for_updates
 
-            self.done.emit(check_for_updates(timeout_seconds=5.0))
+            self._emit(self.done, check_for_updates(timeout_seconds=5.0))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class UpdateDownloadWorker(QThread):
+class UpdateDownloadWorker(_Worker):
     """Downloads and verifies a release without blocking the window."""
 
     progress = Signal(int, int)  # bytes received, total (0 when unknown)
@@ -522,12 +517,12 @@ class UpdateDownloadWorker(QThread):
             update = download_update(
                 self._version, progress_cb=lambda got, total: self.progress.emit(got, total)
             )
-            self.done.emit(update)
+            self._emit(self.done, update)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class ScheduledScanWorker(QThread):
+class ScheduledScanWorker(_Worker):
     """Runs the unattended scan on demand, without blocking the window."""
 
     done = Signal(object)
@@ -537,12 +532,12 @@ class ScheduledScanWorker(QThread):
         try:
             from crapcleaner.core.scheduler import run_scheduled_scan
 
-            self.done.emit(run_scheduled_scan())
+            self._emit(self.done, run_scheduled_scan())
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class MemoryReportWorker(QThread):
+class MemoryReportWorker(_Worker):
     """Reads RAM, swap, and VRAM statistics off the main thread."""
 
     done = Signal(object)
@@ -552,12 +547,12 @@ class MemoryReportWorker(QThread):
         try:
             from crapcleaner.system.memory_report import get_memory_report
 
-            self.done.emit(get_memory_report())
+            self._emit(self.done, get_memory_report())
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class MemoryActionWorker(QThread):
+class MemoryActionWorker(_Worker):
     """Runs a single memory reclamation action off the main thread."""
 
     done = Signal(object)
@@ -572,12 +567,12 @@ class MemoryActionWorker(QThread):
         try:
             from crapcleaner.system.memory_actions import run_action
 
-            self.done.emit(run_action(self._action_id, dry_run=self._dry_run))
+            self._emit(self.done, run_action(self._action_id, dry_run=self._dry_run))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class StartupWorker(QThread):
+class StartupWorker(_Worker):
     """Loads Windows startup applications off the main thread."""
 
     done = Signal(list)
@@ -587,13 +582,13 @@ class StartupWorker(QThread):
         try:
             from crapcleaner.system.startup import get_startup_items
 
-            self.done.emit(get_startup_items(force_refresh=True))
+            self._emit(self.done, get_startup_items(force_refresh=True))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class StartupActionWorker(QThread):
-    """Executes a startup modification action (toggle enable/disable, remove, add) asynchronously."""
+class StartupActionWorker(_Worker):
+    """Enables, disables, removes, or adds a startup entry off the main thread."""
 
     done = Signal(bool, str)
     failed = Signal(str)
@@ -633,12 +628,12 @@ class StartupActionWorker(QThread):
             else:
                 ok, msg = False, f"Unknown startup action: {self._action}"
 
-            self.done.emit(ok, msg)
+            self._emit(self.done, ok, msg)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class SystemUpdateWorker(QThread):
+class SystemUpdateWorker(_Worker):
     """Checks for pending system updates and recent update history off the main thread."""
 
     done = Signal(object)
@@ -648,12 +643,12 @@ class SystemUpdateWorker(QThread):
         try:
             from crapcleaner.system.system_updates import check_system_updates
 
-            self.done.emit(check_system_updates(include_history=True))
+            self._emit(self.done, check_system_updates(include_history=True))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class SystemUpdateInstallWorker(QThread):
+class SystemUpdateInstallWorker(_Worker):
     """Installs pending system updates off the main thread."""
 
     done = Signal(bool, str)
@@ -664,9 +659,9 @@ class SystemUpdateInstallWorker(QThread):
             from crapcleaner.system.system_updates import install_system_updates
 
             ok, msg = install_system_updates()
-            self.done.emit(ok, msg)
+            self._emit(self.done, ok, msg)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
 # Historic names, kept for existing imports.
@@ -674,7 +669,7 @@ WindowsUpdateWorker = SystemUpdateWorker
 WindowsUpdateInstallWorker = SystemUpdateInstallWorker
 
 
-class ServicesWorker(QThread):
+class ServicesWorker(_Worker):
     """Retrieves every service or systemd unit and its runtime state off the main thread."""
 
     done = Signal(list)
@@ -684,13 +679,13 @@ class ServicesWorker(QThread):
         try:
             from crapcleaner.system.services import get_services_report
 
-            self.done.emit(get_services_report(force_refresh=True))
+            self._emit(self.done, get_services_report(force_refresh=True))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class ServiceActionWorker(QThread):
-    """Executes start, stop, restart, or startup type configuration for a service asynchronously."""
+class ServiceActionWorker(_Worker):
+    """Starts, stops, restarts, or reconfigures one service off the main thread."""
 
     done = Signal(bool, str)
     failed = Signal(str)
@@ -729,12 +724,12 @@ class ServiceActionWorker(QThread):
             else:
                 ok, msg = False, f"Unknown service action: {self._action}"
 
-            self.done.emit(ok, msg)
+            self._emit(self.done, ok, msg)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class PackageManagerWorker(QThread):
+class PackageManagerWorker(_Worker):
     """Scans all detected package managers for available updates off the main thread."""
 
     done = Signal(list)  # list[ManagerResult]
@@ -748,12 +743,12 @@ class PackageManagerWorker(QThread):
         try:
             from crapcleaner.system.package_managers import get_all_updates
 
-            self.done.emit(get_all_updates(force_refresh=self._force_refresh))
+            self._emit(self.done, get_all_updates(force_refresh=self._force_refresh))
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
 
 
-class PackageUpdateWorker(QThread):
+class PackageUpdateWorker(_Worker):
     """Installs one package (or all packages for a manager) off the main thread."""
 
     done = Signal(bool, str)
@@ -773,6 +768,29 @@ class PackageUpdateWorker(QThread):
                 ok, msg = install_all_updates(self._manager)
             else:
                 ok, msg = install_update(self._manager, self._pkg_id)
-            self.done.emit(ok, msg)
+            self._emit(self.done, ok, msg)
         except Exception as exc:  # pragma: no cover - defensive
-            self.failed.emit(str(exc))
+            self._emit(self.failed, str(exc))
+
+
+class DiagnosticsWorker(_Worker):
+    """Writes the diagnostics bundle off the GUI thread.
+
+    It reads the tail of the log and probes every drive, which is seconds of blocking
+    work in a click handler.
+    """
+
+    done = Signal(str)  # path written
+    failed = Signal(str)
+
+    def __init__(self, destination: str, parent=None):
+        super().__init__(parent)
+        self._destination = destination
+
+    def run(self):
+        try:
+            from crapcleaner.system.diagnostics import write_diagnostics_bundle
+
+            self._emit(self.done, write_diagnostics_bundle(self._destination))
+        except Exception as exc:  # pragma: no cover - defensive
+            self._emit(self.failed, str(exc))

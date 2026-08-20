@@ -64,7 +64,6 @@ class DockerView(QWidget):
         output_lay.addWidget(self.output)
         layout.addWidget(output_card)
 
-        # WSL Virtual Disks
         wsl_header = QHBoxLayout()
         wsl_lbl = QLabel("WSL2 / Docker Virtual Disks (ext4.vhdx)")
         wsl_lbl.setStyleSheet("font-weight: 700;")
@@ -89,6 +88,7 @@ class DockerView(QWidget):
         table_lay = QVBoxLayout(table_card)
         table_lay.setContentsMargins(8, 8, 8, 8)
         self.wsl_table = CrapTable(0, 2)
+        self.wsl_table.setAccessibleName("WSL distributions")
         self.wsl_table.setHorizontalHeaderLabels(
             ["Virtual Disk File (.vhdx)", "Allocated Disk Size"]
         )
@@ -97,7 +97,6 @@ class DockerView(QWidget):
         table_lay.addWidget(self.wsl_table)
         layout.addWidget(table_card, 1)
 
-        # Safe Prune Buttons
         prune_row = QHBoxLayout()
         prune_row.setSpacing(8)
         self.prune_system_button = QPushButton("docker system prune")

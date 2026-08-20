@@ -1,15 +1,21 @@
 """GitHub Release and version updater utility for CrapCleaner."""
 
 import json
-import logging
 import re
 import urllib.error
 import urllib.request
 from typing import Any, NamedTuple
 
 from crapcleaner import __version__
+from crapcleaner.config import offline_mode
+from crapcleaner.utils.logs import get_logger
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger("updater")
+
+OFFLINE_REASON = (
+    "Offline mode is on, so CrapCleaner did not contact GitHub. "
+    "Turn offline mode off in Settings to check for updates."
+)
 
 GITHUB_REPO = "PatrickJnr/crapcleaner"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -46,11 +52,19 @@ def _fetch_json(url: str, timeout_seconds: float = 5.0) -> Any:
     return None
 
 
+def offline_skip_reason() -> str | None:
+    """Why an update check will not reach GitHub, or None when it will."""
+    return OFFLINE_REASON if offline_mode() else None
+
+
 def check_for_updates(timeout_seconds: float = 5.0) -> UpdateInfo | None:
     """Check GitHub API for latest published version with multi-endpoint fallback."""
+    if offline_mode():
+        _logger.info("Offline mode is on; skipped the update check")
+        return None
+
     current_parsed = _parse_version(__version__)
 
-    # 1. Try latest published release
     try:
         data = _fetch_json(RELEASES_API_URL, timeout_seconds=timeout_seconds)
         if isinstance(data, dict) and data.get("tag_name"):
@@ -68,7 +82,6 @@ def check_for_updates(timeout_seconds: float = 5.0) -> UpdateInfo | None:
     except Exception as exc:
         _logger.debug("Latest release check failed: %s", exc)
 
-    # 2. Fallback: try release list
     try:
         data = _fetch_json(ALL_RELEASES_URL, timeout_seconds=timeout_seconds)
         if isinstance(data, list) and data and isinstance(data[0], dict):
@@ -87,7 +100,6 @@ def check_for_updates(timeout_seconds: float = 5.0) -> UpdateInfo | None:
     except Exception as exc:
         _logger.debug("All releases fallback check failed: %s", exc)
 
-    # 3. Fallback: try repository tags
     try:
         data = _fetch_json(TAGS_API_URL, timeout_seconds=timeout_seconds)
         if isinstance(data, list) and data and isinstance(data[0], dict):

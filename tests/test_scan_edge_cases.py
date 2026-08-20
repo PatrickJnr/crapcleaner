@@ -31,11 +31,6 @@ def _write(path: str, size: int = 128) -> None:
         fh.write(b"x" * size)
 
 
-# ---------------------------------------------------------------------------
-# Reparse points
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.skipif(not is_windows(), reason="Windows junctions")
 def test_junction_loop_terminates_and_is_not_followed(tmp_path):
     """A junction pointing at its own ancestor must not be traversed.
@@ -94,11 +89,6 @@ def test_is_reparse_point_detects_plain_files(tmp_path):
     _write(str(plain))
     st = os.stat(str(plain), follow_symlinks=False)
     assert is_reparse_point(st) is False
-
-
-# ---------------------------------------------------------------------------
-# Robustness
-# ---------------------------------------------------------------------------
 
 
 def test_missing_root_returns_zero(tmp_path):
@@ -179,9 +169,7 @@ def test_protected_directory_is_not_descended(tmp_path):
     assert total == 128
 
 
-# ---------------------------------------------------------------------------
 # Deletion must not escape through a link
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(not is_windows(), reason="Windows junctions")
@@ -208,8 +196,7 @@ def test_deletion_does_not_follow_a_junction_out_of_the_target(tmp_path):
 
     assert any(p.endswith("junk.tmp") for p in walked)
     assert not any("thesis.docx" in p for p in walked), "walk escaped through the junction"
-    # The junction is offered as a deletable entry itself, so the link goes but its
-    # target survives.
+    # The junction is a deletable entry itself: the link goes, its target survives.
     assert any(p.endswith("escape") for p in walked)
     assert (documents / "thesis.docx").exists()
 

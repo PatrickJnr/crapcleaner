@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from crapcleaner.utils.files import walk_safe_entries
 
 FILE_CATEGORY_MAP: dict[str, str] = {
-    # Images
     ".png": "Images",
     ".jpg": "Images",
     ".jpeg": "Images",
@@ -29,7 +28,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".nef": "Images",
     ".heic": "Images",
     ".avif": "Images",
-    # Videos
     ".mp4": "Videos",
     ".mkv": "Videos",
     ".avi": "Videos",
@@ -41,7 +39,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".3gp": "Videos",
     ".mpg": "Videos",
     ".mpeg": "Videos",
-    # Audio
     ".mp3": "Audio",
     ".flac": "Audio",
     ".wav": "Audio",
@@ -54,7 +51,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".alac": "Audio",
     ".mid": "Audio",
     ".midi": "Audio",
-    # Archives
     ".zip": "Archives",
     ".rar": "Archives",
     ".7z": "Archives",
@@ -65,7 +61,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".zst": "Archives",
     ".cab": "Archives",
     ".tgz": "Archives",
-    # Executables & Installers
     ".exe": "Executables",
     ".msi": "Executables",
     ".msix": "Executables",
@@ -78,7 +73,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".rpm": "Executables",
     ".dmg": "Executables",
     ".pkg": "Executables",
-    # Documents
     ".pdf": "Documents",
     ".doc": "Documents",
     ".docx": "Documents",
@@ -94,7 +88,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".csv": "Documents",
     ".md": "Documents",
     ".epub": "Documents",
-    # Game files
     ".pak": "Game files",
     ".uasset": "Game files",
     ".bik": "Game files",
@@ -104,7 +97,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".wad": "Game files",
     ".big": "Game files",
     ".unity3d": "Game files",
-    # Developer files
     ".py": "Developer files",
     ".js": "Developer files",
     ".ts": "Developer files",
@@ -128,7 +120,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".sh": "Developer files",
     ".bat": "Developer files",
     ".ps1": "Developer files",
-    # Disk images & VMs
     ".iso": "Virtual machines & Disks",
     ".vhd": "Virtual machines & Disks",
     ".vhdx": "Virtual machines & Disks",
@@ -138,7 +129,6 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".ova": "Virtual machines & Disks",
     ".ovf": "Virtual machines & Disks",
     ".img": "Virtual machines & Disks",
-    # AI models & data
     ".gguf": "AI models & Data",
     ".safetensors": "AI models & Data",
     ".onnx": "AI models & Data",
@@ -181,10 +171,9 @@ class _GroupStats:
 class FileTypeCollector:
     """Accumulates the breakdown from files handed to it, from any number of threads.
 
-    The Storage view used to walk the tree a second time to build this. It now
-    subscribes to the hierarchy scan's traversal instead, which runs on a pool - so
-    each thread accumulates into its own dict and they are merged at the end rather
-    than contending on a lock per file.
+    Fed by the hierarchy scan's traversal, which runs on a pool, so each thread
+    accumulates into its own dict and they are merged at the end rather than
+    contending on a lock per file.
     """
 
     __slots__ = ("_local", "_per_thread", "_lock")
@@ -255,8 +244,8 @@ def analyze_file_types(
 ) -> list[FileTypeSummary]:
     """Scan root and group storage by functional file categories.
 
-    Kept for callers that only want this one breakdown (the CLI). The Storage view
-    shares the hierarchy scan's traversal through :class:`FileTypeCollector`.
+    For callers that want only this breakdown (the CLI); the Storage view shares the
+    hierarchy scan's traversal through :class:`FileTypeCollector` instead.
     """
     if not root or not os.path.isdir(root):
         return []
@@ -264,9 +253,8 @@ def analyze_file_types(
     groups: dict[str, _GroupStats] = {}
     visited_files = 0
 
-    # walk_safe_entries hands back the DirEntry objects from the directory listing,
-    # which already carry the size. Re-stat'ing each file by path cost one syscall per
-    # file and dominated the whole Storage Breakdown view.
+    # DirEntry.stat() reuses the directory listing; re-stat'ing by path cost one
+    # syscall per file and dominated this view.
     for dirpath, file_entries in walk_safe_entries(root):
         if stop_event is not None and stop_event.is_set():
             break

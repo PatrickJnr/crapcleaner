@@ -130,7 +130,8 @@ def _build_browser_categories(browser_id: str, display: str, root: str) -> list[
         targets = []
         for profile in profiles:
             for sub in subpaths:
-                p = os.path.join(profile, *sub)
+                # sub is a "a/b" string, not a sequence: split it or join() walks characters.
+                p = os.path.join(profile, *sub.split("/"))
                 if os.path.isdir(p):
                     targets.append(CacheTarget(path=p))
         return targets
@@ -232,7 +233,6 @@ def get_categories() -> list[CleanupCategory]:
     categories: list[CleanupCategory] = []
 
     if is_windows():
-        # Chromium-based browsers on Windows
         categories.extend(
             _build_browser_categories(
                 "chrome", "Google Chrome", os.path.join(local, "Google", "Chrome", "User Data")
@@ -286,7 +286,6 @@ def get_categories() -> list[CleanupCategory]:
             )
         )
 
-        # Firefox derivatives on Windows
         categories.extend(
             _firefox_categories(
                 "firefox", "Mozilla Firefox", os.path.join(local, "Mozilla", "Firefox", "Profiles")
@@ -305,7 +304,6 @@ def get_categories() -> list[CleanupCategory]:
         )
 
     elif is_linux():
-        # Chromium-based on Linux
         categories.extend(
             _build_browser_categories(
                 "chrome", "Google Chrome", os.path.join(user, ".config", "google-chrome")
@@ -349,7 +347,6 @@ def get_categories() -> list[CleanupCategory]:
             )
         )
 
-        # Firefox on Linux
         categories.extend(
             _firefox_categories(
                 "firefox", "Mozilla Firefox", os.path.join(user, ".mozilla", "firefox")

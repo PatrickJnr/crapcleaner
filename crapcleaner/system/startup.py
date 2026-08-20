@@ -55,9 +55,7 @@ class StartupItem:
         }
 
 
-# ---------------------------------------------------------------------------
 # Shared heuristics - no platform branching
-# ---------------------------------------------------------------------------
 
 
 def extract_executable_path(command: str) -> str:
@@ -179,11 +177,6 @@ def extract_publisher(name: str, file_path: str) -> str:
 _extract_executable_path = extract_executable_path
 _estimate_startup_impact = estimate_startup_impact
 _extract_publisher = extract_publisher
-
-
-# ---------------------------------------------------------------------------
-# Dispatch
-# ---------------------------------------------------------------------------
 
 
 def _backend():

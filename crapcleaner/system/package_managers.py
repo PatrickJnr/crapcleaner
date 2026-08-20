@@ -15,11 +15,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from crapcleaner.utils.platform import is_linux, is_windows, run_command
-
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
+from crapcleaner.config import offline_mode
+from crapcleaner.system.backends.updates_linux import elevated
+from crapcleaner.utils.platform import is_linux, is_windows, run_command, safe_package_ids
 
 
 @dataclass
@@ -50,30 +48,27 @@ class ManagerResult:
     available: bool = True
 
 
-# ---------------------------------------------------------------------------
-# Cache
-# ---------------------------------------------------------------------------
-
 _CACHE_TTL = 120.0
 
-# Installers are killed when they exceed these. Large packages (IDEs, SDKs, Adobe)
-# routinely run for many minutes, and a half-installed package is worse than a slow
-# one, so these are generous rather than snappy.
+# Generous: large packages run for many minutes and a half-installed package is
+# worse than a slow one.
 _INSTALL_TIMEOUT = 1800.0
 _INSTALL_ALL_TIMEOUT = 7200.0
 _cache_lock = threading.Lock()
 _cached = None
+
+OFFLINE_MESSAGE = "Skipped: offline mode is on, so no update source was contacted."
+
+_NO_ELEVATION_MESSAGE = (
+    "Root privileges are required to install packages, and neither pkexec nor sudo is "
+    "available. Run CrapCleaner as root, or install polkit."
+)
 
 
 def _clear_cache() -> None:
     global _cached
     with _cache_lock:
         _cached = None
-
-
-# ---------------------------------------------------------------------------
-# Detection helpers
-# ---------------------------------------------------------------------------
 
 
 def _cmd_exists(name: str) -> bool:
@@ -105,20 +100,23 @@ def detect_managers() -> list:
     return available
 
 
-# ---------------------------------------------------------------------------
-# Subprocess helper
-# ---------------------------------------------------------------------------
-
-
 def _run(args, timeout=60.0, env_extra=None):
     """(returncode, stdout, stderr) for one package-manager command."""
     result = run_command(args, timeout=timeout, env_extra=env_extra)
     return result.returncode, result.stdout, result.stderr
 
 
-# ---------------------------------------------------------------------------
-# Winget
-# ---------------------------------------------------------------------------
+def _run_as_root(args, timeout=60.0, env_extra=None):
+    """(returncode, stdout, stderr) for a command that only works as root."""
+    result = elevated(args, timeout=timeout, env_extra=env_extra)
+    if result.get("error") == "no elevation helper":
+        return -1, "", _NO_ELEVATION_MESSAGE
+    return (
+        result.get("returncode", -1),
+        str(result.get("stdout") or ""),
+        str(result.get("stderr") or ""),
+    )
+
 
 # No "" entry here: str.startswith("") is always True and would skip every row.
 _WINGET_SKIP_PREFIXES = ("Name", "-", "\\", "The following", "upgrades available", "No applicable")
@@ -146,10 +144,8 @@ def _parse_winget_upgrades(text):
             continue
         if any(stripped.startswith(p) for p in _WINGET_SKIP_PREFIXES):
             continue
-        # winget pads cells to a fixed width, so a value that fills its column is
-        # separated from the next by a single space - splitting on runs of spaces
-        # would merge the two. Slice by header offsets, and only fall back to the
-        # space split when the offsets clearly do not line up with this row.
+        # winget pads cells to a fixed width, so a full cell sits one space from the
+        # next; splitting on space runs would merge them. Header offsets first.
         cols = [line[start:end].strip() for start, end in bounds]
         if not cols[1] or re.search(r"\s", cols[1]):
             cols = [col.strip() for col in re.split(r"\s{2,}", stripped)]
@@ -183,11 +179,6 @@ def _get_winget_updates():
         return result
     result.updates = _parse_winget_upgrades(stdout)
     return result
-
-
-# ---------------------------------------------------------------------------
-# Chocolatey
-# ---------------------------------------------------------------------------
 
 
 def _parse_choco_outdated(text):
@@ -226,52 +217,40 @@ def _get_choco_updates():
     return result
 
 
-# ---------------------------------------------------------------------------
-# APT
-# ---------------------------------------------------------------------------
+# "Inst linux-image-generic [6.8.0-31] (6.8.0-40 Ubuntu:24.04/noble-security [amd64])"
+_APT_INST = re.compile(r"^Inst\s+(\S+)\s+\[([^\]]*)\]\s+\(([^\s)]+)\s+([^)]*)\)")
 
 
 def _get_apt_updates(manager="apt"):
+    """The only apt query in the package; `updates_linux` reads these same rows."""
     result = ManagerResult(manager=manager)
-    _run(["sudo", "-n", manager, "-q", "update"], timeout=30.0)
+    # `--just-print` simulates and needs no root, and works on hosts that ship
+    # apt-get without apt. A read-only check must never `apt update`: that mutates
+    # the package lists and needs root.
     rc, stdout, stderr = _run(
-        [manager, "list", "--upgradable", "--quiet"],
+        ["apt-get", "--just-print", "upgrade"],
         timeout=30.0,
         env_extra={"DEBIAN_FRONTEND": "noninteractive"},
     )
-    if rc == -1 and "not found" in stderr:
+    if rc != 0 and not stdout.strip():
         result.available = False
-        result.error = f"{manager} not found"
+        result.error = stderr.strip() or f"{manager} could not list upgradable packages."
         return result
     for line in stdout.splitlines():
-        line = line.strip()
-        if not line or line.startswith("Listing...") or line.startswith("WARNING"):
-            continue
-        m = re.match(r"^(\S+)/(\S+)\s+(\S+)\s+\S+.*upgradable from:\s+(\S+)", line)
+        m = _APT_INST.match(line.strip())
         if m:
-            name_arch, source, available, current = (
-                m.group(1),
-                m.group(2),
-                m.group(3),
-                m.group(4).rstrip(")"),
-            )
-            pkg_id = name_arch.split(":")[0]
+            pkg_id = m.group(1).split(":")[0]
             result.updates.append(
                 PackageUpdate(
                     id=pkg_id,
                     name=pkg_id,
-                    current_version=current,
-                    available_version=available,
+                    current_version=m.group(2),
+                    available_version=m.group(3),
                     manager=manager,
-                    source=source,
+                    source=m.group(4).strip(),
                 )
             )
     return result
-
-
-# ---------------------------------------------------------------------------
-# Flatpak
-# ---------------------------------------------------------------------------
 
 
 def _get_flatpak_updates():
@@ -309,11 +288,6 @@ def _get_flatpak_updates():
     return result
 
 
-# ---------------------------------------------------------------------------
-# Snap
-# ---------------------------------------------------------------------------
-
-
 def _get_snap_updates():
     result = ManagerResult(manager="snap")
     rc, stdout, stderr = _run(["snap", "refresh", "--list"], timeout=20.0)
@@ -348,11 +322,6 @@ def _get_snap_updates():
     return result
 
 
-# ---------------------------------------------------------------------------
-# Pacman
-# ---------------------------------------------------------------------------
-
-
 def _get_pacman_updates():
     result = ManagerResult(manager="pacman")
     if _cmd_exists("checkupdates"):
@@ -377,11 +346,6 @@ def _get_pacman_updates():
                 )
             )
     return result
-
-
-# ---------------------------------------------------------------------------
-# DNF/YUM
-# ---------------------------------------------------------------------------
 
 
 def _get_dnf_updates(manager="dnf"):
@@ -413,13 +377,11 @@ def _get_dnf_updates(manager="dnf"):
     return result
 
 
-# ---------------------------------------------------------------------------
-# Main public API
-# ---------------------------------------------------------------------------
-
-
 def get_all_updates(force_refresh=False):
     global _cached
+    if offline_mode():
+        return [ManagerResult(manager=m, error=OFFLINE_MESSAGE) for m in detect_managers()]
+
     now = time.monotonic()
     if not force_refresh:
         with _cache_lock:
@@ -455,6 +417,9 @@ def get_all_updates(force_refresh=False):
 
 def install_update(manager, pkg_id):
     _clear_cache()
+    if not safe_package_ids([pkg_id]):
+        # Several of these managers run elevated and read a leading dash as an option.
+        return False, f"Refusing an unsafe package name: {pkg_id}"
     try:
         if manager == "winget":
             rc, stdout, stderr = _run(
@@ -476,21 +441,23 @@ def install_update(manager, pkg_id):
                 ["choco", "upgrade", pkg_id, "-y", "--no-progress"], timeout=_INSTALL_TIMEOUT
             )
         elif manager in ("apt", "apt-get"):
-            rc, stdout, stderr = _run(
-                ["sudo", "-n", manager, "install", "--only-upgrade", "-y", pkg_id],
+            rc, stdout, stderr = _run_as_root(
+                [manager, "install", "--only-upgrade", "-y", pkg_id],
                 timeout=_INSTALL_TIMEOUT,
                 env_extra={"DEBIAN_FRONTEND": "noninteractive"},
             )
         elif manager == "flatpak":
             rc, stdout, stderr = _run(["flatpak", "update", "-y", pkg_id], timeout=_INSTALL_TIMEOUT)
         elif manager == "snap":
-            rc, stdout, stderr = _run(["snap", "refresh", pkg_id], timeout=_INSTALL_TIMEOUT)
+            rc, stdout, stderr = _run_as_root(["snap", "refresh", pkg_id], timeout=_INSTALL_TIMEOUT)
         elif manager == "pacman":
-            rc, stdout, stderr = _run(
+            rc, stdout, stderr = _run_as_root(
                 ["pacman", "-S", "--noconfirm", pkg_id], timeout=_INSTALL_TIMEOUT
             )
         elif manager in ("dnf", "yum"):
-            rc, stdout, stderr = _run([manager, "upgrade", "-y", pkg_id], timeout=_INSTALL_TIMEOUT)
+            rc, stdout, stderr = _run_as_root(
+                [manager, "upgrade", "-y", pkg_id], timeout=_INSTALL_TIMEOUT
+            )
         else:
             return False, f"Unsupported package manager: {manager}"
         ok = rc == 0
@@ -521,21 +488,23 @@ def install_all_updates(manager):
                 ["choco", "upgrade", "all", "-y", "--no-progress"], timeout=_INSTALL_ALL_TIMEOUT
             )
         elif manager in ("apt", "apt-get"):
-            rc, stdout, stderr = _run(
-                ["sudo", "-n", manager, "upgrade", "-y"],
+            rc, stdout, stderr = _run_as_root(
+                [manager, "upgrade", "-y"],
                 timeout=_INSTALL_ALL_TIMEOUT,
                 env_extra={"DEBIAN_FRONTEND": "noninteractive"},
             )
         elif manager == "flatpak":
             rc, stdout, stderr = _run(["flatpak", "update", "-y"], timeout=_INSTALL_ALL_TIMEOUT)
         elif manager == "snap":
-            rc, stdout, stderr = _run(["snap", "refresh"], timeout=_INSTALL_ALL_TIMEOUT)
+            rc, stdout, stderr = _run_as_root(["snap", "refresh"], timeout=_INSTALL_ALL_TIMEOUT)
         elif manager == "pacman":
-            rc, stdout, stderr = _run(
+            rc, stdout, stderr = _run_as_root(
                 ["pacman", "-Syu", "--noconfirm"], timeout=_INSTALL_ALL_TIMEOUT
             )
         elif manager in ("dnf", "yum"):
-            rc, stdout, stderr = _run([manager, "upgrade", "-y"], timeout=_INSTALL_ALL_TIMEOUT)
+            rc, stdout, stderr = _run_as_root(
+                [manager, "upgrade", "-y"], timeout=_INSTALL_ALL_TIMEOUT
+            )
         else:
             return False, f"Unsupported package manager: {manager}"
         ok = rc == 0

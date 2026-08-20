@@ -10,14 +10,15 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QRectF
-from PySide6.QtGui import QImage, QPainter, qAlpha
+from PySide6.QtGui import QColor, QImage, QPainter, QPalette, qAlpha
 from PySide6.QtWidgets import QApplication
 
+from crapcleaner.config import load_settings, update_settings
 from crapcleaner.gui import icons
 from crapcleaner.gui.app import MainWindow
 from crapcleaner.gui.icons import font_available, material_code
 from crapcleaner.gui.sidebar import NAV_ITEMS
-from crapcleaner.gui.theme import THEMES, apply_theme
+from crapcleaner.gui.theme import THEMES, apply_theme, palette_for
 from crapcleaner.models.category import SafetyLevel
 from crapcleaner.models.report import ScanCategoryResult, ScanReport
 
@@ -31,6 +32,10 @@ def app():
 def test_apply_theme_all_palettes(app):
     for theme in THEMES:
         apply_theme(app, theme)
+        palette = palette_for(theme)
+        assert app.palette().color(QPalette.ColorRole.Window) == QColor(palette["window"])
+        assert app.palette().color(QPalette.ColorRole.Highlight) == QColor(palette["accent"])
+        assert palette["surface"] in app.styleSheet()
 
 
 def test_main_window_boots_and_navigates(app):
@@ -39,14 +44,21 @@ def test_main_window_boots_and_navigates(app):
     window.show()
     for key in window._PAGE_KEYS:
         window.navigate(key)
+        assert window.stack.currentIndex() == window._PAGE_KEYS.index(key)
     window.review_and_clean()
+    assert window.stack.currentIndex() == window._PAGE_KEYS.index("cleanup")
     window.close()
 
 
 def test_settings_apply_theme_roundtrip(app):
     window = MainWindow()
-    window.apply_settings()
     window.show()
+    for theme in ("light", "nord", "dark"):
+        update_settings(theme=theme)
+        window.apply_settings()
+        assert window._theme == theme
+        assert window._settings["theme"] == theme
+        assert load_settings()["theme"] == theme
     window.close()
 
 
@@ -92,7 +104,6 @@ def test_cleanup_view_filtering_and_selection(app):
     window = MainWindow()
     view = window.cleanup_view
 
-    # Test selection helpers
     view._select_all(True)
     sel = view.selected_categories()
     assert len(sel) > 0
@@ -110,15 +121,12 @@ def test_cleanup_view_filtering_and_selection(app):
     inv_sel = view.selected_categories()
     assert len(inv_sel) == len(checkable_categories) - len(safe_sel)
 
-    # Test safety chips filter
     view._set_safety_filter("SAFE")
     view._set_safety_filter("ALL")
 
-    # Test search filter
     view.search_edit.setText("python")
     view.search_edit.setText("")
 
-    # Expand/collapse
     view.tree_expand_all()
     view.tree_collapse_all()
     window.close()
@@ -153,7 +161,6 @@ def test_scan_and_sidebar_badge_updates(app):
 def test_large_files_and_duplicates_views(app):
     window = MainWindow()
 
-    # Large files view test
     lf = window.large_files_view
 
     class DummyFile:
@@ -170,7 +177,6 @@ def test_large_files_and_duplicates_views(app):
     lf._filter_table("nonexistent")
     assert lf.table.isRowHidden(0)
 
-    # Duplicates view test
     dp = window.duplicates_view
 
     class DummyGroup:

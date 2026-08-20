@@ -10,9 +10,9 @@ from unittest.mock import patch
 import pytest
 
 from crapcleaner.core.protected_paths import (
+    explain_protection,
     get_protected_rules_summary,
     get_protected_system_roots,
-    is_path_protected,
     validate_cleanup_path,
 )
 from crapcleaner.utils.platform import is_windows
@@ -28,47 +28,47 @@ def test_protected_system_roots():
     assert all(isinstance(p, str) for p in paths)
 
 
-def test_is_path_protected_git_and_ssh():
-    assert is_path_protected("/home/user/code/project/.git/HEAD")
-    assert is_path_protected("/home/user/.ssh/known_hosts")
-    assert is_path_protected("/home/user/.ssh/id_ed25519")
-    assert is_path_protected("/home/user/.gnupg/secring.gpg")
+def test_protects_git_and_ssh():
+    assert explain_protection("/home/user/code/project/.git/HEAD")
+    assert explain_protection("/home/user/.ssh/known_hosts")
+    assert explain_protection("/home/user/.ssh/id_ed25519")
+    assert explain_protection("/home/user/.gnupg/secring.gpg")
 
 
 @windows_only
-def test_is_path_protected_git_and_ssh_windows():
-    assert is_path_protected("C:\\Projects\\repo\\.git")
-    assert is_path_protected("C:\\Users\\User\\.ssh\\id_rsa")
+def test_protects_git_and_ssh_windows():
+    assert explain_protection("C:\\Projects\\repo\\.git")
+    assert explain_protection("C:\\Users\\User\\.ssh\\id_rsa")
 
 
-def test_is_path_protected_browser_credentials():
-    assert is_path_protected("/home/user/.mozilla/firefox/profile.default/key4.db")
-    assert is_path_protected("/home/user/.mozilla/firefox/profile.default/logins.json")
-    assert is_path_protected("/home/user/.config/google-chrome/Default/Login Data")
-    assert is_path_protected("/home/user/.config/google-chrome/Default/Cookies")
+def test_protects_browser_credentials():
+    assert explain_protection("/home/user/.mozilla/firefox/profile.default/key4.db")
+    assert explain_protection("/home/user/.mozilla/firefox/profile.default/logins.json")
+    assert explain_protection("/home/user/.config/google-chrome/Default/Login Data")
+    assert explain_protection("/home/user/.config/google-chrome/Default/Cookies")
 
 
 @windows_only
-def test_is_path_protected_browser_credentials_windows():
-    assert is_path_protected(
+def test_protects_browser_credentials_windows():
+    assert explain_protection(
         "C:\\Users\\User\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data"
     )
-    assert is_path_protected(
+    assert explain_protection(
         "C:\\Users\\User\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Cookies"
     )
 
 
 @windows_only
-def test_is_path_protected_system_roots_windows():
+def test_protects_system_roots_windows():
     with patch("crapcleaner.core.protected_paths.get_windows_dir", return_value="C:\\Windows"):
-        assert is_path_protected("C:\\Windows")
-        assert is_path_protected("C:\\Windows\\System32")
+        assert explain_protection("C:\\Windows")
+        assert explain_protection("C:\\Windows\\System32")
 
 
 @linux_only
-def test_is_path_protected_system_roots_linux():
+def test_protects_system_roots_linux():
     for root in ("/etc", "/usr", "/boot", "/proc"):
-        assert is_path_protected(root), root
+        assert explain_protection(root) is not None, root
 
 
 def test_ordinary_cache_path_is_not_protected(tmp_path):

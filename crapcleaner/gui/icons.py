@@ -28,11 +28,10 @@ _CODEPOINTS_PATH = ASSETS_DIR / "MaterialIcons-Regular.codepoints"
 
 _LOGICAL_SIZE = 18
 _DEVICE_SCALE = 2
-# Glyphs are rendered slightly smaller than the box so they sit centered
-# with padding, matching how Material icons are typically displayed.
+# Material icons sit with padding inside their box rather than filling it.
 _GLYPH_SIZE_FACTOR = 0.8
 
-# Logical names used by the UI, mapped to Google Material icon names.
+#: Logical name -> Google Material icon name.
 _MATERIAL_NAMES = {
     "brand": "cleaning_services",
     "trash": "delete",

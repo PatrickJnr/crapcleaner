@@ -54,7 +54,6 @@ class SpecsView(QWidget):
         root_lay.setContentsMargins(28, 24, 28, 24)
         root_lay.setSpacing(16)
 
-        # 1. Header with title, subtitle, and primary actions
         header = QHBoxLayout()
         titles = QVBoxLayout()
         titles.setSpacing(4)
@@ -87,12 +86,10 @@ class SpecsView(QWidget):
 
         root_lay.addLayout(header)
 
-        # 2. Quick Specs Hero Strip (4 Key Stats)
         self.hero_container = QHBoxLayout()
         self.hero_container.setSpacing(12)
         root_lay.addLayout(self.hero_container)
 
-        # 3. Filter Chips & Search Toolbar
         filter_bar = QHBoxLayout()
         filter_bar.setSpacing(8)
 
@@ -119,6 +116,7 @@ class SpecsView(QWidget):
         filter_bar.addStretch(1)
 
         self.search_edit = QLineEdit()
+        self.search_edit.setAccessibleName("Search hardware specifications")
         self.search_edit.setPlaceholderText("Search specifications (e.g. RTX, Ryzen, NVMe)...")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setFixedWidth(280)
@@ -127,7 +125,6 @@ class SpecsView(QWidget):
 
         root_lay.addLayout(filter_bar)
 
-        # 4. Scrollable 2-Column Content Grid
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -138,7 +135,6 @@ class SpecsView(QWidget):
         self.content_layout.setContentsMargins(0, 4, 0, 16)
         self.content_layout.setSpacing(14)
 
-        # 2-Column container
         self.grid_widget = QWidget()
         self.grid_layout = QHBoxLayout(self.grid_widget)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
@@ -162,7 +158,6 @@ class SpecsView(QWidget):
         """Render modern animated skeleton placeholder blocks while loading."""
         self._clear_animations()
 
-        # 1. Clear Hero
         while self.hero_container.count():
             item = self.hero_container.takeAt(0)
             if item is not None:
@@ -170,7 +165,6 @@ class SpecsView(QWidget):
                 if w is not None:
                     w.deleteLater()
 
-        # 2. Clear Columns
         while self.col_left.count():
             item = self.col_left.takeAt(0)
             if item is not None:
@@ -187,7 +181,6 @@ class SpecsView(QWidget):
 
         self._card_widgets.clear()
 
-        # 3. Add 4 Hero Skeletons
         hero_titles = ["PROCESSOR", "GRAPHICS", "MEMORY (RAM)", "OPERATING SYSTEM"]
         for idx, title in enumerate(hero_titles):
             card = QFrame()
@@ -212,7 +205,6 @@ class SpecsView(QWidget):
             self._apply_skeleton_pulse(card, delay_offset=idx * 120)
             self.hero_container.addWidget(card)
 
-        # 4. Add Left Column Skeleton Cards
         left_skeletons = [
             ("Operating System Details", 5),
             ("Central Processor (CPU)", 6),
@@ -224,7 +216,6 @@ class SpecsView(QWidget):
             self._apply_skeleton_pulse(card, delay_offset=(idx + 4) * 100)
             self.col_left.addWidget(card)
 
-        # 5. Add Right Column Skeleton Cards
         right_skeletons = [
             ("Physical Memory & RAM Slots", 4),
             ("Graphics & Display Adapters", 5),
@@ -246,7 +237,6 @@ class SpecsView(QWidget):
         lay.setContentsMargins(18, 14, 18, 14)
         lay.setSpacing(12)
 
-        # Header
         hdr = QHBoxLayout()
         t_lbl = QLabel(title)
         t_lbl.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {_c(self._theme, 'text')};")
@@ -257,7 +247,6 @@ class SpecsView(QWidget):
         hdr.addWidget(copy_skel)
         lay.addLayout(hdr)
 
-        # Key-Value Skeleton Rows
         for i in range(row_count):
             row = QHBoxLayout()
             row.setSpacing(12)
@@ -411,7 +400,6 @@ class SpecsView(QWidget):
         card_lay.setContentsMargins(18, 14, 18, 14)
         card_lay.setSpacing(10)
 
-        # Header Row
         header_row = QHBoxLayout()
         header_row.setSpacing(8)
 
@@ -433,7 +421,6 @@ class SpecsView(QWidget):
 
         card_lay.addLayout(header_row)
 
-        # Key-Value Rows
         searchable_lines = [title]
         for label, val in rows:
             row = QHBoxLayout()
@@ -465,7 +452,6 @@ class SpecsView(QWidget):
     def _populate(self, specs, health_data: list | None = None):
         self._clear_animations()
 
-        # 1. Clear Hero
         while self.hero_container.count():
             item = self.hero_container.takeAt(0)
             if item is not None:
@@ -473,7 +459,6 @@ class SpecsView(QWidget):
                 if w is not None:
                     w.deleteLater()
 
-        # 2. Clear Grid Columns
         while self.col_left.count():
             item = self.col_left.takeAt(0)
             if item is not None:
@@ -490,8 +475,6 @@ class SpecsView(QWidget):
 
         self._card_widgets.clear()
 
-        # 3. Populate Hero Strip (4 Cards)
-        # Hero 1: CPU
         cpu_short = specs.cpu.name.replace("Processor", "").replace("8-Core", "").strip()
         self.hero_container.addWidget(
             self._make_hero_card(
@@ -501,7 +484,6 @@ class SpecsView(QWidget):
             )
         )
 
-        # Hero 2: Primary GPU
         primary_gpu = specs.gpus[0].name if specs.gpus else "Display Adapter"
         gpu_sub = (
             f"{format_size(specs.gpus[0].adapter_ram_bytes)} VRAM"
@@ -510,7 +492,6 @@ class SpecsView(QWidget):
         )
         self.hero_container.addWidget(self._make_hero_card("Graphics", primary_gpu, gpu_sub))
 
-        # Hero 3: Memory
         mem_tot = format_size(specs.memory.total_bytes)
         mem_used = format_size(specs.memory.used_bytes)
         self.hero_container.addWidget(
@@ -519,7 +500,6 @@ class SpecsView(QWidget):
             )
         )
 
-        # Hero 4: OS
         os_short = f"{specs.os.name} {specs.os.architecture}"
         self.hero_container.addWidget(
             self._make_hero_card(
@@ -529,8 +509,6 @@ class SpecsView(QWidget):
             )
         )
 
-        # 4. Left Column Cards (OS, CPU, Motherboard, Network)
-        # Card 1: Operating System
         os_rows = [
             ("Operating System", f"{specs.os.name} ({specs.os.architecture})"),
             ("Build & Version", specs.os.build_number),
@@ -543,7 +521,6 @@ class SpecsView(QWidget):
         self.col_left.addWidget(os_card)
         self._card_widgets.append((os_card, "os_net", os_search))
 
-        # Card 2: CPU Processor
         cpu_rows = [
             ("Processor", specs.cpu.name),
             ("Architecture", specs.cpu.architecture),
@@ -559,7 +536,6 @@ class SpecsView(QWidget):
         self.col_left.addWidget(cpu_card)
         self._card_widgets.append((cpu_card, "cpu_ram", cpu_search))
 
-        # Card 3: Motherboard & BIOS
         mb_rows = [
             ("Manufacturer", specs.motherboard.manufacturer),
             ("Product Model", specs.motherboard.product),
@@ -573,7 +549,6 @@ class SpecsView(QWidget):
         self.col_left.addWidget(mb_card)
         self._card_widgets.append((mb_card, "motherboard", mb_search))
 
-        # Card 4: Network Interfaces Card (Clean Full-Width List)
         net_card = QFrame()
         net_card.setObjectName("SpecsCard")
         net_card.setProperty("card", "true")
@@ -633,8 +608,6 @@ class SpecsView(QWidget):
         self._card_widgets.append((net_card, "os_net", " ".join(net_search_lines)))
         self.col_left.addStretch(1)
 
-        # 5. Right Column Cards (RAM, GPUs, Storage Drives)
-        # Card 5: Memory (RAM) with Live Gauge
         ram_card = QFrame()
         ram_card.setObjectName("SpecsCard")
         ram_card.setProperty("card", "true")
@@ -662,7 +635,6 @@ class SpecsView(QWidget):
         ram_header.addWidget(ram_copy_btn)
         ram_lay.addLayout(ram_header)
 
-        # Progress bar
         ram_bar = QProgressBar()
         ram_bar.setFixedHeight(8)
         ram_bar.setTextVisible(False)
@@ -698,7 +670,6 @@ class SpecsView(QWidget):
         self.col_right.addWidget(ram_card)
         self._card_widgets.append((ram_card, "cpu_ram", " ".join(ram_search_lines)))
 
-        # Card 6: Graphics (GPU) Cards
         gpu_card = QFrame()
         gpu_card.setObjectName("SpecsCard")
         gpu_card.setProperty("card", "true")
@@ -769,7 +740,6 @@ class SpecsView(QWidget):
         self.col_right.addWidget(gpu_card)
         self._card_widgets.append((gpu_card, "gpu", " ".join(gpu_search_lines)))
 
-        # Card 7: Storage Drives Card
         drive_card = QFrame()
         drive_card.setObjectName("SpecsCard")
         drive_card.setProperty("card", "true")
@@ -805,7 +775,6 @@ class SpecsView(QWidget):
         d_head.addWidget(d_copy_btn)
         d_lay.addLayout(d_head)
 
-        # Build a drive-letter -> media type lookup from pre-fetched health data
         health_lookup: dict[str, str] = {}
         for dh in health_data or []:
             if is_windows():
@@ -835,7 +804,6 @@ class SpecsView(QWidget):
             tot_str = format_size(d.total_bytes)
             free_str = format_size(d.free_bytes)
 
-            # Disk type on the right of the header row
             drive_key = (
                 (d_name if d_name.endswith(":") else d_name + ":").upper()
                 if is_windows()
@@ -878,7 +846,6 @@ class SpecsView(QWidget):
         self._card_widgets.append((drive_card, "storage", " ".join(drive_search_lines)))
         self.col_right.addStretch(1)
 
-        # Apply any active filter
         self._apply_filter()
 
     def _copy_specs(self):

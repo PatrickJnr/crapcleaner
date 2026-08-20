@@ -78,7 +78,6 @@ class ServicesView(QWidget):
         layout.setContentsMargins(0, 0, 8, 0)
         layout.setSpacing(14)
 
-        # 1. Hero Card
         self.hero_card = QFrame()
         self.hero_card.setProperty("card", "true")
         hero_lay = QVBoxLayout(self.hero_card)
@@ -134,7 +133,6 @@ class ServicesView(QWidget):
         self.status_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
         hero_lay.addWidget(self.status_label)
 
-        # Result banner
         self.result_banner = QFrame()
         self.result_banner.setProperty("card", "true")
         self.result_banner.setVisible(False)
@@ -151,7 +149,6 @@ class ServicesView(QWidget):
 
         layout.addWidget(self.hero_card)
 
-        # 2. Metric Cards Row
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(12)
         c1, self.total_card_val, self.total_card_sub = stat_card(
@@ -170,7 +167,6 @@ class ServicesView(QWidget):
             metrics_row.addWidget(c)
         layout.addLayout(metrics_row)
 
-        # 3. Filter & Search Controls
         filter_card = QFrame()
         filter_card.setProperty("card", "true")
         f_lay = QHBoxLayout(filter_card)
@@ -182,6 +178,7 @@ class ServicesView(QWidget):
         f_lay.addWidget(search_icon)
 
         self.search_input = QLineEdit()
+        self.search_input.setAccessibleName("Search services")
         self.search_input.setPlaceholderText(
             f"Search {self._unit_plural} by display name, {self._unit_noun} name, or description..."
         )
@@ -189,17 +186,20 @@ class ServicesView(QWidget):
         f_lay.addWidget(self.search_input, 2)
 
         self.status_combo = QComboBox()
+        self.status_combo.setAccessibleName("Filter by service status")
         self.status_combo.addItems(["All Status", "Running Only", "Stopped Only"])
         self.status_combo.currentIndexChanged.connect(self._filter_services)
         f_lay.addWidget(self.status_combo)
 
         self.startup_combo = QComboBox()
+        self.startup_combo.setAccessibleName("Filter by startup type")
         # Startup types differ per platform - systemd has no delayed-start mode.
         self.startup_combo.addItems(["All Startup Types"] + self._startup_types)
         self.startup_combo.currentIndexChanged.connect(self._filter_services)
         f_lay.addWidget(self.startup_combo)
 
         self.type_combo = QComboBox()
+        self.type_combo.setAccessibleName("Filter by service kind")
         self.type_combo.addItems(
             [
                 f"All {self._unit_plural.title()}",
@@ -212,8 +212,8 @@ class ServicesView(QWidget):
 
         layout.addWidget(filter_card)
 
-        # 4. Services Table
         self.table = CrapTable(0, 6)
+        self.table.setAccessibleName("System services")
         self.table.setHorizontalHeaderLabels(
             [
                 "Display Name",
@@ -319,8 +319,8 @@ class ServicesView(QWidget):
             if status_filter == "Stopped Only" and s.status != "Stopped":
                 continue
 
-            # The combo is populated from the platform's own startup types, so an
-            # exact-prefix match covers every one of them without listing names here.
+            # The combo is filled from the platform's own startup types, so a prefix
+            # match covers every one of them.
             if startup_filter != "All Startup Types" and startup_filter not in s.startup_type:
                 continue
 
@@ -335,7 +335,7 @@ class ServicesView(QWidget):
         self._populate_table(filtered)
 
     def _populate_table(self, items: list[Any]):
-        # Build name→service map for safe post-sort lookup
+        # name -> service map: sorting reorders the rows, so look up by name.
         self._svc_map: dict[str, Any] = {s.name: s for s in items}
 
         self.table.setSortingEnabled(False)
@@ -343,7 +343,6 @@ class ServicesView(QWidget):
         self.table.setRowCount(len(items))
 
         for row, s in enumerate(items):
-            # Display Name
             d_item = QTableWidgetItem(s.display_name)
             d_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             if s.description:
@@ -351,13 +350,11 @@ class ServicesView(QWidget):
             d_item.setData(Qt.ItemDataRole.UserRole, s.name)
             self.table.setItem(row, 0, d_item)
 
-            # Service Name
             n_item = QTableWidgetItem(s.name)
             n_item.setForeground(QColor(_c(self._theme, "muted")))
             n_item.setData(Qt.ItemDataRole.UserRole, s.name)
             self.table.setItem(row, 1, n_item)
 
-            # Status
             st_item = QTableWidgetItem(s.status)
             if s.status == "Running":
                 st_item.setForeground(QColor(_c(self._theme, "safe")))
@@ -367,7 +364,6 @@ class ServicesView(QWidget):
                 st_item.setForeground(QColor(_c(self._theme, "warning")))
             self.table.setItem(row, 2, st_item)
 
-            # Startup Type
             su_item = QTableWidgetItem(s.startup_type)
             if "Disabled" in s.startup_type:
                 su_item.setForeground(QColor(_c(self._theme, "danger")))
@@ -375,12 +371,10 @@ class ServicesView(QWidget):
                 su_item.setForeground(QColor(_c(self._theme, "safe")))
             self.table.setItem(row, 3, su_item)
 
-            # Account
             acc_item = QTableWidgetItem(s.account)
             acc_item.setForeground(QColor(_c(self._theme, "faint")))
             self.table.setItem(row, 4, acc_item)
 
-            # Description
             desc_item = QTableWidgetItem(s.description)
             desc_item.setForeground(QColor(_c(self._theme, "muted")))
             self.table.setItem(row, 5, desc_item)

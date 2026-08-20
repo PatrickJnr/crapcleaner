@@ -55,19 +55,15 @@ def test_extract_executable_path():
 
 
 def test_estimate_startup_impact(tmp_path):
-    # Non-existent file
     assert _estimate_startup_impact("RandomApp", "C:\\nonexistent.exe", False) == "Not Measured"
 
-    # Known high impact keyword
     assert _estimate_startup_impact("Discord", "C:\\Users\\User\\Discord.exe", True) == "High"
     assert _estimate_startup_impact("Steam Client", "C:\\Steam\\steam.exe", True) == "High"
     assert _estimate_startup_impact("Spotify", "C:\\Spotify\\spotify.exe", True) == "High"
 
-    # Known medium impact keyword
     assert _estimate_startup_impact("OneDrive", "C:\\OneDrive\\onedrive.exe", True) == "Medium"
     assert _estimate_startup_impact("Razer Synapse", "C:\\Razer\\razer.exe", True) == "Medium"
 
-    # File size based impact
     f = tmp_path / "small.exe"
     f.write_bytes(b"x" * 1000)
     assert _estimate_startup_impact("SmallUtil", str(f), True) == "Low"

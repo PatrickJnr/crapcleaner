@@ -1,0 +1,5 @@
+# The exact versions every published binary is built from. Every workflow job that
+# runs PyInstaller installs this file, so a release is never bundled against
+# whatever Qt or PyInstaller happened to be newest that morning.
+PySide6==6.11.1
+pyinstaller==6.22.2

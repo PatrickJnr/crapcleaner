@@ -73,6 +73,7 @@ class AiDataView(QWidget):
         self.scan_button.clicked.connect(self._scan)
 
         self.min_size = QSpinBox()
+        self.min_size.setAccessibleName("Minimum cache size")
         self.min_size.setRange(10, 102400)
         self.min_size.setValue(50)
         self.min_size.setSuffix(" MB")
@@ -83,6 +84,7 @@ class AiDataView(QWidget):
         toolbar.addStretch(1)
 
         self.search_edit = QLineEdit()
+        self.search_edit.setAccessibleName("Filter AI models and caches")
         self.search_edit.setPlaceholderText("Filter AI models/caches...")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._filter_table)
@@ -94,6 +96,7 @@ class AiDataView(QWidget):
         table_lay = QVBoxLayout(table_card)
         table_lay.setContentsMargins(8, 8, 8, 8)
         self.table = CrapTable(0, 5)
+        self.table.setAccessibleName("AI model and cache locations")
         self.table.setHorizontalHeaderLabels(
             ["Path", "Application", "Size", "Last Modified", "Classification"]
         )

@@ -18,6 +18,8 @@ class HistoryEntry:
     skipped: int = 0
     errors: int = 0
     total_identified: int = 0
+    category_sizes: dict[str, int] = field(default_factory=dict)
+    manifest_path: str = ""
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -48,4 +50,6 @@ class HistoryEntry:
             space_recovered=report.total_space_recovered,
             skipped=report.total_skipped,
             errors=len(report.errors),
+            category_sizes={r.category_id: r.space_recovered for r in report.results},
+            manifest_path=getattr(report, "manifest_path", ""),
         )

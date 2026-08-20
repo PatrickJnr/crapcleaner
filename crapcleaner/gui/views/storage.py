@@ -373,12 +373,12 @@ class StorageBreakdownView(QWidget):
             )
         )
 
-        # Controls toolbar
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
         toolbar.addWidget(QLabel("Drive / Path:"))
         self.drive_combo = QComboBox()
+        self.drive_combo.setAccessibleName("Drive to analyse")
         self.drive_combo.setFixedWidth(180)
         drives = [d.rstrip("\\") if is_windows() else d for d in list_drives()]
         if not is_windows():
@@ -409,6 +409,7 @@ class StorageBreakdownView(QWidget):
         toolbar.addWidget(downloads_btn)
 
         self.favorite_combo = QComboBox()
+        self.favorite_combo.setAccessibleName("Saved folders")
         self.favorite_combo.setFixedWidth(180)
         self._reload_storage_favorites()
         self.favorite_combo.currentTextChanged.connect(self._on_favorite_selected)
@@ -420,6 +421,7 @@ class StorageBreakdownView(QWidget):
         toolbar.addWidget(favorite_btn)
 
         self.path_edit = QLineEdit()
+        self.path_edit.setAccessibleName("Folder to analyse")
         self.path_edit.setText(drives[0] if drives else get_user_profile())
         toolbar.addWidget(self.path_edit, 1)
 
@@ -431,13 +433,13 @@ class StorageBreakdownView(QWidget):
 
         toolbar.addWidget(QLabel("Max Depth:"))
         self.depth_spin = QSpinBox()
+        self.depth_spin.setAccessibleName("Folder depth to analyse")
         self.depth_spin.setRange(1, 6)
         self.depth_spin.setValue(3)
         toolbar.addWidget(self.depth_spin)
 
-        # Logical size is what a file claims to contain; allocated size is what it
-        # occupies, which is what the drive free space reflects. Off by default
-        # because on Windows it costs a call per file.
+        # Free space tracks allocated size, not logical size. Off by default because
+        # on Windows it costs a call per file.
         self.allocated_check = QCheckBox("On-disk size")
         self.allocated_check.setToolTip(
             "Measure what files occupy on disk rather than their length. Accounts for "
@@ -476,7 +478,6 @@ class StorageBreakdownView(QWidget):
         self.progress_label.setVisible(False)
         root_lay.addWidget(self.progress_label)
 
-        # Drive Health & Diagnostics Header Card
         self.health_card = QFrame()
         self.health_card.setProperty("card", "true")
         h_lay = QHBoxLayout(self.health_card)
@@ -497,7 +498,6 @@ class StorageBreakdownView(QWidget):
 
         root_lay.addWidget(self.health_card)
 
-        # Section Selector (Tabs)
         tab_row = QHBoxLayout()
         tab_row.setSpacing(8)
         self._section_buttons = {}
@@ -519,10 +519,8 @@ class StorageBreakdownView(QWidget):
         tab_row.addStretch(1)
         root_lay.addLayout(tab_row)
 
-        # Content Stack
         self.content_stack = QStackedWidget()
 
-        # 1. Proportional storage grid
         grid_card = QFrame()
         grid_card.setProperty("card", "true")
         t_lay = QVBoxLayout(grid_card)
@@ -559,12 +557,12 @@ class StorageBreakdownView(QWidget):
 
         self.content_stack.addWidget(grid_card)
 
-        # 2. File Types Table
         types_card = QFrame()
         types_card.setProperty("card", "true")
         ty_lay = QVBoxLayout(types_card)
         ty_lay.setContentsMargins(8, 8, 8, 8)
         self.types_table = CrapTable(0, 4)
+        self.types_table.setAccessibleName("Space by file type")
         self.types_table.setHorizontalHeaderLabels(
             ["File Category", "Total Reclaimable/Used", "File Count", "Storage Share (%)"]
         )
@@ -572,12 +570,12 @@ class StorageBreakdownView(QWidget):
         ty_lay.addWidget(self.types_table)
         self.content_stack.addWidget(types_card)
 
-        # 3. Old Files Table
         old_card = QFrame()
         old_card.setProperty("card", "true")
         old_lay = QVBoxLayout(old_card)
         old_lay.setContentsMargins(8, 8, 8, 8)
         self.old_table = CrapTable(0, 5)
+        self.old_table.setAccessibleName("Files not opened recently")
         self.old_table.setHorizontalHeaderLabels(
             ["File Name", "Age (Days)", "Size", "Last Modified", "Path"]
         )
@@ -585,12 +583,12 @@ class StorageBreakdownView(QWidget):
         old_lay.addWidget(self.old_table)
         self.content_stack.addWidget(old_card)
 
-        # 4. VMs & Containers Table
         vm_card = QFrame()
         vm_card.setProperty("card", "true")
         vm_lay = QVBoxLayout(vm_card)
         vm_lay.setContentsMargins(8, 8, 8, 8)
         self.vm_table = CrapTable(0, 4)
+        self.vm_table.setAccessibleName("Virtual machine disks")
         self.vm_table.setHorizontalHeaderLabels(
             ["Platform", "Virtual Disk / Container Path", "Size", "Optimization Guidance"]
         )
@@ -598,7 +596,6 @@ class StorageBreakdownView(QWidget):
         vm_lay.addWidget(self.vm_table)
         self.content_stack.addWidget(vm_card)
 
-        # 5. What changed since the last scan of this path
         changes_card = QFrame()
         changes_card.setProperty("card", "true")
         changes_lay = QVBoxLayout(changes_card)
@@ -608,6 +605,7 @@ class StorageBreakdownView(QWidget):
         self.changes_summary.setProperty("subtle", "true")
         changes_lay.addWidget(self.changes_summary)
         self.changes_table = CrapTable(0, 4)
+        self.changes_table.setAccessibleName("Folders that changed since the last scan")
         self.changes_table.setHorizontalHeaderLabels(["Change", "Was", "Now", "Folder"])
         self.changes_table.horizontalHeader().setSectionResizeMode(
             3, QHeaderView.ResizeMode.Stretch

@@ -6,6 +6,7 @@ TRIM enablement status, and capacity metrics without running destructive tests.
 
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -68,10 +69,10 @@ def _query_storage_health() -> list[DiskHealthInfo]:
 def get_storage_health_report(
     force_refresh: bool = False, ttl: float = HEALTH_CACHE_TTL
 ) -> list[DiskHealthInfo]:
-    """Inspect and return read-only storage device health across all accessible drives.
+    """Read-only storage device health for every accessible drive.
 
-    Each query spawns PowerShell or lsblk, so results are cached briefly and
-    shared by every caller. Explicit refreshes bypass the cache.
+    Each query spawns PowerShell or lsblk, so results are cached briefly;
+    explicit refreshes bypass the cache.
     """
     global _cached_report
     now = time.monotonic()
@@ -93,21 +94,42 @@ def clear_storage_health_cache() -> None:
         _cached_report = None
 
 
-def _get_windows_trim_status() -> tuple[bool | None, bool | None]:
-    """Query Windows TRIM status via fsutil."""
+_FSUTIL_TRIM = re.compile(r"(?:([A-Za-z]+)\s+)?DisableDeleteNotify\s*=\s*(\d+)")
+
+
+def _windows_trim_states() -> dict[str, bool]:
+    """Filesystem name -> whether TRIM is enabled, as reported by fsutil.
+
+    ``DisableDeleteNotify = 0`` means TRIM is *enabled*; the flag is inverted. fsutil
+    prints one row per filesystem (NTFS, ReFS) and the rows can disagree, so a volume
+    must be answered from its own row. The unnamed row is what pre-8.1 fsutil printed.
+    """
     result = run_command(["fsutil", "behavior", "query", "DisableDeleteNotify"], timeout=5.0)
-    stdout = str(result.get("stdout", ""))
-    # DisableDeleteNotify = 0 means TRIM is enabled on NTFS/ReFS
-    if "DisableDeleteNotify = 0" in stdout or "= 0" in stdout:
-        return True, True
-    if "DisableDeleteNotify = 1" in stdout or "= 1" in stdout:
-        return True, False
-    return None, None
+    states: dict[str, bool] = {}
+    for line in str(result.get("stdout", "")).splitlines():
+        match = _FSUTIL_TRIM.search(line)
+        if match:
+            states[(match.group(1) or "").upper()] = match.group(2) == "0"
+    return states
+
+
+def _get_windows_trim_status(
+    filesystem: str = "", states: dict[str, bool] | None = None
+) -> tuple[bool | None, bool | None]:
+    """(supported, enabled) for one filesystem; unknown to fsutil reports (None, None)."""
+    if states is None:
+        states = _windows_trim_states()
+    enabled = states.get(filesystem.strip().upper())
+    if enabled is None:
+        enabled = states.get("")
+    if enabled is None:
+        return None, None
+    return True, enabled
 
 
 def _get_windows_storage_health() -> list[DiskHealthInfo]:
     disks: list[DiskHealthInfo] = []
-    trim_supp, trim_en = _get_windows_trim_status()
+    trim_states = _windows_trim_states()
 
     # Query partitions with DriveLetter mapped to their physical disk metadata
     ps_cmd = (
@@ -121,8 +143,8 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
         'MediaType = if ($pd) { $pd.MediaType } else { "Unknown" }; '
         'BusType = if ($pd) { $pd.BusType } else { "Unknown" }; '
         "Size = $p.Size; "
-        'HealthStatus = if ($pd) { $pd.HealthStatus } else { "Healthy" }; '
-        'OperationalStatus = if ($pd) { $pd.OperationalStatus } else { "OK" }; '
+        'HealthStatus = if ($pd) { $pd.HealthStatus } else { "Unknown" }; '
+        'OperationalStatus = if ($pd) { $pd.OperationalStatus } else { "Unknown" }; '
         "} } | ConvertTo-Json"
     )
     result = run_command(["powershell", "-NoProfile", "-Command", ps_cmd], timeout=8.0)
@@ -143,10 +165,9 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
                 media = str(item.get("MediaType", "Unknown"))
                 bus = str(item.get("BusType", "Unknown"))
                 size = int(item.get("Size") or 0)
-                health = str(item.get("HealthStatus", "Healthy"))
-                op_status = str(item.get("OperationalStatus", "OK"))
+                health = str(item.get("HealthStatus", "Unknown"))
+                op_status = str(item.get("OperationalStatus", "Unknown"))
 
-                # Accurate NVMe / SSD / HDD categorization
                 if "NVME" in bus.upper() or "NVME" in model.upper():
                     media = "NVMe SSD"
                 elif (
@@ -158,7 +179,6 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
                 elif "HDD" in media.upper() or "HARD DISK" in media.upper():
                     media = "HDD"
 
-                # Enrich with volume-level filesystem and free space
                 free_space = 0
                 filesystem = "NTFS"
                 try:
@@ -172,6 +192,7 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
 
                 seen_drives.add(dev_id.upper())
                 is_solid_state = "SSD" in media or "NVMe" in media
+                trim_supp, trim_en = _get_windows_trim_status(filesystem, trim_states)
                 disks.append(
                     DiskHealthInfo(
                         device_id=dev_id,
@@ -190,7 +211,6 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
         except Exception:
             pass
 
-    # Ensure all drives from list_drives() are included
     for drive in list_drives():
         d_clean = drive.rstrip("\\")
         d_key = (d_clean if d_clean.endswith(":") else f"{d_clean}:").upper()
@@ -199,6 +219,8 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
                 info = get_drive_info(drive)
                 total = int(info.get("total", 0))
                 free = int(info.get("free", 0))
+                filesystem = str(info.get("filesystem", "NTFS"))
+                trim_supp, trim_en = _get_windows_trim_status(filesystem, trim_states)
                 disks.append(
                     DiskHealthInfo(
                         device_id=d_clean,
@@ -207,11 +229,11 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
                         bus_type="Local",
                         capacity=total,
                         free_space=free,
-                        filesystem=str(info.get("filesystem", "NTFS")),
+                        filesystem=filesystem,
                         trim_supported=trim_supp,
                         trim_enabled=trim_en,
-                        health_status="Healthy",
-                        operational_status="OK",
+                        health_status="Unknown",
+                        operational_status="Unknown",
                     )
                 )
             except OSError:
@@ -221,11 +243,79 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
     return disks
 
 
+def _as_bytes(value: Any) -> int | None:
+    try:
+        return int(str(value).strip().rstrip("B") or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mount_options(device: str) -> set[str]:
+    """Mount options of every filesystem mounted from `device` or one of its partitions."""
+    options: set[str] = set()
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 4 and parts[0].startswith(device):
+                    options.update(parts[3].split(","))
+    except OSError:
+        pass
+    return options
+
+
+def _fstrim_timer_active() -> bool | None:
+    """Whether the periodic fstrim job runs; None when systemd cannot be asked."""
+    if not shutil.which("systemctl"):
+        return None
+    res = run_command(["systemctl", "is-enabled", "fstrim.timer"], timeout=5.0)
+    state = str(res.get("stdout", "")).strip()
+    if not state:
+        return None
+    return state in ("enabled", "enabled-runtime")
+
+
+def _smart_health(device: str) -> tuple[str, str]:
+    """(health, operational status) from smartctl, or Unknown when it cannot be read."""
+    if not shutil.which("smartctl"):
+        return "Unknown", "Unknown"
+    res = run_command(["smartctl", "-H", "-j", device], timeout=10.0)
+    try:
+        data = json.loads(str(res.get("stdout", "")).strip() or "{}")
+    except ValueError:
+        return "Unknown", "Unknown"
+    status = data.get("smart_status") if isinstance(data, dict) else None
+    passed = status.get("passed") if isinstance(status, dict) else None
+    if passed is True:
+        return "Healthy", "OK"
+    if passed is False:
+        return "Unhealthy", "SMART self-assessment failed"
+    return "Unknown", "Unknown"
+
+
+def _linux_trim_status(device: str, disc_gran: Any) -> tuple[bool | None, bool | None]:
+    """(supported, enabled) from lsblk's discard granularity plus how discard is run."""
+    granularity = _as_bytes(disc_gran)
+    if granularity is None:
+        return None, None
+    if granularity <= 0:
+        return False, False
+    if "discard" in _mount_options(device):
+        return True, True
+    return True, _fstrim_timer_active()
+
+
 def _get_linux_storage_health() -> list[DiskHealthInfo]:
     disks: list[DiskHealthInfo] = []
-    # Try lsblk with json byte output
     res = run_command(
-        ["lsblk", "-J", "-b", "-d", "-o", "NAME,MODEL,ROTA,SIZE,TYPE,TRAN,FSTYPE,MOUNTPOINT"],
+        [
+            "lsblk",
+            "-J",
+            "-b",
+            "-d",
+            "-o",
+            "NAME,MODEL,ROTA,SIZE,TYPE,TRAN,FSTYPE,MOUNTPOINT,DISC-GRAN",
+        ],
         timeout=5.0,
     )
     raw = str(res.get("stdout", "")).strip()
@@ -236,7 +326,7 @@ def _get_linux_storage_health() -> list[DiskHealthInfo]:
                 name = item.get("name", "")
                 model = (item.get("model") or name or "Storage Drive").strip()
                 rota = item.get("rota")  # True = HDD, False = SSD
-                tran = (item.get("tran") or "SATA").upper()
+                tran = (item.get("tran") or "Unknown").upper()
                 media = "SSD" if rota is False else ("HDD" if rota is True else "Storage Drive")
                 if tran == "NVME":
                     media = "NVMe SSD"
@@ -255,19 +345,22 @@ def _get_linux_storage_health() -> list[DiskHealthInfo]:
                     except OSError:
                         pass
 
+                device_id = f"/dev/{name}"
+                trim_supported, trim_enabled = _linux_trim_status(device_id, item.get("disc-gran"))
+                health, operational = _smart_health(device_id)
                 disks.append(
                     DiskHealthInfo(
-                        device_id=f"/dev/{name}",
+                        device_id=device_id,
                         model=model,
                         media_type=media,
                         bus_type=tran,
                         capacity=capacity,
                         free_space=free_space,
-                        filesystem=item.get("fstype") or "ext4",
-                        trim_supported=True if "SSD" in media else None,
-                        trim_enabled=True if "SSD" in media else None,
-                        health_status="Healthy",
-                        operational_status="OK",
+                        filesystem=item.get("fstype") or "Unknown",
+                        trim_supported=trim_supported,
+                        trim_enabled=trim_enabled,
+                        health_status=health,
+                        operational_status=operational,
                     )
                 )
         except ValueError:
@@ -294,8 +387,8 @@ def _get_fallback_storage_health() -> list[DiskHealthInfo]:
                     filesystem="Local",
                     trim_supported=None,
                     trim_enabled=None,
-                    health_status="Healthy",
-                    operational_status="OK",
+                    health_status="Unknown",
+                    operational_status="Unknown",
                 )
             )
         except OSError:

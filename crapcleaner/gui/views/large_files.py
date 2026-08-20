@@ -28,7 +28,7 @@ from crapcleaner.gui.dialogs import (
     ConfirmDeleteDialog,
 )
 from crapcleaner.gui.icons import icon as material_icon
-from crapcleaner.gui.views.common import CrapTable, NumericItem, _c, page_header
+from crapcleaner.gui.views.common import CrapTable, NumericItem, _c, delete_paths, page_header
 from crapcleaner.utils.files import file_manager_name, reveal_in_file_manager
 from crapcleaner.utils.format import (
     format_size,
@@ -71,12 +71,12 @@ class LargeFilesView(QWidget):
         controls_lay.setContentsMargins(14, 12, 14, 12)
         controls_lay.setSpacing(10)
 
-        # Folder row
         f_row = QHBoxLayout()
         f_row.setSpacing(8)
         f_row.addWidget(QLabel("Scan Target:"))
         self.root_edit = QLineEdit()
         self.root_edit.setText(self._default_root())
+        self.root_edit.setAccessibleName("Folder to scan")
         self.browse_button = QPushButton("Browse...")
         self.browse_button.setIcon(material_icon("folder_open", _c(self._theme, "text")))
         self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -85,7 +85,6 @@ class LargeFilesView(QWidget):
         f_row.addWidget(self.browse_button)
         controls_lay.addLayout(f_row)
 
-        # Quick presets & threshold row
         opts_row = QHBoxLayout()
         opts_row.setSpacing(8)
         opts_row.addWidget(QLabel("Presets:"))
@@ -111,9 +110,11 @@ class LargeFilesView(QWidget):
         self.threshold_combo = QComboBox()
         self.threshold_combo.addItems(["100 MB", "500 MB", "1 GB", "2 GB", "5 GB", "10 GB"])
         self.threshold_combo.setCurrentIndex(2)
+        self.threshold_combo.setAccessibleName("Minimum file size")
         self.custom_threshold = QLineEdit()
         self.custom_threshold.setPlaceholderText("Custom e.g. 750MB")
         self.custom_threshold.setFixedWidth(130)
+        self.custom_threshold.setAccessibleName("Custom minimum file size")
         opts_row.addWidget(self.threshold_combo)
         opts_row.addWidget(self.custom_threshold)
 
@@ -140,12 +141,12 @@ class LargeFilesView(QWidget):
         controls_lay.addLayout(opts_row)
         layout.addWidget(controls)
 
-        # Search filter within table results
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
         self.table_search = QLineEdit()
         self.table_search.setPlaceholderText("Filter scanned results by name or type...")
         self.table_search.setClearButtonEnabled(True)
+        self.table_search.setAccessibleName("Filter scanned results")
         self.table_search.textChanged.connect(self._filter_table)
         filter_row.addWidget(self.table_search)
 
@@ -169,6 +170,7 @@ class LargeFilesView(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
         self.table.itemDoubleClicked.connect(self._open_row)
+        self.table.setAccessibleName("Large files found")
         self._empty_message = "Select a target folder and click 'Find Large Files' to begin."
         self.table.set_empty_text(self._theme, self._empty_message)
         table_lay.addWidget(self.table)
@@ -308,40 +310,63 @@ class LargeFilesView(QWidget):
             return
         file_path = path_item.text()
 
+        selected = self._selected_paths() or [file_path]
+
         menu = QMenu(self)
         open_folder = menu.addAction(f"Reveal in {file_manager_name()}")
         copy_path = menu.addAction("Copy Path")
         menu.addSeparator()
-        to_recycle = menu.addAction("Move to Recycle Bin")
+        to_recycle = menu.addAction(
+            "Move to Recycle Bin"
+            if len(selected) == 1
+            else f"Move {len(selected)} Files to Recycle Bin"
+        )
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
         if action == open_folder:
             self._open_folder(file_path)
         elif action == copy_path:
             QApplication.clipboard().setText(file_path)
         elif action == to_recycle:
-            self._recycle_path(file_path)
+            self._recycle_paths(selected)
 
-    def _recycle_path(self, path: str):
-        # Routed through the core helper so the protected-path rules apply here too.
-        from crapcleaner.core.cleaner import remove_selected_paths
+    def _selected_paths(self) -> list[str]:
+        paths = []
+        for index in self.table.selectionModel().selectedRows():
+            item = self.table.item(index.row(), 4)
+            if item is not None:
+                paths.append(item.text())
+        return paths
 
+    def _recycle_paths(self, paths: list[str]):
+        if not paths:
+            return None
+        listing = "\n".join(paths[:10]) + ("\n…" if len(paths) > 10 else "")
         dialog = ConfirmDeleteDialog(
             "Move to Recycle Bin",
-            f"Move this file to the Recycle Bin?\n\n{path}\n\nIt can be restored from the Recycle Bin if needed.",
+            f"Move {len(paths)} file(s) to the Recycle Bin?\n\n{listing}\n\n"
+            "They can be restored from the Recycle Bin if needed.",
             confirm_label="Move to Recycle Bin",
         )
         if dialog.exec() != ConfirmDeleteDialog.DialogCode.Accepted:
-            return
-        outcome = remove_selected_paths([path], use_recycle_bin=True)[0]
-        if outcome.removed:
-            self._files = [f for f in self._files if f.path != path]
-            self.show_files(self._files)
-            QMessageBox.information(self, "Recycle Bin", "File moved to the Recycle Bin.")
-        else:
+            return None
+        return delete_paths(self, paths, self._after_recycle, title="Moving to Recycle Bin")
+
+    def _after_recycle(self, outcomes):
+        moved = [o for o in outcomes if o.removed]
+        refused = [o for o in outcomes if not o.removed]
+        gone = {o.path for o in moved}
+        self._files = [f for f in self._files if f.path not in gone]
+        self.show_files(self._files)
+        if refused:
+            detail = "\n".join(f"{o.path}\n    {o.reason}" for o in refused[:5])
             QMessageBox.warning(
                 self,
                 "Recycle Bin",
-                f"The file was not moved.\n\n{outcome.reason}",
+                f"Moved {len(moved)} file(s). {len(refused)} were not moved:\n\n{detail}",
+            )
+        else:
+            QMessageBox.information(
+                self, "Recycle Bin", f"Moved {len(moved)} file(s) to the Recycle Bin."
             )
 
     def apply_theme(self, theme: str):

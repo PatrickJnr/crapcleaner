@@ -21,11 +21,6 @@ from crapcleaner.utils.format import format_size
 _app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
 
 
-# ---------------------------------------------------------------------------
-# AnimatedNumber
-# ---------------------------------------------------------------------------
-
-
 def test_animated_number_uses_its_formatter():
     label = AnimatedNumber(formatter=format_size)
     label.set_value(1024 * 1024 * 1024)
@@ -64,11 +59,6 @@ def test_motion_enabled_survives_a_settings_failure():
     """A settings problem must never stop the UI drawing."""
     with patch("crapcleaner.config.load_settings", side_effect=OSError("boom")):
         assert motion_enabled() is True
-
-
-# ---------------------------------------------------------------------------
-# Sparkline
-# ---------------------------------------------------------------------------
 
 
 def test_sparkline_never_exceeds_capacity():
@@ -122,11 +112,6 @@ def test_sparkline_clear():
         spark.push(value)
     spark.clear()
     assert spark.sample_count() == 0
-
-
-# ---------------------------------------------------------------------------
-# SegmentedBar
-# ---------------------------------------------------------------------------
 
 
 def test_segmented_bar_proportions_sum_to_one():
@@ -188,11 +173,6 @@ def test_segmented_bar_muted_mode_still_paints():
     bar.set_segments([("a", 1.0, "faint"), ("b", 1.0, "faint")], muted=True)
     bar.render(QPixmap(bar.size()))
     assert bar.proportions() == [pytest.approx(0.5), pytest.approx(0.5)]
-
-
-# ---------------------------------------------------------------------------
-# Depth
-# ---------------------------------------------------------------------------
 
 
 def test_add_depth_card_level_avoids_the_effect_graph():

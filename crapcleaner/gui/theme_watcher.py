@@ -1,13 +1,9 @@
 """Reload themes when their files change, so editing one does not mean restarting.
 
-Themes are data now, which invites editing the JSON by hand - and editing anything
-by hand is unbearable if every change costs a restart. A watcher on the user theme
-directory turns the loop into: save the file, look at the window.
-
-Editors rarely write a file once. A "save" is usually a write to a temporary file
-followed by a rename, which the watcher sees as several events and, briefly, as the
-file having disappeared. Every event therefore goes through a short timer, and the
-directory is watched as well as the files so a rename is not missed.
+An editor's "save" is usually a write to a temporary file followed by a rename,
+which arrives as several events and, briefly, as the file having disappeared. So
+every event goes through a short timer, and the directory is watched as well as
+the files to catch the rename.
 """
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, Signal
@@ -42,8 +38,7 @@ class ThemeWatcher(QObject):
     def directories(self) -> list[str]:
         """Every directory themes are read from.
 
-        Both are watched: the user's own directory, and the one shipped with the
-        application - which is where a theme being tried out often lands.
+        The bundled one is watched too: a theme being tried out often lands there.
         """
         found = [BUNDLED_THEME_DIR]
         try:
@@ -62,8 +57,8 @@ class ThemeWatcher(QObject):
     def rewatch(self) -> None:
         """Watch the directory and everything currently in it.
 
-        Called again after each reload: a file that was replaced by a rename is a
-        different inode, and the old watch no longer refers to anything.
+        Called again after each reload: a file replaced by a rename is a different
+        inode, so the old watch no longer refers to anything.
         """
         import os
 

@@ -1,14 +1,8 @@
 """Application logging: one rotating file, off by default at anything but WARNING.
 
-The application had no log at all. `LOG_FILE` was declared in constants and never
-written, three modules imported `logging` with no handler configured, and 36 broad
-exception handlers ended in a bare `pass` - so when something went wrong on a user's
-machine there was nothing to ask them for.
-
-What is logged is deliberately narrow: what the application was doing and what went
-wrong. Filesystem paths appear where they are the subject of the failure, since the
-whole product is about directories; file contents, credentials and command output
-never do.
+Logged: what the application was doing and what went wrong. Filesystem paths appear
+where they are the subject of the failure; file contents, credentials and command
+output never do.
 """
 
 import logging

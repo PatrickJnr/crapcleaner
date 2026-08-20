@@ -123,24 +123,20 @@ def test_startup_view_population_and_filtering(qt_app):
     assert view.enabled_card_val.text() == "1"
     assert view.disabled_card_val.text() == "1"
 
-    # Search filter
     view.search_input.setText("Discord")
     assert view.table.rowCount() == 1
     assert view.table.item(0, 1).text() == "Discord"
 
-    # Reset search and test scope filter
     view.search_input.setText("")
     view.scope_combo.setCurrentText("All Users (HKLM)")
     assert view.table.rowCount() == 1
     assert view.table.item(0, 1).text() == "OneDrive"
 
-    # State filter
     view.scope_combo.setCurrentText("All Scopes")
     view.state_combo.setCurrentText("Enabled Only")
     assert view.table.rowCount() == 1
     assert view.table.item(0, 1).text() == "Discord"
 
-    # Theme application
     view.apply_theme("dracula")
 
 
@@ -160,13 +156,11 @@ def test_windows_update_view_population_and_filtering(qt_app):
     assert view.crit_card_val.text() == "1"
     assert view.hist_card_val.text() == "1"
 
-    # History search
     view.hist_search.setText("KB5001122")
     assert view.hist_table.rowCount() == 1
     view.hist_search.setText("NonExistentKB")
     assert view.hist_table.rowCount() == 0
 
-    # Theme application
     view.apply_theme("catppuccin_mocha")
 
 
@@ -179,29 +173,24 @@ def test_services_view_population_and_filtering(qt_app):
 
     assert view.table.rowCount() == 2
     # The noun follows the platform: "services" on Windows, "units" under systemd.
-    # Asserting one platform's wording is what this used to get wrong.
     assert view.hero_badge.text() == f"2 {view._unit_plural.upper()}"
     assert view.running_badge.text() == "1 RUNNING"
     assert view.stopped_badge.text() == "1 STOPPED"
 
-    # Search filter
     view.search_input.setText("wuauserv")
     assert view.table.rowCount() == 1
     assert view.table.item(0, 1).text() == "wuauserv"
 
-    # Status filter
     view.search_input.setText("")
     view.status_combo.setCurrentText("Running Only")
     assert view.table.rowCount() == 1
     assert view.table.item(0, 1).text() == "wuauserv"
 
-    # Third-party filter
     view.status_combo.setCurrentText("All Status")
     view.type_combo.setCurrentText("Third-Party Only")
     assert view.table.rowCount() == 1
     assert view.table.item(0, 1).text() == "CustomToolSvc"
 
-    # Theme application
     view.apply_theme("nord")
 
 

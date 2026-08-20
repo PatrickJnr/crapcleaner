@@ -1,13 +1,12 @@
 """Remember what a scan measured, so the next one can say what changed.
 
-A treemap answers "what is big". The question people actually arrive with is "my
-drive filled up this week and I do not know why", which needs two points in time.
-The storage scan already builds a full directory index; keeping a trimmed copy of
-it costs a fraction of a second and makes the comparison free.
+Answering "why did my drive fill up this week" needs two points in time. The storage
+scan already builds a full directory index; keeping a trimmed copy makes the
+comparison free.
 
-Only directories worth naming are stored - anything below `MIN_TRACKED_SIZE`, and
-never more than `MAX_TRACKED_DIRS` of them - so the file stays small on a volume
-with hundreds of thousands of folders.
+Only directories at or above `MIN_TRACKED_SIZE` are stored, and never more than
+`MAX_TRACKED_DIRS` of them, so the file stays small on a volume with hundreds of
+thousands of folders.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ import os
 import time
 from dataclasses import dataclass
 
+from crapcleaner.utils.disk_size import SIZE_LOGICAL
 from crapcleaner.utils.logs import get_logger
 
 logger = get_logger("snapshots")
@@ -62,6 +62,8 @@ class SnapshotComparison:
     changes: list[StorageChange]
     previous_total: int
     current_total: int
+    #: Why the two scans cannot be subtracted, empty when they can.
+    incomparable: str = ""
 
     @property
     def total_delta(self) -> int:
@@ -80,6 +82,7 @@ class SnapshotComparison:
             "previous_total": self.previous_total,
             "current_total": self.current_total,
             "total_delta": self.total_delta,
+            "incomparable": self.incomparable,
             "changes": [c.to_dict() for c in self.changes],
         }
 
@@ -109,7 +112,7 @@ def sizes_from_index(index) -> dict[str, int]:
     return {path: node.size for path, node in index.nodes.items()}
 
 
-def save_snapshot(root: str, sizes: dict[str, int], size_mode: str = "logical") -> str | None:
+def save_snapshot(root: str, sizes: dict[str, int], size_mode: str = SIZE_LOGICAL) -> str | None:
     """Store this scan's directory sizes. Returns the file written, or None."""
     payload = {
         "version": SNAPSHOT_VERSION,
@@ -151,16 +154,32 @@ def compare(
     sizes: dict[str, int],
     previous: dict | None = None,
     min_delta: int = MIN_TRACKED_SIZE,
+    size_mode: str = SIZE_LOGICAL,
 ) -> SnapshotComparison | None:
-    """What changed under `root` since the stored scan.
+    """What changed under `root` since the stored scan, or None if there is no
+    snapshot to compare against.
 
-    Returns None when there is nothing to compare against, or when the stored scan
-    used a different size mode - comparing logical against allocated sizes would
-    report a change that is only a change of units.
+    A comparison across two size modes is refused rather than reported: logical minus
+    allocated is a change of unit, not growth. The returned `incomparable` says so.
     """
     previous = previous if previous is not None else load_snapshot(root)
     if previous is None:
         return None
+
+    absolute_root = os.path.abspath(root)
+    previous_mode = str(previous.get("size_mode", SIZE_LOGICAL))
+    if previous_mode != size_mode:
+        return SnapshotComparison(
+            root=absolute_root,
+            previous_taken_at=float(previous.get("taken_at", 0.0)),
+            changes=[],
+            previous_total=0,
+            current_total=0,
+            incomparable=(
+                f"The stored scan measured {previous_mode} sizes and this one measured "
+                f"{size_mode}. Re-scan in {previous_mode} mode to compare."
+            ),
+        )
 
     before: dict[str, int] = {str(k): int(v) for k, v in previous.get("dirs", {}).items()}
     after = _tracked(sizes)
@@ -179,7 +198,6 @@ def compare(
             changes.append(StorageChange(path, was, 0, "removed"))
 
     changes.sort(key=lambda c: abs(c.delta), reverse=True)
-    absolute_root = os.path.abspath(root)
     return SnapshotComparison(
         root=absolute_root,
         previous_taken_at=float(previous.get("taken_at", 0.0)),
@@ -187,14 +205,3 @@ def compare(
         previous_total=int(previous.get("total", 0)),
         current_total=int(sizes.get(absolute_root, sizes.get(root, 0))),
     )
-
-
-def clear_snapshots() -> None:
-    """Forget every stored scan."""
-    directory = snapshot_dir()
-    try:
-        for name in os.listdir(directory):
-            if name.endswith(".json"):
-                os.remove(os.path.join(directory, name))
-    except OSError:
-        pass

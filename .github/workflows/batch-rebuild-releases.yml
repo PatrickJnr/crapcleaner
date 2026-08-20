@@ -9,16 +9,16 @@ on:
         default: '["v1.0.7.1", "v1.0.7", "v1.0.6", "v1.0.5", "v1.0.4", "v1.0.3", "v1.0.2", "v1.0.1", "v1.0.0"]'
 
 jobs:
-  rebuild-release-matrix:
+  build:
     name: Rebuild ${{ matrix.tag }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         tag: ${{ fromJson(github.event.inputs.tags || '["v1.0.7.1", "v1.0.7", "v1.0.6", "v1.0.5", "v1.0.4", "v1.0.3", "v1.0.2", "v1.0.1", "v1.0.0"]') }}
         os: [windows-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
+      contents: read
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Tag Code
         uses: actions/checkout@v7
@@ -35,7 +35,7 @@ jobs:
       - name: Inject Packaging Specification into Tag Source
         shell: bash
         run: |
-          cp repo-master/CrapCleaner.spec repo-tag/
+          cp repo-master/CrapCleaner.spec repo-master/requirements-build.txt repo-tag/
           if [ -d repo-master/scripts ]; then
             mkdir -p repo-tag/scripts
             cp -r repo-master/scripts/* repo-tag/scripts/ || true
@@ -57,8 +57,7 @@ jobs:
         working-directory: repo-tag
         run: |
           python -m pip install --upgrade pip
-          pip install .
-          pip install pyinstaller
+          pip install . -r requirements-build.txt
           pyinstaller --noconfirm --clean CrapCleaner.spec
 
       - name: Build Linux Standalone Binary
@@ -66,43 +65,77 @@ jobs:
         working-directory: repo-tag
         run: |
           python -m pip install --upgrade pip
-          pip install .
-          pip install pyinstaller
+          pip install . -r requirements-build.txt
           pyinstaller --noconfirm --clean CrapCleaner.spec
           chmod +x dist/crapcleaner-linux-x86_64
           cd dist
           tar -czvf crapcleaner-linux-x86_64.tar.gz crapcleaner-linux-x86_64
 
-      # Replacing a release's binaries without replacing its checksums leaves the
-      # published sums describing files that are no longer there - a user who follows
-      # the project's own verification advice concludes the download was tampered with.
-      - name: Recompute Checksums for the Rebuilt Assets
+      - name: Verify the Rebuilt Binary Reports ${{ matrix.tag }}
         shell: bash
-        working-directory: repo-tag/dist
+        working-directory: repo-tag
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            sha256sum CrapCleaner.exe > checksums-windows.txt
-            cat checksums-windows.txt
+            BINARY=./dist/CrapCleaner.exe
           else
-            sha256sum crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums-linux.txt
-            cat checksums-linux.txt
+            BINARY=./dist/crapcleaner-linux-x86_64
           fi
+          EXPECTED="${{ matrix.tag }}"
+          EXPECTED="${EXPECTED#v}"
+          REPORTED=$("$BINARY" --version | tr -d '\r' | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1)
+          echo "reported $REPORTED, rebuilding $EXPECTED"
+          test "$REPORTED" = "$EXPECTED"
 
-      - name: Update Windows Binary on Release
-        if: runner.os == 'Windows'
-        uses: softprops/action-gh-release@v3
+      - name: Upload Rebuilt Assets
+        uses: actions/upload-artifact@v7
         with:
-          tag_name: ${{ matrix.tag }}
-          files: |
+          name: rebuild-${{ matrix.tag }}-${{ runner.os }}
+          path: |
             repo-tag/dist/CrapCleaner.exe
-            repo-tag/dist/checksums-windows.txt
-
-      - name: Update Linux Binaries on Release
-        if: runner.os == 'Linux'
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ matrix.tag }}
-          files: |
             repo-tag/dist/crapcleaner-linux-x86_64
             repo-tag/dist/crapcleaner-linux-x86_64.tar.gz
-            repo-tag/dist/checksums-linux.txt
+          if-no-files-found: error
+
+  publish:
+    name: Publish ${{ matrix.tag }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJson(github.event.inputs.tags || '["v1.0.7.1", "v1.0.7", "v1.0.6", "v1.0.5", "v1.0.4", "v1.0.3", "v1.0.2", "v1.0.1", "v1.0.0"]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows Assets
+        uses: actions/download-artifact@v8
+        with:
+          name: rebuild-${{ matrix.tag }}-Windows
+          path: release-assets
+
+      - name: Download Linux Assets
+        uses: actions/download-artifact@v8
+        with:
+          name: rebuild-${{ matrix.tag }}-Linux
+          path: release-assets
+
+      # Replacing a release's binaries without replacing checksums.txt leaves the
+      # published sums describing files that are no longer there - a user who follows
+      # the project's own verification advice concludes the download was tampered with.
+      - name: Regenerate checksums.txt for the Rebuilt Assets
+        working-directory: release-assets
+        run: |
+          sha256sum CrapCleaner.exe crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Replace the Release Assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ matrix.tag }}
+          files: |
+            release-assets/CrapCleaner.exe
+            release-assets/crapcleaner-linux-x86_64
+            release-assets/crapcleaner-linux-x86_64.tar.gz
+            release-assets/checksums.txt

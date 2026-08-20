@@ -6,10 +6,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
+from crapcleaner.config import config_dir
 from crapcleaner.core.actions import run_action
+from crapcleaner.core.manifest import MAX_MANIFEST_ITEMS, write_manifest
 from crapcleaner.core.protected_paths import validate_cleanup_path
 from crapcleaner.models.category import CacheTarget, CleanupCategory
-from crapcleaner.models.report import CleanupReport, CleanupResult
+from crapcleaner.models.report import CleanupReport, CleanupResult, RemovedPath
 from crapcleaner.utils.files import (
     recycle_file,
     recycle_tree,
@@ -54,6 +56,7 @@ def _delete_target_files(
     stop_event: StopEvent,
     use_recycle_bin: bool = False,
     excluded: frozenset[str] = frozenset(),
+    removed: list[RemovedPath] | None = None,
 ) -> tuple:
     deleted = 0
     recovered = 0
@@ -64,6 +67,10 @@ def _delete_target_files(
 
     def outcome() -> tuple:
         return deleted, recovered, skipped, errors, permission_errors, skip_reasons
+
+    def note_removed(path: str, size: int, file_count: int = 1) -> None:
+        if removed is not None and len(removed) < MAX_MANIFEST_ITEMS:
+            removed.append(RemovedPath(path, size, use_recycle_bin, file_count))
 
     def record_failure(path: str, exc: OSError) -> None:
         if isinstance(exc, PermissionError):
@@ -99,10 +106,10 @@ def _delete_target_files(
             recovered += size
             return
         try:
-            removed = recycle_file(path) if use_recycle_bin else remove_file(path)
-            if removed:
+            if recycle_file(path) if use_recycle_bin else remove_file(path):
                 deleted += 1
                 recovered += size
+                note_removed(path, size)
             else:
                 skipped += 1
                 skip_reasons.append(f"{path}: in use or locked by another process")
@@ -129,26 +136,35 @@ def _delete_target_files(
                         pass
             return
         if use_recycle_bin and not patterns and not excluded:
+            # The tree may only be recycled whole if nothing inside it was refused.
             size = 0
             count = 0
+            holds_protected = False
             for root, dirs, files in walk_safe(path):
                 if stop_event is not None and stop_event.is_set():
                     raise _Stopped
                 for name in files:
+                    full = os.path.join(root, name)
+                    is_safe_entry, _ = validate_cleanup_path(full)
+                    if not is_safe_entry:
+                        holds_protected = True
+                        break
                     count += 1
                     try:
-                        size += os.path.getsize(os.path.join(root, name))
+                        size += os.path.getsize(full)
                     except OSError:
                         pass
-            if recycle_tree(path):
-                deleted += count
-                recovered += size
-            else:
-                skipped += 1
-                skip_reasons.append(f"{path}: could not be moved to the Recycle Bin")
-            return
-        total_size = 0
-        total_files = 0
+                if holds_protected:
+                    break
+            if not holds_protected:
+                if recycle_tree(path):
+                    deleted += count
+                    recovered += size
+                    note_removed(path, size, count)
+                else:
+                    skipped += 1
+                    skip_reasons.append(f"{path}: could not be moved to the Recycle Bin")
+                return
         for root, dirs, files in walk_safe(path, topdown=False):
             if stop_event is not None and stop_event.is_set():
                 raise _Stopped
@@ -170,8 +186,9 @@ def _delete_target_files(
                     size = 0
                 try:
                     if recycle_file(full) if use_recycle_bin else remove_file(full):
-                        total_files += 1
-                        total_size += size
+                        deleted += 1
+                        recovered += size
+                        note_removed(full, size)
                     else:
                         skipped += 1
                         skip_reasons.append(f"{full}: in use or locked by another process")
@@ -185,20 +202,11 @@ def _delete_target_files(
                     skipped += 1
                     skip_reasons.append(dir_reason)
                     continue
-                if patterns or excluded:
-                    # Only files matching the pattern - or not deselected by the user -
-                    # may go. Removing the tree here would take the rest with it, so the
-                    # directory is only unlinked if processing left it empty.
-                    try:
-                        os.rmdir(full)
-                    except OSError:
-                        pass
-                    continue
-                if not (recycle_tree(full) if use_recycle_bin else remove_tree(full)):
-                    skipped += 1
-                    skip_reasons.append(f"{full}: directory could not be removed")
-        deleted += total_files
-        recovered += total_size
+                # Removed only when empty, so a refused file is never taken with it.
+                try:
+                    os.rmdir(full)
+                except OSError:
+                    pass
 
     try:
         if os.path.isfile(target_path):
@@ -233,7 +241,9 @@ def _delete_target_files(
                             handle_file(entry.path)
             except OSError as exc:
                 record_failure(target_path, exc)
-    except _Stopped:
+    except _Stopped as stopped:
+        # The walk is abandoned, but the deletions it already made are real.
+        stopped.partial = outcome()
         raise
 
     return outcome()
@@ -251,10 +261,8 @@ class PathRemoval:
 def remove_selected_paths(paths: Iterable[str], use_recycle_bin: bool = True) -> list[PathRemoval]:
     """Remove paths a user picked individually, validating each one first.
 
-    Views that let the user select files by hand - duplicates, large files - route
-    through here rather than calling the filesystem helpers directly, so no deletion
-    in the application can skip the protected-path layer. The per-path outcome lets
-    the caller report exactly what was refused and why.
+    Every hand-selected deletion routes through here so none can skip the
+    protected-path layer. The per-path outcome says what was refused and why.
     """
     outcomes: list[PathRemoval] = []
     for path in paths:
@@ -293,7 +301,9 @@ def _name_matches(name: str, patterns: tuple) -> bool:
 
 
 class _Stopped(Exception):
-    pass
+    """Raised when the stop event fires mid-walk, carrying what was already deleted."""
+
+    partial: tuple = (0, 0, 0, [], [], [])
 
 
 def clean_categories(
@@ -306,9 +316,8 @@ def clean_categories(
 ) -> CleanupReport:
     """Clean the given categories.
 
-    `excluded_paths` holds files the user deselected in the preview. They are
-    counted as skipped and left exactly where they are - which is what makes the
-    file-level preview more than a listing.
+    `excluded_paths` holds files the user deselected in the preview; they are
+    counted as skipped and left where they are.
     """
     started = datetime.now()
     report = CleanupReport(started=started, dry_run=dry_run, use_recycle_bin=use_recycle_bin)
@@ -386,6 +395,7 @@ def clean_categories(
                     stop_event,
                     use_recycle_bin,
                     excluded,
+                    report.removed,
                 )
                 deleted += d
                 recovered += r
@@ -393,7 +403,14 @@ def clean_categories(
                 errors.extend(e)
                 permission_errors.extend(pe)
                 skip_reasons.extend(sr)
-        except _Stopped:
+        except _Stopped as stopped:
+            d, r, s, e, pe, sr = stopped.partial
+            deleted += d
+            recovered += r
+            skipped += s
+            errors.extend(e)
+            permission_errors.extend(pe)
+            skip_reasons.extend(sr)
             report.errors.append("Cleanup stopped by user.")
         except Exception as exc:
             errors.append(f"{category.name}: {exc}")
@@ -413,4 +430,5 @@ def clean_categories(
         )
 
     report.duration = (datetime.now() - started).total_seconds()
+    report.manifest_path = write_manifest(report, config_dir()) or ""
     return report

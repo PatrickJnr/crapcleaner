@@ -1,8 +1,7 @@
 """Qt stylesheet generation and theme application.
 
-Separated from the palette data (:mod:`crapcleaner.gui.theme.palettes`) so that
-adding a colour scheme is a data change and changing how widgets are styled is a
-code change - they used to be two halves of one 2 100-line module.
+Separate from the palette data (:mod:`crapcleaner.gui.theme.palettes`) so adding a
+colour scheme is a data change and restyling widgets is a code change.
 """
 
 from PySide6.QtGui import QColor, QIcon
@@ -12,8 +11,7 @@ from crapcleaner.gui.theme.palettes import palette_for
 
 
 def _build_stylesheet(p: dict) -> str:
-    # Callers hand this raw palettes as well as prepared ones, so the derived
-    # label colours are ensured here rather than assumed.
+    # Callers pass raw palettes as well as prepared ones, so derive rather than assume.
     from crapcleaner.gui.theme.palettes import derive_ink
 
     p = derive_ink(p)
@@ -451,12 +449,11 @@ def _build_stylesheet(p: dict) -> str:
 def apply_theme(app: QApplication, theme: str, window=None) -> None:
     """Apply a theme, on the window when there is one.
 
-    `QApplication.setStyleSheet` re-polishes every widget of every top-level and
-    costs about four times as much per widget as the same sheet set on a window
-    - 1115ms against 243ms for the same 845 widgets, which is the difference
-    between a theme you can edit live and one you cannot. Every dialog here is
-    parented inside the window, so it inherits either way. The application-level
-    sheet is still used at start-up, before the window exists.
+    `QApplication.setStyleSheet` re-polishes every top-level: 1115ms against 243ms
+    on the window for the same 845 widgets, which is the difference between a theme
+    you can edit live and one you cannot. Dialogs are parented inside the window, so
+    they inherit either way; the app-level sheet is only for start-up, before the
+    window exists.
     """
     palette = palette_for(theme)
     sheet = _build_stylesheet(palette)

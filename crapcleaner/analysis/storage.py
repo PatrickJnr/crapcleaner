@@ -84,10 +84,8 @@ def _assemble_from(
 class StorageIndex:
     """Every directory a scan measured, keyed by path.
 
-    `analyze_storage_hierarchy` measures the whole tree regardless of `max_depth` -
-    a folder's size includes everything beneath it - and then throws away everything
-    deeper than the tree it returns. Expanding a folder therefore re-walked a subtree
-    that had just been measured. Keeping the flat maps makes that expansion a lookup.
+    The whole tree is measured regardless of `max_depth`, so keeping the flat maps
+    makes expanding a folder a lookup instead of re-walking what was just measured.
     """
 
     nodes: dict[str, StorageNode] = field(default_factory=dict)
@@ -126,12 +124,10 @@ def _should_skip_linux_subtree(path: str) -> bool:
     )
 
 
-#: Directories enumerated concurrently. Every directory is queued as its own unit of
-#: work, so one oversized subtree - AppData is routinely two thirds of a user profile -
-#: cannot leave the other threads idle. Enumeration is dominated by syscalls that
-#: release the GIL and, on a cold cache, by per-directory I/O latency that overlaps
-#: almost perfectly: measured 16k files/s serial against 52k files/s at this width on
-#: an NVMe volume with nothing cached.
+#: Each directory is queued as its own unit of work, so one oversized subtree cannot
+#: leave the other threads idle. Enumeration is dominated by GIL-releasing syscalls
+#: and I/O latency that overlaps almost perfectly: measured 16k files/s serial against
+#: 52k files/s at this width on an uncached NVMe volume.
 _MAX_SCAN_WORKERS = 24
 
 
@@ -152,27 +148,22 @@ def analyze_storage_hierarchy(
 
     The whole tree is measured regardless of `max_depth`, because a folder's size
     includes everything beneath it; `max_depth` only limits how deep the returned tree
-    is kept. Directories are enumerated by a pool of workers pulling from a shared
-    queue, and the tree is assembled from the flat results, so the output never depends
-    on the order in which directories happened to finish.
+    is kept. Workers pull from a shared queue and the tree is assembled from the flat
+    results, so the output never depends on the order directories finished in.
 
-    Pass `partial_cb` to receive the tree as it stands every `partial_interval` seconds
-    while the scan runs, so a caller can show the largest directories immediately rather
-    than waiting for a whole volume to be measured.
+    Pass `partial_cb` to receive the tree as it stands every `partial_interval` seconds,
+    so a caller can show the largest directories before the volume is fully measured.
 
     Pass `file_observer` to be handed every file entry and its stat result as they are
-    read. The Storage view used to run three independent traversals of the same tree -
-    the hierarchy, the file-type breakdown and the old-file list - paying the metadata
-    cost three times; they now share this one. The observer runs on the scan's worker
+    read, sparing other analyses a second traversal. It runs on the scan's worker
     threads, so it must be cheap and thread-safe.
 
-    Pass `index_out` to keep every directory that was measured, which makes expanding
-    a folder a lookup rather than another walk.
+    Pass `index_out` to keep every directory measured, making expansion a lookup.
 
     `size_mode` selects what a file's size means: `logical` is the length of its
     contents, which every listing already carries; `allocated` is what it occupies on
-    disk, which is what the drive's free space reflects for compressed, sparse, and
-    very small files. Allocated mode costs an extra call per file on Windows.
+    disk, which is what free space reflects for compressed, sparse and very small
+    files. Allocated mode costs an extra call per file on Windows.
     """
     if not root or not os.path.isdir(root):
         return None
@@ -180,8 +171,8 @@ def analyze_storage_hierarchy(
     visited_paths: set[str] = set()
     visited_inodes: set[tuple[int, int]] = set()
     total_visited_files = 0
-    # Guards the shared visited sets and the progress counter. The critical sections
-    # are a set lookup each, orders of magnitude cheaper than the syscalls around them.
+    # Guards the shared visited sets and the progress counter; each critical section is
+    # a set lookup, far cheaper than the syscalls around it.
     state_lock = threading.Lock()
 
     def _already_visited(real_path: str, entry: os.DirEntry | None) -> bool:
@@ -227,8 +218,7 @@ def analyze_storage_hierarchy(
                         return node, []
                     try:
                         if child.is_dir(follow_symlinks=False):
-                            # A junction or symlink points at data that lives elsewhere;
-                            # descending would bill another drive's bytes to this one.
+                            # Descending a junction bills another drive's bytes here.
                             if is_link_like(child) or _should_skip_linux_subtree(child.path):
                                 continue
                             subdirs.append(child)
@@ -258,21 +248,24 @@ def analyze_storage_hierarchy(
     queue: SimpleQueue = SimpleQueue()
     outstanding = [0]
 
-    def _enqueue(path: str, real_path: str, entry: os.DirEntry | None) -> bool:
+    def _claim(real_path: str, entry: os.DirEntry | None) -> bool:
+        """Reserve a directory for scanning without making it runnable yet.
+
+        A child queued before its parent records `parent_of[child]` can finish first
+        and find no ancestor to bill, losing its bytes; the caller must publish the
+        link and the parent node before calling `queue.put`.
+        """
         if _already_visited(real_path, entry):
             return False
         with state_lock:
             outstanding[0] += 1
-        queue.put((path, real_path))
         return True
 
     def _roll_up(path: str, node: StorageNode) -> None:
         """Add a finished directory's totals to every ancestor. Caller holds the lock.
 
-        Aggregating as results arrive, rather than summing the tree at the end, is what
-        makes a mid-scan snapshot possible: the top of the tree is always correct for
-        everything measured so far, and taking a snapshot costs a walk of the shallow
-        levels instead of a walk of every directory found.
+        Aggregating as results arrive is what makes a mid-scan snapshot possible and
+        cheap: the top of the tree is always correct for everything measured so far.
         """
         parent = parent_of.get(path)
         while parent is not None:
@@ -301,9 +294,7 @@ def analyze_storage_hierarchy(
 
             node, subdirs = _scan_one(path)
             accepted = [
-                entry
-                for entry in subdirs
-                if _enqueue(entry.path, os.path.join(real_path, entry.name), entry)
+                entry for entry in subdirs if _claim(os.path.join(real_path, entry.name), entry)
             ]
 
             with state_lock:
@@ -314,11 +305,13 @@ def analyze_storage_hierarchy(
                 _roll_up(path, node)
                 outstanding[0] -= 1
 
+            for entry in accepted:
+                queue.put((entry.path, os.path.join(real_path, entry.name)))
+
     def _snapshot() -> StorageNode:
         """A consistent view of the shallow levels, assembled outside the lock.
 
-        Holding the lock for the whole assembly stalled all 24 workers once a second;
-        copying the few maps the shallow levels need is far shorter.
+        Holding the lock for the whole assembly stalled every worker once a second.
         """
         with state_lock:
             shallow_nodes: dict[str, StorageNode] = {}
@@ -347,8 +340,9 @@ def analyze_storage_hierarchy(
     except OSError:
         root_real = root
 
-    if not _enqueue(root, root_real, None):
+    if not _claim(root_real, None):
         return StorageNode(name=os.path.basename(root) or root, path=root)
+    queue.put((root, root_real))
 
     workers = max(1, int(max_workers))
     finished = threading.Event()

@@ -7,7 +7,6 @@ from PySide6.QtWidgets import QApplication
 from crapcleaner.gui.dialogs import HelpSafetyDialog
 from crapcleaner.gui.views import HelpSafetyView, StorageBreakdownView
 
-# Ensure QApplication exists for GUI widget tests
 _app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
 
 
@@ -17,13 +16,11 @@ def test_help_safety_view():
     assert len(view._cards) >= 9
     assert view.search_edit is not None
 
-    # Test filter chips
     view._set_filter("REGISTRY")
     assert view._filter == "REGISTRY"
     reg_cards = [c for _, c, _ in view._cards if not c.isHidden()]
     assert len(reg_cards) >= 1
 
-    # Reset filter and test search
     view._set_filter("ALL")
     view.search_edit.setText("telemetry")
     visible_cards = [c for _, c, _ in view._cards if not c.isHidden()]
@@ -49,7 +46,6 @@ def test_storage_breakdown_view():
     assert view.vm_table is not None
     assert view.favorite_combo is not None
 
-    # Test section switching
     view._set_active_section("TYPES")
     assert view.content_stack.currentIndex() == 1
 
@@ -78,7 +74,7 @@ def test_is_worker_running_and_stop_worker_with_deleted_qobject():
     worker = HealthWorker()
     shiboken6.delete(worker)
 
-    # Must return False and not raise RuntimeError: libshiboken: Internal C++ object already deleted
+    # Must return False, not raise libshiboken's "Internal C++ object already deleted".
     assert is_worker_running(worker) is False
     stop_worker(worker)
 
@@ -91,17 +87,16 @@ def test_storage_breakdown_refresh_health_lifecycle_and_deleted_worker():
     mock_main = MagicMock()
     view = StorageBreakdownView(mock_main)
 
-    # Case 1: First call starts worker
     view.refresh_health()
     worker1 = view._health_worker
     assert worker1 is not None
 
-    # Case 2: Manually simulate worker deletion as done by Qt deleteLater()
+    # Free the C++ side the way Qt's deleteLater() does.
     worker_to_delete = HealthWorker(parent=view)
     shiboken6.delete(worker_to_delete)
     view._health_worker = worker_to_delete
 
-    # Case 3: Second call must not crash with Shiboken deleted object RuntimeError
+    # The second call must survive the stale worker reference.
     view.refresh_health()
     assert view._health_worker is not worker_to_delete
     if view._health_worker is not None:

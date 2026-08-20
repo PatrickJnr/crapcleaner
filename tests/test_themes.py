@@ -191,7 +191,6 @@ def test_theme_gallery_widget_filtering_and_selection(qt_app):
         assert f"{label} ({count})" in chip_texts
     assert f"All ({len(THEMES)})" in chip_texts
 
-    # Test selecting a new theme
     changed_signals = []
     gallery.theme_changed.connect(changed_signals.append)
     gallery.select_theme("nord")
@@ -204,14 +203,12 @@ def test_theme_gallery_widget_filtering_and_selection(qt_app):
     assert gallery.current_theme() == "adwaita-dark"
     assert gallery.hero_name_label.text() == "Adwaita Dark"
 
-    # Test category filtering
     gallery._on_category_selected("retro")
     visible_retro_cards = [c for c in gallery._cards.values() if not c.isHidden()]
     assert len(visible_retro_cards) == 8
     assert not gallery._cards["windows-95"].isHidden()
     assert gallery._cards["dark"].isHidden()
 
-    # Test search query filtering
     gallery._on_category_selected("light")
     visible_light_cards = [c for c in gallery._cards.values() if not c.isHidden()]
     assert len(visible_light_cards) == 5
@@ -223,11 +220,9 @@ def test_theme_gallery_widget_filtering_and_selection(qt_app):
     assert len(visible_search_cards) == 1
     assert not gallery._cards["dracula"].isHidden()
 
-    # Test search clear
     gallery._on_search_changed("")
     visible_all_cards = [c for c in gallery._cards.values() if not c.isHidden()]
     assert len(visible_all_cards) == len(THEMES)
 
-    # Test random theme
     gallery._select_random_theme()
     assert gallery.current_theme() in THEMES

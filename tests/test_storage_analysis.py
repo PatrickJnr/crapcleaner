@@ -2,9 +2,11 @@
 
 import os
 import threading
+import time
 
 import pytest
 
+import crapcleaner.analysis.storage as storage_mod
 from crapcleaner.analysis.file_types import analyze_file_types
 from crapcleaner.analysis.storage import analyze_storage_hierarchy
 
@@ -21,9 +23,7 @@ def tree(tmp_path):
     return str(tmp_path)
 
 
-# ---------------------------------------------------------------------------
 # Parallel analysis must not change the answer
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("workers", [1, 2, 4, 8])
@@ -70,11 +70,6 @@ def test_missing_root_returns_none(tmp_path):
     assert analyze_storage_hierarchy(str(tmp_path / "nope")) is None
 
 
-# ---------------------------------------------------------------------------
-# Cancellation and progress
-# ---------------------------------------------------------------------------
-
-
 def test_hierarchy_cancellation_returns_promptly(tree):
     stop = threading.Event()
     stop.set()
@@ -97,11 +92,6 @@ def test_file_types_cancellation(tree):
     stop = threading.Event()
     stop.set()
     assert analyze_file_types(tree, stop_event=stop) == []
-
-
-# ---------------------------------------------------------------------------
-# File-type analysis
-# ---------------------------------------------------------------------------
 
 
 def test_file_types_reads_sizes_correctly(tmp_path):
@@ -174,3 +164,25 @@ def test_file_types_records_extensions(tmp_path):
 
 def test_file_types_on_missing_root(tmp_path):
     assert analyze_file_types(str(tmp_path / "nope")) == []
+
+
+class TestRollUpDoesNotRaceTheParentLink:
+    """BUG-02: a child finishing before its parent recorded the link lost its bytes."""
+
+    def test_a_child_that_finishes_first_still_reaches_the_root(self, tmp_path, monkeypatch):
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+        (deep / "payload.bin").write_bytes(b"x" * 10_000)
+
+        class StallingQueue(storage_mod.SimpleQueue):
+            def put(self, item, *args, **kwargs):
+                super().put(item, *args, **kwargs)
+                if os.path.basename(item[0]) == "b":
+                    # Hold the parent's worker while the child's runs to completion.
+                    time.sleep(0.5)
+
+        monkeypatch.setattr(storage_mod, "SimpleQueue", StallingQueue)
+        node = analyze_storage_hierarchy(str(tmp_path), max_depth=3, max_workers=4)
+
+        assert node.size == 10_000
+        assert node.file_count == 1

@@ -47,10 +47,9 @@ _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 def is_link_like(entry_or_stat) -> bool:
     """Whether an entry is a symlink, junction, or other reparse point.
 
-    Accepts an `os.DirEntry` or a stat result. Traversal must never descend through
-    one: a junction loop recurses until the file budget is spent, and a junction
-    pointing outside the tree being walked would let a scan report - or a cleanup
-    delete - files that are nowhere near the intended target.
+    Accepts an `os.DirEntry` or a stat result. Traversal must never descend
+    through one: junction loops recurse forever, and a junction pointing outside
+    the tree lets a scan report - or a cleanup delete - unrelated files.
     """
     try:
         is_entry = hasattr(entry_or_stat, "is_symlink")
@@ -73,10 +72,9 @@ def is_link_like(entry_or_stat) -> bool:
 def walk_safe(top: str, topdown: bool = True):
     """`os.walk` that never follows symlinks or Windows junctions.
 
-    `os.walk` follows junctions even with `followlinks=False`, because that flag only
-    covers symlinks. Reparse points are yielded among the file names rather than
-    descended into, so a caller deleting a tree removes the link itself and leaves its
-    target alone.
+    `followlinks=False` covers only symlinks, so `os.walk` still follows junctions.
+    Reparse points are yielded among the file names rather than descended into, so
+    a caller deleting a tree removes the link and leaves its target alone.
     """
     try:
         entries = list(os.scandir(top))
@@ -107,15 +105,11 @@ def walk_safe(top: str, topdown: bool = True):
 def walk_safe_entries(top: str, skip_dir: Callable[[str], bool] | None = None):
     """Like :func:`walk_safe`, but yields `(dirpath, file_entries)` with the entries.
 
-    A directory listing already carries each file's size, so a caller that needs sizes
-    can read them from the `os.DirEntry` instead of issuing a fresh `os.stat` per file.
-    That one avoidable syscall per file is the difference between a file-type breakdown
-    taking a hundred seconds and taking ten.
+    The `os.DirEntry` already carries each file's size, so callers avoid one
+    `os.stat` per file - a ten-fold difference on a file-type breakdown.
 
-    Symlinks and junctions are yielded as entries rather than descended into, exactly
-    as in :func:`walk_safe`. Pass `skip_dir` to prune a subtree by path - the callers
-    that used to prune `os.walk`'s `dirnames` list in place need it, and pruning here
-    means the skipped directory is never even listed.
+    Reparse points are yielded, not descended into, as in :func:`walk_safe`.
+    `skip_dir` prunes a subtree by path before it is ever listed.
     """
     try:
         entries = list(os.scandir(top))
@@ -258,12 +252,10 @@ def _on_rmtree_error(func, path, _exc_info):
 def remove_tree(path: str) -> bool:
     """Permanently remove a directory tree, handling readonly files gracefully.
 
-    Links inside the tree are detached rather than followed. `shutil.rmtree` only
-    learned to recognise junctions in Python 3.12 (`os.DirEntry.is_junction`), and this
-    project supports 3.10 and 3.11, where it would descend into one and delete the
-    files it points at. Detaching them first makes the behaviour identical on every
-    supported version. The attribute pass uses the same safe walk so it cannot clear
-    the read-only flag on files outside the tree either.
+    Links are detached rather than followed: `shutil.rmtree` only recognises
+    junctions from Python 3.12 (`os.DirEntry.is_junction`), and on the 3.10/3.11
+    this project supports it would descend into one and delete its target.
+    The attribute pass uses the same safe walk for the same reason.
     """
     norm = normalize_long_path(path)
     try:
@@ -433,9 +425,8 @@ def _empty_linux_trash() -> bool:
 def path_is_locked(path: str) -> bool:
     """Whether a file is held open by another process.
 
-    A read-only file, or one whose permissions deny writing, is not locked - it used
-    to be reported as such, which points the user at the wrong remedy. Only a sharing
-    violation counts.
+    A read-only file, or one whose permissions deny writing, is not locked;
+    reporting it as such points the user at the wrong remedy.
     """
     norm = normalize_long_path(path)
     if not os.path.exists(norm):

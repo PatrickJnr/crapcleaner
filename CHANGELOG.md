@@ -5,6 +5,70 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-08-20
+
+Safety audit, cleanup manifests, and offline mode.
+
+A second audit of the codebase, implemented. Three defects in this release deleted
+files the application had already refused to delete. The first one hardened the deletion paths
+the application knew about; this one found the ones it did not. Three defects in this
+release deleted files the application had already decided not to delete, and three
+categories that are ticked by default were pointed at installed software and user data
+rather than at cache. Everything the audit raised is fixed, and the roadmap it proposed
+is implemented: cleanup manifests, a restore path, a diagnostics bundle, offline mode,
+regrowth rates, a high-contrast mode, bulk duplicate rules, and a generated catalogue.
+
+### Fixed
+
+- **A protected file was refused by name and then deleted with its parent directory**: the cleanup engine validated every file in a directory and skipped the protected ones, and the directory loop that followed removed the whole containing folder - taking the refused files with it. The run reported them as skipped, with the protection reason, after they were already gone. Validation was per file; deletion was per tree. A directory is now unlinked only if processing left it empty.
+- **The Recycle Bin path validated nothing at all**: with the Recycle Bin on and no filename pattern, which is what the interface does by default, the walk only counted files and then handed the whole tree to the shell in one call. No file inside was ever checked against the protected-path rules. The walk that measures the tree now validates it at the same time: a clean tree still moves in a single call, and one protected file inside drops it to the per-file path, which refuses that file and keeps the rest.
+- **Every Chromium browser cache category matched nothing**: `os.path.join(profile, *sub)` unpacked the string one character at a time, so `"Cache"` resolved to `<profile>/C/a/c/h/e`. All sixteen registered Chrome, Edge, Brave and Opera GX cache entries reported zero bytes and deleted nothing, on both platforms, since 1.0.11. Firefox was unaffected. Browser cache is the most-used category in a disk cleaner.
+- **Three categories that are ticked by default were not caches**: the WinGet entry claimed `%LOCALAPPDATA%\Microsoft\WinGet\Packages`, which is where winget unpacks tools installed in portable mode - cleaning it uninstalled them. The Poetry entry claimed the whole `pypoetry\Cache` directory, which holds every project virtual environment Poetry creates unless the user has moved them. The Snap entry claimed `~/snap`, which is each snap's own settings and saved files. All three are narrowed to the directories that actually hold cache, and a test now fails if any default-selected category reaches for them again.
+- **A cancelled cleanup reported that it had deleted nothing**: counts were folded into the result only after the walk finished, and cancelling skipped the fold. Three hundred files, cancelled halfway: a hundred and fifty deleted, and the report and history both recorded zero.
+- **A folder could measure smaller than the sum of its own children**: in the parallel storage walk a child became runnable before its parent had been recorded, so a child that finished first found no parent and its bytes never reached any ancestor - permanently, since the roll-up runs once per directory.
+- **Scan and cleanup disagreed about which files a pattern matched**: the scan's fast path matched extensionless names that the deletion refused, so `catalog`, `backlog`, `changelog` and `dialog` were all counted as `*.log`. The scan promised bytes the cleanup then left behind.
+- **A fully expired scan cache was never rewritten**: it was pruned to nothing in memory and left untouched on disk, so every start re-parsed the same dead entries. The file could grow and never shrink.
+- **Comparing storage snapshots ignored the size mode they were taken in**: an on-disk-size scan compared against a logical snapshot reported the change of unit as growth, on the one feature whose entire purpose is answering what grew. A mismatch is now refused and explained.
+- **The contrast engine could return a worse colour than the one it was given**: when no candidate reached the target ratio it fell back to a fixed extreme, which on some accents replaced readable dark ink at 5.01:1 with white at 3.68:1. It now takes the extreme only when the extreme actually reads better.
+- **TRIM was reported enabled on systems where it is disabled**: the Windows query matched any line containing `= 0`, and real output has one line per filesystem, so a machine with NTFS disabled and ReFS enabled read as enabled for the filesystem holding the data.
+- **Linux storage health was asserted rather than measured**: every device was reported "Healthy" and every SSD was reported as having TRIM support and TRIM enabled, none of which the underlying tool reports. A failing NVMe was described as healthy. Trim support now comes from the device's discard granularity, trim activity from the mount option or the systemd timer, and health from SMART when it is installed - and anything that cannot be determined says "Unknown" rather than inventing a reassuring answer.
+- **Installing an update failed on every Linux distribution except Debian's**: pacman, dnf and snap all need root and only the apt paths asked for it, so the button always returned a permission error on Arch, Fedora and openSUSE. Two separate implementations of "list available updates" also disagreed with each other; there is one now.
+- **Opening a Linux settings or services window froze the application for five seconds, killed the window, and reported success**: the launcher waited on a process it should have detached from, hit its own timeout, terminated it, and then said "Opened".
+- **The window froze for two seconds whenever a background probe was still running**: every worker in the application overrides its thread body and never runs an event loop, so the quit request could not do anything and the call degraded to a blocking wait on the interface thread - at the head of twenty-seven refresh and action handlers. Nineteen of the twenty-seven workers had no way to be interrupted at all, so closing during a Windows Update check hung and then tore down a thread that was still running.
+- **Recycling a large selection left the window not responding**: the Duplicates and Large Files views deleted inline in the button handler, with no progress and no cancel.
+- **History rows pointed at the wrong run once the table was sorted**.
+
+### Security
+
+- **A contributor avatar URL was passed to the network layer unchecked**: the URL comes from the API response or from a cache file in the user's own configuration directory, and no scheme, host or size was enforced. Anyone able to write that file could have had arbitrary URLs opened, `file://` included. Restricted to GitHub over HTTPS, with the response capped.
+- **Opening the Updates tab ran `sudo apt update`**: a read-only check mutated the package lists on any machine with a passwordless sudo rule. Listing upgradable packages reads the lists apt already has.
+- **Package names scraped from command output were appended to a command running as root**: a name beginning with a dash is read as an option by apt and pacman. Every id is now shape-checked before it can reach an elevated package manager.
+- **The last `shell=True` call is gone**, along with the PATH and working-directory lookup it implied.
+- **Self-updating no longer fights the package manager that installed it**: a copy installed through WinGet, Scoop, Chocolatey, Flatpak or Snap is detected and refused with that manager's own upgrade command, instead of silently replacing itself and leaving the manager's records stale. And a failed swap can no longer leave nothing behind: the target is proved replaceable before the application exits, and both installer scripts restore and report rather than exiting into an empty directory.
+- **Every CI job now declares the token scope it needs.** Five jobs inherited the repository default; only the two publishing jobs hold write access.
+
+### Added
+
+- **A record of what a cleanup actually removed**: every run writes a manifest - each path, its size, and whether it went to the Recycle Bin or was removed permanently - kept for the last twenty runs. History shows it per run, and for a run that used the Recycle Bin, *Restore this run* lists the exact paths and opens the bin. Neither Windows nor the FreeDesktop trash exposes an undo this application can call, so it does not pretend to have one. The manifest is a list of the user's own paths: it is never logged, and never leaves the machine.
+- **A diagnostics bundle**: one file with version, platform, capability report, drive summary and the tail of the log, with every path reduced to its root. *Save Diagnostics Bundle…* on the Help page, or `crapcleaner diagnostics`.
+- **Offline mode**: one setting that stops the update check, the contributor fetch, the package-manager queries and the hostname lookup. Everything that would have gone to the network says it was skipped, rather than failing as though the network were down.
+- **How long ago a category was cleaned, and how fast it comes back**: "regrows about 400 MB per week", from the run history. Where there is not enough history it says so instead of showing zero, which is the honest answer to whether cleaning something is worth it.
+- **A high-contrast mode**: a setting that routes the *active* palette through the contrast engine at a stricter 7:1 ratio, rather than being one theme among forty-five. Across every shipped theme, 663 of 675 colour pairs now reach AAA.
+- **One keep-rule across every duplicate group**: keep the first, oldest, newest, shortest path, or the copy in a folder you pick - applied to all groups at once, with the resulting selection shown before anything moves. The per-group dialog only ever reached one group at a time, and groups past the display cap could not be acted on at all.
+- **A generated category catalogue**: `scripts/generate_category_catalogue.py` builds a browsable page from each category's own description of what it contains, why it grows, why it is safe to delete, and what happens afterwards. Generated, so it cannot drift from the application. Filling it in found that a quarter of the categories had never had that metadata written.
+- **`crapcleaner history --manifest`** to list what a given run removed.
+
+### Changed
+
+- **Accessibility is enforced rather than remembered**: a test walks every view and dialog and fails on any interactive control that has neither an accessible name nor visible text. Two hundred and twenty-two controls, none unnamed; the exemptions are two documented rules rather than a list of names.
+- **Released binaries are built from pinned tooling**: PyInstaller and Qt were previously whatever pip resolved on the morning of the build, so two releases a week apart could carry different Qt versions with no record of which. `uv.lock` is removed - nothing read it.
+- **The release path verifies what it publishes**: the Linux binary is now executed before release rather than only built, lint and type checks run on tag, a rebuilt release regenerates the checksum file users are told to verify against, and every binary carries build provenance linking it to the commit and workflow that produced it.
+- **Release notes fail loudly** rather than silently publishing the newest version's notes under an older tag.
+- **The test suite gained a configuration**: a bare `pytest` at the repository root collected whatever it found, an unrecognised marker did nothing, and warnings passed unnoticed. Coverage is measured by branch now. Three guards that asserted only that certain strings appeared in a workflow file - and passed while the bug they named was live - now parse the workflow.
+- **Comments are 59% fewer**: narration, numbered build outlines and decorative banners removed across the codebase; the rationale comments - platform quirks, measured performance decisions, approaches tried and rejected - kept and compressed. Three were stale rather than verbose and described a Studio that no longer looks like that.
+- **`pyproject.toml` carries the metadata a published package needs** - readme, licence, classifiers, project URLs - and a windowed entry point so a pip-installed launch does not open a console. Nothing is published yet.
+- Dead code removed: a duplicate worker, a superseded file scanner, and two configuration keys that were written to every settings file and read by nothing.
+
 ## [1.1.0] - 2026-08-20
 
 Codebase audit, self-update and live theme editing.

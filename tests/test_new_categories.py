@@ -31,7 +31,6 @@ def test_developer_categories_expansion():
 def test_all_registered_categories():
     all_cats = get_all_categories()
     assert len(all_cats) >= 50
-    # Every category must have an id, name, group, and safety level
     for c in all_cats:
         assert c.id
         assert c.name

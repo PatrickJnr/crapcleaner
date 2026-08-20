@@ -25,7 +25,6 @@ def test_analyze_storage_hierarchy(tmp_path):
     assert node.dir_count == 2
     assert len(node.children) == 2
 
-    # Check child sort order (largest first)
     assert node.children[0].name == "folder_b"
     assert node.children[0].size == 2048
     assert node.children[0].percentage_of_parent > 60.0
