@@ -6,7 +6,10 @@ winget's portable install root, Poetry's virtualenvs, and each snap's per-user d
 """
 
 import os
+import re
 from unittest.mock import patch
+
+import pytest
 
 from crapcleaner.categories import apps, python
 from crapcleaner.registry import get_all_categories
@@ -22,9 +25,13 @@ NEVER_AUTO_SELECTED = (
 
 
 def _is_per_snap_user_data(path: str) -> bool:
-    """~/snap holds each snap's settings and saved files; /var/...snapd is its cache."""
-    unix = path.replace("\\", "/")
-    return "/snap/" in unix and not unix.startswith("/var/")
+    """The snap root and a snap's data root are user data.
+
+    A cache directory *inside* one - ~/snap/discord/current/.config/discord/Cache - is
+    a cache like any other, so only the roots themselves are refused.
+    """
+    unix = path.replace("\\", "/").rstrip("/")
+    return bool(re.search(r"/snap(/[^/]+(/(current|common|\d+))?)?$", unix))
 
 
 def _auto_selected(categories):
@@ -48,6 +55,7 @@ def test_no_auto_selected_category_targets_installed_software_or_user_data():
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the WinGet category is Windows-only")
 def test_winget_category_leaves_the_portable_install_root_alone():
     with (
         patch.object(apps, "is_windows", return_value=True),

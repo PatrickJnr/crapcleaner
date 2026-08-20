@@ -16,6 +16,12 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "profile"))
     monkeypatch.setenv("OneDrive", str(tmp_path / "onedrive"))
     monkeypatch.setenv("OneDriveConsumer", str(tmp_path / "onedrive_consumer"))
+    # The same isolation for POSIX: without these the config and history resolve to the
+    # real home directory, so settings written by one test are read by the next.
+    monkeypatch.setenv("HOME", str(tmp_path / "profile"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "profile" / ".config"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "profile" / ".cache"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "profile" / ".local" / "share"))
     return tmp_path
 
 

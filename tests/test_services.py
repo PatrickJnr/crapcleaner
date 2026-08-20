@@ -5,6 +5,8 @@ import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
+import pytest
+
 from crapcleaner.system.backends import services_linux, services_windows
 from crapcleaner.system.backends.services_windows import (
     CRITICAL_SERVICES,
@@ -312,6 +314,7 @@ def test_a_failed_systemd_gui_launch_is_not_reported_as_success():
     assert "denied" in message
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows services backend")
 def test_services_console_is_launched_without_a_shell():
     """The console path must be explicit, not resolved through PATH and the CWD."""
     opened: list[str] = []
