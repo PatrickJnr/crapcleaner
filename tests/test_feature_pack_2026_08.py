@@ -596,10 +596,15 @@ class TestSelfUpdate:
         )
         script = write_installer_script(update)
         body = open(script, encoding="utf-8").read().replace(str(os.getpid()), str(victim.pid))
-        # Do not relaunch a fake binary during the test.
-        body = body.replace('"$TARGET" ', ': "$TARGET" ')
-        with open(script, "w", encoding="utf-8") as fh:
-            fh.write(body)
+        # Do not relaunch a fake binary during the test. Only lines that *run* the
+        # target are neutralised: a blanket replace of the quoted variable also hit
+        # `mv "$TARGET" "$BACKUP"`, so the swap this test exists to check never ran.
+        lines = body.splitlines()
+        for index, line in enumerate(lines):
+            if line.strip().startswith('"$TARGET"'):
+                lines[index] = f": {line}"
+        with open(script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("\n".join(lines) + "\n")
 
         subprocess.run(["/bin/sh", script], timeout=30, check=False)
         for _ in range(20):

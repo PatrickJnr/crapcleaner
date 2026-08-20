@@ -3,18 +3,22 @@
 from crapcleaner.categories.developer import get_categories as get_dev_categories
 from crapcleaner.categories.gaming import get_categories as get_gaming_categories
 from crapcleaner.registry import get_all_categories
+from crapcleaner.utils.platform import is_linux, is_windows
 
 
 def test_gaming_categories_expansion():
-    cats = get_gaming_categories()
-    cat_ids = {c.id for c in cats}
-    # Check that new gaming categories exist
-    assert (
-        "fivem_cache" in cat_ids
-        or "directx_shader_cache" in cat_ids
-        or "launcher_caches" in cat_ids
-        or "steam_caches" in cat_ids
-    )
+    """Gaming coverage is platform-specific: Linux gets Linux paths, not Windows ones."""
+    cat_ids = {c.id for c in get_gaming_categories()}
+
+    if is_linux():
+        expected = {"steam_caches_linux", "heroic_cache_linux", "lutris_bottles_cache_linux"}
+    elif is_windows():
+        expected = {"fivem_cache", "directx_shader_cache", "launcher_caches", "steam_caches"}
+    else:
+        assert cat_ids == set(), "no gaming coverage is claimed for this platform"
+        return
+
+    assert cat_ids & expected, f"none of {sorted(expected)} in {sorted(cat_ids)}"
 
 
 def test_developer_categories_expansion():
