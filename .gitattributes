@@ -1,0 +1,4 @@
+# The suite is most of the repository by file count and would otherwise decide what
+# GitHub calls this project. Marking it keeps the language summary about the
+# application; the tests stay in the repository, stay readable, and still run in CI.
+tests/** linguist-vendored

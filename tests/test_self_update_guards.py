@@ -207,10 +207,18 @@ class TestTheInstallerScriptRunsWithoutAConsole:
         assert 'del /F /Q "%PROBE%"' in body
 
 
+#: subprocess defines these on Windows only, which is also the only platform where
+#: they mean anything: off Windows the code asks for no flags at all.
+_CREATE_NO_WINDOW = 0x08000000
+_DETACHED_PROCESS = 0x00000008
+
+
+@pytest.mark.skipif(
+    not hasattr(subprocess, "CREATE_NO_WINDOW"),
+    reason="console creation flags exist only on Windows",
+)
 def test_the_installer_is_started_with_a_console_it_simply_does_not_show(tmp_path, monkeypatch):
     """DETACHED_PROCESS gives the script no console at all, which is what broke it."""
-    import subprocess as sp
-
     seen = {}
 
     def fake_popen(args, **kwargs):
@@ -225,5 +233,5 @@ def test_the_installer_is_started_with_a_console_it_simply_does_not_show(tmp_pat
     module.apply_update(_update(tmp_path))
 
     flags = seen["creationflags"]
-    assert flags & sp.CREATE_NO_WINDOW, "the console must exist but stay hidden"
-    assert not flags & getattr(sp, "DETACHED_PROCESS", 0), "no console means no pipe, no FOR /F"
+    assert flags & _CREATE_NO_WINDOW, "the console must exist but stay hidden"
+    assert not flags & _DETACHED_PROCESS, "no console means no pipe, and no FOR /F either"
