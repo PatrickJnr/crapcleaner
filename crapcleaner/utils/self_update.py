@@ -404,6 +404,29 @@ def _verify_replaceable(target: str) -> None:
         ) from exc
 
 
+def _child_environment() -> dict[str, str]:
+    """The environment minus the one-file bootstrap this process was started with.
+
+    A frozen one-file build runs with `_PYI_*` set, describing the archive it unpacked
+    and its place in the parent/child pair. Anything it starts inherits them, and they
+    travel through the installer script into the new build, whose own bootloader then
+    believes it is the child of a one-file parent and checks that its parent process is
+    the same executable. It is not - the parent is a shell that has since exited - so it
+    refuses to start with "Security validation failure: parent process has different
+    executable", after the swap has already succeeded.
+
+    PyInstaller also moves the library path aside and keeps the original beside it.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI")}
+    env.pop("_MEIPASS2", None)  # the name used by builds before PyInstaller 6.
+
+    for name in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        original = env.pop(f"{name}_ORIG", None)
+        if original is not None:
+            env[name] = original
+    return env
+
+
 def apply_update(update: DownloadedUpdate, relaunch_args: str = "") -> str:
     """Start the installer and hand control to it. The caller must then exit.
 
@@ -425,6 +448,7 @@ def apply_update(update: DownloadedUpdate, relaunch_args: str = "") -> str:
                 ["cmd.exe", "/c", script],
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 close_fds=True,
+                env=_child_environment(),
             )
         else:
             subprocess.Popen(
@@ -433,6 +457,7 @@ def apply_update(update: DownloadedUpdate, relaunch_args: str = "") -> str:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 close_fds=True,
+                env=_child_environment(),
             )
     except OSError as exc:
         _discard(script)

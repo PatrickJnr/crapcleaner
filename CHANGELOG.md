@@ -5,6 +5,16 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-08-21
+
+The updated build refused to start after replacing itself.
+
+### Fixed
+
+- **"Security validation failure: parent process has different executable!"** greeted anyone whose update had just succeeded. A frozen one-file build runs with `_PYI_*` variables describing the archive it unpacked and its place in the parent/child pair the bootloader uses. Everything it starts inherits them, so they travelled into the installer script and from there into the new build, whose own bootloader concluded it was the child of a one-file parent and checked that its parent process was the same executable. It was not - that parent was a shell which had since exited - so it refused to start, after the swap had already succeeded. The installer is now started with those variables removed, and with the library path PyInstaller moves aside restored to what it was.
+
+  The check that reports this was added in PyInstaller 6.22.1. Builds are pinned to 6.22.2 and had it; a local build made against 6.22.0 did not, which is why the update appeared to work when it was tested here and failed for anyone who ran a published one.
+
 ## [1.3.1] - 2026-08-21
 
 The self-update never ran its installer.

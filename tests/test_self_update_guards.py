@@ -235,3 +235,63 @@ def test_the_installer_is_started_with_a_console_it_simply_does_not_show(tmp_pat
     flags = seen["creationflags"]
     assert flags & _CREATE_NO_WINDOW, "the console must exist but stay hidden"
     assert not flags & _DETACHED_PROCESS, "no console means no pipe, and no FOR /F either"
+
+
+class TestTheInstallerDoesNotInheritTheOneFileBootstrap:
+    """A frozen one-file build runs with `_PYI_*` describing the archive it unpacked.
+
+    Anything it starts inherits them, and they travelled through the installer script
+    into the new build, whose own bootloader then believed it was the child of a
+    one-file parent and checked that its parent process was the same executable. It was
+    not - the parent was a shell that had since exited - so the new build refused to
+    start with "Security validation failure: parent process has different executable",
+    after the swap had already succeeded.
+    """
+
+    def test_the_bootstrap_variables_are_dropped(self, monkeypatch):
+        monkeypatch.setenv("_PYI_PARENT_PROCESS_LEVEL", "1")
+        monkeypatch.setenv("_PYI_ARCHIVE_FILE", r"C:\apps\CrapCleaner.exe")
+        monkeypatch.setenv("_PYI_APPLICATION_HOME_DIR", r"C:\Temp\_MEI123")
+        monkeypatch.setenv("_MEIPASS2", r"C:\Temp\_MEI123")
+
+        env = module._child_environment()
+
+        assert not [name for name in env if name.startswith("_PYI")]
+        assert "_MEIPASS2" not in env
+
+    def test_everything_else_survives(self, monkeypatch):
+        """Stripping too much would start the new build without its own environment."""
+        monkeypatch.setenv("_PYI_ARCHIVE_FILE", "x")
+        monkeypatch.setenv("CRAPCLEANER_TEST_MARKER", "kept")
+
+        env = module._child_environment()
+
+        assert env.get("CRAPCLEANER_TEST_MARKER") == "kept"
+        assert "PATH" in env
+
+    def test_the_library_path_is_put_back_as_it_was(self, monkeypatch):
+        """PyInstaller moves it aside on Linux and keeps the original beside it."""
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEI999")
+        monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib/mine")
+
+        env = module._child_environment()
+
+        assert env["LD_LIBRARY_PATH"] == "/usr/lib/mine"
+        assert "LD_LIBRARY_PATH_ORIG" not in env
+
+    def test_the_installer_is_started_with_the_cleaned_environment(self, tmp_path, monkeypatch):
+        seen = {}
+
+        def fake_popen(args, **kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(pid=1234)
+
+        monkeypatch.setenv("_PYI_PARENT_PROCESS_LEVEL", "1")
+        monkeypatch.setattr(module, "is_windows", lambda: True)
+        monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(module, "_verify_replaceable", lambda target: None)
+
+        module.apply_update(_update(tmp_path))
+
+        assert "env" in seen, "without an explicit environment the child inherits this one"
+        assert not [name for name in seen["env"] if name.startswith("_PYI")]
