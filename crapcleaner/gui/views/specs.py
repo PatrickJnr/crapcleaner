@@ -81,7 +81,7 @@ class SpecsView(QWidget):
         self.refresh_btn = QPushButton("Refresh Specs")
         self.refresh_btn.setProperty("primary", "true")
         self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.refresh_btn.clicked.connect(self.refresh_specs)
+        self.refresh_btn.clicked.connect(lambda: self.refresh_specs(force=True))
         header.addWidget(self.refresh_btn)
 
         root_lay.addLayout(header)
@@ -308,7 +308,11 @@ class SpecsView(QWidget):
             match_text = (not self._filter_query) or (self._filter_query in searchable_text.lower())
             card_widget.setVisible(match_cat and match_text)
 
-    def refresh_specs(self):
+    def refresh_specs(self, force: bool = False):
+        if force:
+            from crapcleaner.system.hardware import refresh_hardware_cache
+
+            refresh_hardware_cache()
         if self._specs is None:
             self._show_skeletons()
         from crapcleaner.gui.workers import SpecsWorker, stop_worker

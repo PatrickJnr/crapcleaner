@@ -51,6 +51,17 @@ from crapcleaner.utils.platform import (
 )
 
 
+def _refresh_nav_badges(main) -> None:
+    """Ask the window to restate its sidebar counts, if it is a window that has any.
+
+    Tests build these views with `main=None`, and the dialogs that host them are not
+    the main window at all.
+    """
+    refresh = getattr(main, "refresh_nav_badges", None)
+    if callable(refresh):
+        refresh()
+
+
 class SystemUpdatesView(QWidget):
     """View and manage pending operating-system updates and update history.
 
@@ -297,6 +308,7 @@ class SystemUpdatesView(QWidget):
     def _on_updates_loaded(self, report: Any):
         self._report = report
         self.check_btn.setEnabled(True)
+        _refresh_nav_badges(self._main)
 
         # Backend badge: the Windows Update service, or the detected package manager.
         svc_status = report.service_status.upper()
@@ -369,6 +381,26 @@ class SystemUpdatesView(QWidget):
         )
         self.result_banner.setVisible(True)
 
+    def _severity_cell(self, severity: str) -> QTableWidgetItem:
+        """Microsoft rates severity only for security bulletins.
+
+        A definition or driver update has no MSRC rating at all, and printing
+        "Unspecified" in the column reads as a verdict on the update rather than as the
+        absence of one.
+        """
+        if severity not in ("Critical", "Important", "Moderate", "Low"):
+            cell = QTableWidgetItem("—")
+            cell.setForeground(QColor(_c(self._theme, "muted")))
+            cell.setToolTip("Microsoft rates severity only for security updates.")
+            return cell
+
+        cell = QTableWidgetItem(severity)
+        if severity in ("Critical", "Important"):
+            cell.setForeground(QColor(_c(self._theme, "danger")))
+        elif severity == "Moderate":
+            cell.setForeground(QColor(_c(self._theme, "warning")))
+        return cell
+
     def _populate_available(self, items: list[Any]):
         self.avail_table.setRowCount(0)
         self.avail_table.setRowCount(len(items))
@@ -384,12 +416,7 @@ class SystemUpdatesView(QWidget):
             kb_item = QTableWidgetItem(kb_str)
             self.avail_table.setItem(row, 1, kb_item)
 
-            sev_item = QTableWidgetItem(item.severity)
-            if item.severity in ("Critical", "Important"):
-                sev_item.setForeground(QColor(_c(self._theme, "danger")))
-            elif item.severity == "Moderate":
-                sev_item.setForeground(QColor(_c(self._theme, "warning")))
-            self.avail_table.setItem(row, 2, sev_item)
+            self.avail_table.setItem(row, 2, self._severity_cell(item.severity))
 
             size_str = format_size(item.size_bytes) if item.size_bytes > 0 else "Dynamic"
             s_item = QTableWidgetItem(size_str)
@@ -733,6 +760,7 @@ class AppUpdatesView(QWidget):
 
         self._results = results
         self._all_updates = [u for r in results for u in r.updates]
+        _refresh_nav_badges(self._main)
         self.refresh_btn.setEnabled(True)
 
         total = len(self._all_updates)

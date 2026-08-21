@@ -10,9 +10,11 @@ import platform
 import socket
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
 
 from crapcleaner.config import offline_mode
+from crapcleaner.utils import disk_cache
 from crapcleaner.utils.format import format_size
 from crapcleaner.utils.logs import get_logger
 from crapcleaner.utils.platform import (
@@ -25,6 +27,9 @@ from crapcleaner.utils.platform import (
 )
 
 logger = get_logger("hardware")
+
+#: Key for adapter details kept between launches.
+_GPU_CACHE_NAME = "gpus"
 
 
 @dataclass
@@ -468,6 +473,59 @@ def _get_nvidia_smi_vram() -> dict[str, int]:
 
 
 def _get_gpu_specs() -> list[GpuSpec]:
+    """Adapter details, cached. Callers get their own list to sort or extend."""
+    return list(_probe_gpu_specs())
+
+
+def refresh_hardware_cache() -> None:
+    """Drop cached adapter details so the next read re-probes the hardware."""
+    _probe_gpu_specs.cache_clear()
+    disk_cache.clear(_GPU_CACHE_NAME)
+
+
+def _gpu_signature() -> list:
+    """Adapter names and driver versions, read from the registry in well under a
+    millisecond. It changes exactly when a cached adapter answer stops being true.
+    """
+    try:
+        return sorted(
+            [str(a.get("name", "")), str(a.get("driver_version", ""))]
+            for a in _get_windows_gpu_registry()
+        )
+    except Exception:
+        return []
+
+
+def _gpus_from_payload(payload: Any) -> tuple[GpuSpec, ...]:
+    if not isinstance(payload, list):
+        return ()
+    try:
+        return tuple(GpuSpec(**entry) for entry in payload)
+    except (TypeError, ValueError):
+        # Written by a different version of the model: treat as a miss.
+        return ()
+
+
+@lru_cache(maxsize=1)
+def _probe_gpu_specs() -> tuple[GpuSpec, ...]:
+    """Adapter details, reusing an answer from an earlier launch when still valid.
+
+    The signature is empty on platforms without the registry probe, and an empty
+    signature never matches, so nothing is persisted there.
+    """
+    signature = _gpu_signature()
+    if signature:
+        cached = _gpus_from_payload(disk_cache.load(_GPU_CACHE_NAME, signature))
+        if cached:
+            return cached
+
+    specs = _query_gpu_specs()
+    if signature and specs:
+        disk_cache.store(_GPU_CACHE_NAME, signature, [asdict(spec) for spec in specs])
+    return specs
+
+
+def _query_gpu_specs() -> tuple[GpuSpec, ...]:
     gpus: list[GpuSpec] = []
     if os.name == "nt":
         reg_gpus = _get_windows_gpu_registry()
@@ -612,7 +670,7 @@ def _get_gpu_specs() -> list[GpuSpec]:
         return 1
 
     gpus.sort(key=_gpu_sort_priority)
-    return gpus
+    return tuple(gpus)
 
 
 def _get_drive_specs() -> list[DriveSpec]:

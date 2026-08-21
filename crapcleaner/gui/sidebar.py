@@ -5,7 +5,10 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -41,18 +44,31 @@ NAV_SECTIONS = [
             ("docker", "Docker", "storage"),
         ],
     ),
+    # Eight items under one heading was the longest undifferentiated run in the rail,
+    # and the two update pages sat adjacent reading as near-duplicates of each other.
     (
         "SYSTEM",
         [
             ("specs", "PC Specs", "specs"),
+            ("drives", "Drives", "drives"),
             ("memory", "Memory Cleaner", "memory"),
-            # These four are relabelled per platform by the capability registry;
-            # the text here is only the fallback.
+        ],
+    ),
+    (
+        "MAINTENANCE",
+        [
+            # Startup and Services are relabelled per platform by the capability
+            # registry; the text here is only the fallback.
             ("startup", "Startup Apps", "rocket"),
             ("services", "Services", "tune"),
-            ("app_updates", "App Updates", "system_update"),
-            ("updates", "System Updates", "system_update"),
             ("history", "History", "history"),
+        ],
+    ),
+    (
+        "UPDATES",
+        [
+            ("app_updates", "App Updates", "app_update"),
+            ("updates", "System Updates", "system_update"),
         ],
     ),
     (
@@ -68,7 +84,7 @@ NAV_ITEMS = [item for _, items in NAV_SECTIONS for item in items]
 
 
 class NavButton(QPushButton):
-    """Navigation button using native Qt icon + text with dynamic badge text."""
+    """Navigation button using native Qt icon + text with a right-aligned badge pill."""
 
     def __init__(self, key: str, label: str, icon_name: str, parent=None):
         clean_label = label.replace("&", "&&") if "&&" not in label else label
@@ -83,12 +99,47 @@ class NavButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(38)
         self.setIconSize(QSize(18, 18))
+        # The rail is a fixed width, so a long label must give way rather than push the
+        # button wider than the rail: inside a scroll area an oversized minimum is
+        # honoured, and everything to the right of it - the badge - is clipped away.
+        # Ignored, not a zero minimum: the default policy refuses to shrink below the
+        # text's own hint.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
-    def set_badge(self, text: str):
-        if text:
-            self.setText(f"{self.base_label}  ({text})")
-        else:
-            self.setText(self.base_label)
+        # The badge floats over the button's own right edge rather than being appended to
+        # the label: a label that grows with its count pushes against a fixed-width rail
+        # and cannot be styled or aligned.
+        badge_lay = QHBoxLayout(self)
+        badge_lay.setContentsMargins(0, 0, 9, 0)
+        # The pill is an overlay, not content: without this it adds its own width to the
+        # button's minimum, which pushed the buttons wider than the rail and clipped the
+        # badges off the right edge.
+        badge_lay.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        badge_lay.addStretch(1)
+        self._badge = QLabel("")
+        self._badge.setProperty("navBadge", "true")
+        self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        # Without a fixed height the label takes the whole row and the pill becomes a
+        # block; without a Fixed policy it stretches past the rail's right edge.
+        self._badge.setFixedHeight(18)
+        # A single digit is narrower than twice the corner radius, which collapses
+        # the pill into a square.
+        self._badge.setMinimumWidth(20)
+        self._badge.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._badge.setVisible(False)
+        badge_lay.addWidget(self._badge, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def set_badge(self, text: str, level: str = ""):
+        """`level` picks the pill colour: "" is neutral, "accent" asks for attention."""
+        self._badge.setText(text)
+        self._badge.setVisible(bool(text))
+        self._badge.setProperty("level", level)
+        self._badge.style().unpolish(self._badge)
+        self._badge.style().polish(self._badge)
+        self.setAccessibleDescription(
+            f"Open the {self.base_label.replace('&&', '&')} page" + (f", {text}" if text else "")
+        )
 
 
 class Sidebar(QFrame):
@@ -148,6 +199,24 @@ class Sidebar(QFrame):
         layout.addWidget(brand_card)
         layout.addSpacing(4)
 
+        # Every nav button is a fixed 38px tall, so the rail cannot compress: on a window
+        # shorter than the full list the bottom of it was simply cut off. The brand and
+        # the footer stay pinned and the navigation scrolls between them.
+        nav_scroll = QScrollArea()
+        nav_scroll.setWidgetResizable(True)
+        nav_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Scoped by object name on purpose: a selector-less widget stylesheet applies
+        # to the whole subtree, which blanked the active row's fill and the badge pills.
+        nav_scroll.setObjectName("NavScroll")
+        nav_scroll.setStyleSheet("#NavScroll, #NavScroll > QWidget { background: transparent; }")
+        nav_host = QWidget()
+        nav_host.setObjectName("NavHost")
+        nav_host.setStyleSheet("#NavHost { background: transparent; }")
+        nav_lay = QVBoxLayout(nav_host)
+        nav_lay.setContentsMargins(0, 0, 0, 0)
+        nav_lay.setSpacing(3)
+
         for section_title, items in NAV_SECTIONS:
             visible_items = [
                 (k, lbl, ico)
@@ -158,16 +227,18 @@ class Sidebar(QFrame):
                 continue
             sec_lbl = QLabel(section_title)
             sec_lbl.setProperty("navSection", "true")
-            layout.addWidget(sec_lbl)
+            nav_lay.addWidget(sec_lbl)
             for key, label, icon_name in visible_items:
                 button = NavButton(key, nav_label(key, label), icon_name)
                 button.setIcon(icon(icon_name, theme_color(self._theme, "muted")))
                 button.clicked.connect(lambda _=False, k=key: self.navigation_requested.emit(k))
-                layout.addWidget(button)
+                nav_lay.addWidget(button)
                 self._buttons[key] = button
-            layout.addSpacing(4)
+            nav_lay.addSpacing(4)
 
-        layout.addStretch(1)
+        nav_lay.addStretch(1)
+        nav_scroll.setWidget(nav_host)
+        layout.addWidget(nav_scroll, 1)
 
         footer_card = QFrame()
         footer_card.setProperty("card", "true")
@@ -224,9 +295,9 @@ class Sidebar(QFrame):
             button.style().unpolish(button)
             button.style().polish(button)
 
-    def set_badge(self, key: str, text: str):
+    def set_badge(self, key: str, text: str, level: str = ""):
         if key in self._buttons:
-            self._buttons[key].set_badge(text)
+            self._buttons[key].set_badge(text, level)
 
     def apply_theme(self, theme: str):
         self._theme = theme

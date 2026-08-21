@@ -197,3 +197,52 @@ def test_linux_trash_helpers(tmp_path):
         (trash_dir / "old.txt").write_text("trash")
         assert _empty_linux_trash() is True
         assert not (trash_dir / "old.txt").exists()
+
+
+def test_a_virtual_mount_is_not_reported_as_a_local_disk():
+    """Google Drive answers GetDriveTypeW as a fixed disk; only the device path exposes it."""
+    from unittest.mock import patch
+
+    from crapcleaner.utils import platform as platform_mod
+
+    def fake_query(letter, buffer, size):
+        buffer.value = "\\Device\\Volume{f5ae2bcb-da01-3bf2-8935-408102040811}"
+        return 1
+
+    with patch.object(platform_mod, "is_windows", return_value=True):
+        with patch.object(platform_mod.ctypes, "windll") as windll:
+            windll.kernel32.GetDriveTypeW.return_value = 3  # DRIVE_FIXED
+            windll.kernel32.QueryDosDeviceW.side_effect = fake_query
+            assert platform_mod.windows_drive_display_kind("G:") == "VIRTUAL"
+
+
+def test_a_real_volume_is_local_and_the_system_drive_is_named():
+    from unittest.mock import patch
+
+    from crapcleaner.utils import platform as platform_mod
+
+    def fake_query(letter, buffer, size):
+        buffer.value = "\\Device\\HarddiskVolume3"
+        return 1
+
+    with patch.object(platform_mod, "is_windows", return_value=True):
+        with patch.dict(platform_mod.os.environ, {"SystemDrive": "C:"}):
+            with patch.object(platform_mod.ctypes, "windll") as windll:
+                windll.kernel32.GetDriveTypeW.return_value = 3
+                windll.kernel32.QueryDosDeviceW.side_effect = fake_query
+                assert platform_mod.windows_drive_display_kind("C:") == "SYSTEM"
+                assert platform_mod.windows_drive_display_kind("T:") == "LOCAL"
+
+
+def test_removable_and_network_drives_are_named_without_a_device_lookup():
+    from unittest.mock import patch
+
+    from crapcleaner.utils import platform as platform_mod
+
+    with patch.object(platform_mod, "is_windows", return_value=True):
+        with patch.object(platform_mod.ctypes, "windll") as windll:
+            windll.kernel32.GetDriveTypeW.return_value = 2
+            assert platform_mod.windows_drive_display_kind("E:") == "REMOVABLE"
+            windll.kernel32.GetDriveTypeW.return_value = 4
+            assert platform_mod.windows_drive_display_kind("Z:") == "NETWORK"
+            windll.kernel32.QueryDosDeviceW.assert_not_called()

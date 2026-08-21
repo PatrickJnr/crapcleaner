@@ -124,3 +124,57 @@ class TestGetCategories:
         for cat in finder_cats:
             roots = cat.finder_args[0]
             assert str(tmp_path) in roots
+
+
+def test_a_root_nested_inside_another_is_dropped():
+    """OneDrive lives inside the user profile; scanning both walks it twice."""
+    from crapcleaner.categories.python import _drop_nested_roots
+
+    home = os.path.join("C:", os.sep, "Users", "Sam")
+    onedrive = os.path.join(home, "OneDrive")
+
+    assert _drop_nested_roots([home, onedrive]) == [home]
+    # Order must not matter: the parent wins either way.
+    assert _drop_nested_roots([onedrive, home]) == [home]
+
+
+def test_unrelated_roots_are_all_kept():
+    from crapcleaner.categories.python import _drop_nested_roots
+
+    a = os.path.join("C:", os.sep, "Users", "Sam")
+    b = os.path.join("D:", os.sep, "Projects")
+
+    assert _drop_nested_roots([a, b]) == [a, b]
+
+
+def test_a_sibling_sharing_a_name_prefix_is_not_swallowed():
+    """ "/data" must not be treated as the parent of "/database"."""
+    from crapcleaner.categories.python import _drop_nested_roots
+
+    data = os.path.join("C:", os.sep, "data")
+    database = os.path.join("C:", os.sep, "database")
+
+    assert _drop_nested_roots([data, database]) == [data, database]
+
+
+def test_duplicate_and_empty_roots_collapse():
+    from crapcleaner.categories.python import _drop_nested_roots
+
+    home = os.path.join("C:", os.sep, "Users", "Sam")
+
+    assert _drop_nested_roots([home, home, ""]) == [home]
+
+
+def test_scan_roots_never_contain_a_nested_pair(monkeypatch, tmp_path):
+    """A duplicated subtree reports every artifact in it twice, not just slowly."""
+    from crapcleaner.categories.python import _merge_scan_roots
+
+    profile = tmp_path / "profile"
+    (profile / "OneDrive").mkdir(parents=True)
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("OneDrive", str(profile / "OneDrive"))
+    monkeypatch.setenv("OneDriveConsumer", "")
+
+    roots = _merge_scan_roots([])
+
+    assert roots == [str(profile)]

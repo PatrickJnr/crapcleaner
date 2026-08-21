@@ -152,7 +152,12 @@ def test_scan_and_sidebar_badge_updates(app):
         ],
     )
     window._on_scan_done(sample_report)
-    assert "(" in window.sidebar._buttons["cleanup"].text()
+    # The reclaimable total goes in the badge pill beside the label, not into the
+    # label itself.
+    button = window.sidebar._buttons["cleanup"]
+    assert button.text() == button.base_label
+    assert button._badge.text() == "100.0 MB"
+    assert button._badge.property("level") == "accent"
 
     window.cancel_active_scan()
     window.close()

@@ -217,3 +217,63 @@ def test_add_startup_dialog(qt_app):
     assert name == "Test Tool"
     assert path == "C:\\Tool\\tool.exe"
     assert scope == "USER"
+
+
+def test_an_update_microsoft_never_rated_shows_no_severity_verdict(qt_app):
+    """MSRC rates security bulletins only; "Unspecified" reads as a verdict, not a gap."""
+    win = MainWindow()
+    view = win.updates_view
+
+    rep = _sample_update_report()
+    definition = rep.available_updates[0]
+    definition.title = "Security Intelligence Update for Microsoft Defender Antivirus"
+    definition.severity = "Unspecified"
+    definition.categories = ["Definition Updates", "Microsoft Defender Antivirus"]
+    view._on_updates_loaded(rep)
+
+    cell = view.avail_table.item(0, 2)
+    assert cell.text() == "—"
+    assert "only for security updates" in cell.toolTip()
+    # The category column already says what kind of update it is.
+    assert "Definition Updates" in view.avail_table.item(0, 4).text()
+
+
+def test_a_rated_update_still_shows_its_severity(qt_app):
+    win = MainWindow()
+    view = win.updates_view
+    view._on_updates_loaded(_sample_update_report())
+
+    assert view.avail_table.item(0, 2).text() == "Critical"
+
+
+def test_the_services_page_opens_with_whatever_was_already_inspected(qt_app):
+    """Listing services takes seconds; opening to an empty table wastes what is known."""
+    from unittest.mock import patch
+
+    from crapcleaner.system import services as services_mod
+
+    win = MainWindow()
+    view = win.services_view
+    known = _sample_services()
+
+    with patch.object(services_mod, "cached_services_report", return_value=known):
+        with patch("crapcleaner.gui.workers.ServicesWorker"):
+            view.refresh()
+
+    assert view.table.rowCount() == len(known)
+
+
+def test_a_page_that_already_has_services_is_not_repainted_from_the_cache(qt_app):
+    from unittest.mock import patch
+
+    from crapcleaner.system import services as services_mod
+
+    win = MainWindow()
+    view = win.services_view
+    view._services = _sample_services()
+
+    with patch.object(services_mod, "cached_services_report") as cached:
+        with patch("crapcleaner.gui.workers.ServicesWorker"):
+            view.refresh()
+
+    cached.assert_not_called()

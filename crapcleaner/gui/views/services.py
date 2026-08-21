@@ -251,6 +251,15 @@ class ServicesView(QWidget):
         root.addWidget(scroll)
 
     def refresh(self):
+        # Inspecting services takes seconds. Anything already known is painted now, so
+        # the page opens with content and the query only updates it.
+        if not self._services:
+            from crapcleaner.system.services import cached_services_report
+
+            known = cached_services_report()
+            if known:
+                self._on_services_loaded(known)
+
         self.status_label.setText(f"Reading {self._os_name} {self._unit_plural}...")
         self.refresh_btn.setEnabled(False)
         from crapcleaner.gui.workers import ServicesWorker, stop_worker

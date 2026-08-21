@@ -151,3 +151,132 @@ def test_cli_history(capsys):
     assert ret == 0
     captured = capsys.readouterr()
     assert isinstance(captured.out, str)
+
+
+# --- drives -------------------------------------------------------------------
+
+
+def _one_disk():
+    from crapcleaner.system.drives import PhysicalDiskInfo, VolumeInfo
+
+    return [
+        PhysicalDiskInfo(
+            disk_number=0,
+            model="WD_BLACK SN770 1TB",
+            media_type="NVMe SSD",
+            bus_type="NVMe",
+            health_status="Healthy",
+            temperature_c=41,
+            write_errors=None,
+            volumes=[
+                VolumeInfo(
+                    letter="C:",
+                    filesystem="NTFS",
+                    capacity=1000,
+                    free_space=400,
+                    trim_supported=True,
+                    trim_enabled=True,
+                )
+            ],
+        )
+    ]
+
+
+def test_cli_drives_lists_disks_volumes_and_counters(capsys):
+    with patch("crapcleaner.system.drives.get_drives_report", return_value=_one_disk()):
+        with patch(
+            "crapcleaner.system.drive_actions.scheduled_optimization_status",
+            return_value=("Ready", "Never run."),
+        ):
+            assert run(["--drives"]) == 0
+
+    out = capsys.readouterr().out
+    assert "WD_BLACK SN770 1TB" in out
+    assert "Temp: 41C" in out
+    # A counter the controller did not report is absent, not zero.
+    assert "Write errors" not in out
+    assert "TRIM on" in out
+    assert "Scheduled optimisation: Ready." in out
+
+
+def test_cli_drives_as_json(capsys):
+    with patch("crapcleaner.system.drives.get_drives_report", return_value=_one_disk()):
+        assert run(["--drives", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["model"] == "WD_BLACK SN770 1TB"
+    assert payload[0]["volumes"][0]["letter"] == "C:"
+
+
+def test_cli_drives_hides_what_cannot_be_optimised(capsys):
+    """A cloud mount has no media to inspect, so it is not a drive to report."""
+    from crapcleaner.system.drives import UNMAPPED_DISK_NUMBER, PhysicalDiskInfo, VolumeInfo
+
+    virtual = PhysicalDiskInfo(
+        disk_number=UNMAPPED_DISK_NUMBER,
+        model="Other volumes",
+        media_type="Virtual / Removable",
+        volumes=[VolumeInfo(letter="G:", filesystem="FAT32", capacity=10, free_space=5)],
+    )
+    with patch("crapcleaner.system.drives.get_drives_report", return_value=_one_disk() + [virtual]):
+        with patch(
+            "crapcleaner.system.drive_actions.scheduled_optimization_status",
+            return_value=("Ready", ""),
+        ):
+            assert run(["--drives"]) == 0
+
+    assert "G:" not in capsys.readouterr().out
+
+
+def test_cli_analyse_reports_the_reading_and_fails_loudly(capsys):
+    with patch(
+        "crapcleaner.system.drive_actions.analyze_volume",
+        return_value=(True, "C: is 17% fragmented.", 17),
+    ):
+        assert run(["--analyze-drive", "C"]) == 0
+    assert "17% fragmented" in capsys.readouterr().out
+
+    with patch(
+        "crapcleaner.system.drive_actions.analyze_volume",
+        return_value=(False, "C: could not be analysed. Access denied.", None),
+    ):
+        assert run(["--analyze-drive", "C"]) == 1
+    assert "Access denied" in capsys.readouterr().out
+
+
+def test_cli_optimise_is_a_dry_run_until_asked(capsys):
+    """Optimising can run for hours, so it follows the same default the cleanup does."""
+    with patch("crapcleaner.system.drive_actions.optimize_volume") as optimize:
+        assert run(["--optimize-drive", "C"]) == 0
+
+    optimize.assert_not_called()
+    assert "Dry run" in capsys.readouterr().out
+
+
+def test_cli_optimise_runs_when_asked(capsys):
+    with patch(
+        "crapcleaner.system.drive_actions.optimize_volume",
+        return_value=(True, "C: optimised successfully."),
+    ) as optimize:
+        assert run(["--optimize-drive", "C", "--execute"]) == 0
+
+    optimize.assert_called_once_with("C")
+    assert "optimised successfully" in capsys.readouterr().out
+
+
+def test_cli_drive_actions_do_not_open_the_gui():
+    """A flag left out of the launch check starts the interface instead of running."""
+    for argv in (["--drives"], ["--analyze-drive", "C"], ["--optimize-drive", "C"]):
+        with patch("crapcleaner.gui.app.run_gui") as gui:
+            with patch("crapcleaner.system.drives.get_drives_report", return_value=_one_disk()):
+                with patch(
+                    "crapcleaner.system.drive_actions.scheduled_optimization_status",
+                    return_value=("Ready", ""),
+                ):
+                    with patch(
+                        "crapcleaner.system.drive_actions.analyze_volume",
+                        return_value=(True, "ok", 1),
+                    ):
+                        run(argv)
+
+        gui.assert_not_called(), argv

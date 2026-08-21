@@ -198,3 +198,73 @@ def test_linux_trim_enabled_needs_discard_or_the_fstrim_timer(monkeypatch):
 
     # No systemd to ask: discard is supported, but whether it ever runs is unknowable.
     assert _linux_disks(monkeypatch)[0].trim_enabled is None
+
+
+def test_a_withheld_reliability_counter_reads_as_unknown_not_zero():
+    """Get-StorageReliabilityCounter needs elevation; a missing reading is not a healthy 0."""
+    from crapcleaner.system.storage_health import _as_counter
+
+    assert _as_counter(None) is None
+    assert _as_counter("") is None
+    assert _as_counter("not-a-number") is None
+    assert _as_counter(0) == 0
+    assert _as_counter("41") == 41
+
+
+def test_disk_health_serialises_its_reliability_counters():
+    from crapcleaner.system.storage_health import DiskHealthInfo
+
+    disk = DiskHealthInfo(
+        device_id="C:",
+        model="WD_BLACK SN770",
+        media_type="NVMe SSD",
+        bus_type="NVMe",
+        capacity=1000,
+        free_space=500,
+        filesystem="NTFS",
+        trim_supported=True,
+        trim_enabled=True,
+        health_status="Healthy",
+        operational_status="OK",
+        temperature_c=41,
+        wear_percent=3,
+    )
+    data = disk.to_dict()
+
+    assert data["temperature_c"] == 41
+    assert data["wear_percent"] == 3
+    # Counters this drive did not report must survive the round trip as unknown.
+    assert data["power_on_hours"] is None
+    assert data["read_errors"] is None
+
+
+def test_a_zero_lifetime_also_bypasses_the_stored_report():
+    """ttl=0 means "read it fresh", which the persistent layer must not quietly override."""
+    from unittest.mock import patch
+
+    from crapcleaner.system import storage_health as sh
+
+    sample = [
+        sh.DiskHealthInfo(
+            device_id="C:",
+            model="WD",
+            media_type="SSD",
+            bus_type="NVMe",
+            capacity=10,
+            free_space=5,
+            filesystem="NTFS",
+            trim_supported=True,
+            trim_enabled=True,
+            health_status="Healthy",
+            operational_status="OK",
+        )
+    ]
+    with patch.object(sh, "list_drives", return_value=["C:"]):
+        with patch.object(sh, "get_drive_info", return_value={"total": 10, "free": 5}):
+            with patch.object(sh, "_query_storage_health", return_value=sample) as query:
+                sh.clear_storage_health_cache()
+                sh.get_storage_health_report()
+                sh._cached_report = None
+                sh.get_storage_health_report(ttl=0)
+
+    assert query.call_count == 2

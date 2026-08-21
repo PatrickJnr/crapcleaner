@@ -2,6 +2,7 @@
 
 import json
 import time
+from unittest.mock import patch
 
 from crapcleaner.cli import run
 from crapcleaner.system.hardware import (
@@ -223,3 +224,52 @@ def test_offline_mode_skips_the_hostname_lookup(monkeypatch):
     monkeypatch.setattr(hardware, "offline_mode", lambda: False)
     assert hardware._get_network_specs()[0].ip_address == "10.0.0.5"
     assert lookups
+
+
+def test_the_adapter_probe_is_cached_and_clearable():
+    """The GPU probe shells out to WMI and nvidia-smi, and dominates a specs refresh."""
+    from crapcleaner.system import hardware
+
+    calls = []
+    hardware._probe_gpu_specs.cache_clear()
+
+    with patch.object(
+        hardware, "_get_windows_gpu_registry", side_effect=lambda: calls.append(1) or []
+    ):
+        hardware._get_gpu_specs()
+        hardware._get_gpu_specs()
+        hardware._get_gpu_specs()
+
+    assert hardware._probe_gpu_specs.cache_info().misses == 1
+    hardware.refresh_hardware_cache()
+    assert hardware._probe_gpu_specs.cache_info().misses == 0
+
+
+def test_each_caller_gets_its_own_adapter_list():
+    """A shared list would let one subsystem's sort or append corrupt the others."""
+    from crapcleaner.system import hardware
+
+    with patch.object(hardware, "_probe_gpu_specs", lambda: (GpuSpec(name="Cached"),)):
+        first = hardware._get_gpu_specs()
+        second = hardware._get_gpu_specs()
+
+        assert first is not second
+        first.append(GpuSpec(name="scratch"))
+        assert len(second) == 1
+
+
+def test_a_cached_probe_still_reports_live_drive_figures():
+    """Caching the adapter probe must not freeze the values that actually move."""
+    from crapcleaner.system import hardware
+
+    with patch.object(hardware, "_probe_gpu_specs", lambda: (GpuSpec(name="Cached"),)):
+        with patch.object(
+            hardware,
+            "_get_drive_specs",
+            side_effect=[[DriveSpec(free_bytes=1)], [DriveSpec(free_bytes=2)]],
+        ):
+            first = hardware.get_system_specs()
+            second = hardware.get_system_specs()
+
+    assert first.drives[0].free_bytes == 1
+    assert second.drives[0].free_bytes == 2

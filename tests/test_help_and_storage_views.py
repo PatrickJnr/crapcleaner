@@ -77,28 +77,3 @@ def test_is_worker_running_and_stop_worker_with_deleted_qobject():
     # Must return False, not raise libshiboken's "Internal C++ object already deleted".
     assert is_worker_running(worker) is False
     stop_worker(worker)
-
-
-def test_storage_breakdown_refresh_health_lifecycle_and_deleted_worker():
-    import shiboken6
-
-    from crapcleaner.gui.workers import HealthWorker
-
-    mock_main = MagicMock()
-    view = StorageBreakdownView(mock_main)
-
-    view.refresh_health()
-    worker1 = view._health_worker
-    assert worker1 is not None
-
-    # Free the C++ side the way Qt's deleteLater() does.
-    worker_to_delete = HealthWorker(parent=view)
-    shiboken6.delete(worker_to_delete)
-    view._health_worker = worker_to_delete
-
-    # The second call must survive the stale worker reference.
-    view.refresh_health()
-    assert view._health_worker is not worker_to_delete
-    if view._health_worker is not None:
-        view._health_worker.wait(2000)
-    view.close()

@@ -233,6 +233,21 @@ def _build_stylesheet(p: dict) -> str:
         background-color: {p["surface"]};
         color: {p["text"]};
     }}
+    QLabel[navBadge="true"] {{
+        background: transparent;
+        color: {p["muted"]};
+        padding: 0 2px;
+        font-size: 11px;
+        font-weight: 600;
+    }}
+    QLabel[navBadge="true"][level="accent"] {{
+        background-color: {p["accent"]};
+        color: {p["on_accent"]};
+        border-radius: 8px;
+        padding: 0 7px;
+        font-size: 10px;
+        font-weight: 700;
+    }}
     QPushButton[nav="true"][active="true"] {{
         background-color: {p["accent_soft"]};
         color: {p["accent"]};

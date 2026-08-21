@@ -794,3 +794,161 @@ class DiagnosticsWorker(_Worker):
             self._emit(self.done, write_diagnostics_bundle(self._destination))
         except Exception as exc:  # pragma: no cover - defensive
             self._emit(self.failed, str(exc))
+
+
+class DrivesWorker(_Worker):
+    """Loads the physical-disk inventory off the main thread."""
+
+    done = Signal(list, str, str)  # (list[PhysicalDiskInfo], schedule_state, schedule_detail)
+    failed = Signal(str)
+
+    def __init__(self, force_refresh: bool = False, parent=None):
+        super().__init__(parent)
+        self._force_refresh = force_refresh
+
+    def run(self):
+        try:
+            from crapcleaner.system.drive_actions import scheduled_optimization_status
+            from crapcleaner.system.drives import get_drives_report
+
+            drives = get_drives_report(force_refresh=self._force_refresh)
+            try:
+                state, detail = scheduled_optimization_status()
+            except Exception:
+                state, detail = "Unknown", ""
+            self._emit(self.done, drives, state, detail)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._emit(self.failed, str(exc))
+
+
+class DriveAnalyzeWorker(_Worker):
+    """Measures fragmentation on one volume off the main thread."""
+
+    done = Signal(str, bool, str, object)  # (letter, ok, message, percent|None)
+    failed = Signal(str)
+
+    def __init__(self, letter: str, parent=None):
+        super().__init__(parent)
+        self._letter = letter
+
+    def run(self):
+        try:
+            from crapcleaner.system.drive_actions import analyze_volume
+
+            ok, message, percent = analyze_volume(self._letter)
+            self._emit(self.done, self._letter, ok, message, percent)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._emit(self.failed, str(exc))
+
+
+class DriveOptimizeWorker(_Worker):
+    """Runs Windows' volume optimisation, which can take hours on a large HDD."""
+
+    done = Signal(str, bool, str)  # (letter, ok, message)
+    failed = Signal(str)
+
+    def __init__(self, letter: str, parent=None):
+        super().__init__(parent)
+        self._letter = letter
+
+    def run(self):
+        try:
+            from crapcleaner.system.drive_actions import optimize_volume
+
+            ok, message = optimize_volume(self._letter)
+            self._emit(self.done, self._letter, ok, message)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._emit(self.failed, str(exc))
+
+
+class DriveBulkWorker(_Worker):
+    """Runs one drive action across several volumes, one at a time.
+
+    Sequential rather than parallel: these are disk-bound operations, and running them
+    together would only make each one slower. Stopping is honoured between volumes,
+    since Windows offers no way to abort an optimisation already under way.
+    """
+
+    progress = Signal(str, bool, str, object)  # (letter, ok, message, percent|None)
+    started_volume = Signal(str, int, int)  # (letter, index, total)
+    done = Signal(int, int)  # (succeeded, attempted)
+    failed = Signal(str)
+
+    def __init__(self, letters: list[str], action: str, parent=None):
+        super().__init__(parent)
+        self._letters = list(letters)
+        self._action = action
+
+    def run(self):
+        try:
+            from crapcleaner.system.drive_actions import analyze_volume, optimize_volume
+
+            succeeded = 0
+            attempted = 0
+            total = len(self._letters)
+
+            for index, letter in enumerate(self._letters, start=1):
+                if self.stop_requested:
+                    break
+                self._emit(self.started_volume, letter, index, total)
+
+                if self._action == "analyze":
+                    ok, message, percent = analyze_volume(letter)
+                else:
+                    ok, message = optimize_volume(letter)
+                    percent = None
+
+                attempted += 1
+                succeeded += 1 if ok else 0
+                self._emit(self.progress, letter, ok, message, percent)
+
+            self._emit(self.done, succeeded, attempted)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._emit(self.failed, str(exc))
+
+
+class NavCountsWorker(_Worker):
+    """Counts for the sidebar badges, gathered off the GUI thread at launch.
+
+    Only probes that are cheap or already cached belong here. An update check is
+    neither, so the update badges are filled in by their own views instead.
+    """
+
+    done = Signal(dict)
+
+    def run(self):
+        counts: dict[str, str] = {}
+        try:
+            from crapcleaner.system.startup import get_startup_items
+
+            enabled = sum(1 for item in get_startup_items() if item.enabled)
+            if enabled:
+                counts["startup"] = str(enabled)
+        except Exception:
+            pass
+
+        if self.stop_requested:
+            return
+
+        try:
+            from crapcleaner.system.drives import get_drives_report
+
+            disks = [d for d in get_drives_report() if not d.is_unmapped]
+            if disks:
+                counts["drives"] = str(len(disks))
+        except Exception:
+            pass
+
+        if self.stop_requested:
+            return
+
+        try:
+            from crapcleaner.system.services import get_services_report
+
+            running = sum(1 for svc in get_services_report() if svc.status == "Running")
+            if running:
+                counts["services"] = str(running)
+        except Exception:
+            pass
+
+        self._emit(self.done, counts)

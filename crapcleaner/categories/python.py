@@ -336,12 +336,39 @@ def _default_scan_roots() -> list[str]:
     return [r for r in roots if r]
 
 
+def _drop_nested_roots(roots: list[str]) -> list[str]:
+    """Remove any root already covered by another one.
+
+    OneDrive lives inside the user profile, so scanning both walks that subtree twice
+    and reports every artifact in it twice.
+    """
+    normalised = [
+        (os.path.normcase(os.path.normpath(os.path.abspath(root))), root) for root in roots if root
+    ]
+
+    kept: list[str] = []
+    seen: set[str] = set()
+    # Original order is preserved: it decides which root reports a shared artifact.
+    for real, original in normalised:
+        if real in seen:
+            continue
+        # The separator matters: "/data" is not the parent of "/database".
+        if any(
+            other != real and real.startswith(other.rstrip(os.sep) + os.sep)
+            for other, _ in normalised
+        ):
+            continue
+        seen.add(real)
+        kept.append(original)
+    return kept
+
+
 def _merge_scan_roots(configured: list[str]) -> list[str]:
     merged = list(configured)
     for root in _default_scan_roots():
         if root not in merged:
             merged.append(root)
-    return merged
+    return _drop_nested_roots(merged)
 
 
 def _merge_all_drives(roots: list[str]) -> list[str]:
@@ -349,4 +376,4 @@ def _merge_all_drives(roots: list[str]) -> list[str]:
     for drive in list_drives():
         if drive not in merged:
             merged.append(drive)
-    return merged
+    return _drop_nested_roots(merged)

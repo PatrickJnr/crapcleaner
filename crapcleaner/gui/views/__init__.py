@@ -39,6 +39,9 @@ from crapcleaner.gui.views.dashboard import (
 from crapcleaner.gui.views.docker import (
     DockerView,
 )
+from crapcleaner.gui.views.drives import (
+    DrivesView,
+)
 from crapcleaner.gui.views.duplicates import (
     _MAX_DUPLICATE_GROUP_ROWS,
     _MAX_DUPLICATE_TOOLTIP_FILES,
@@ -105,6 +108,7 @@ __all__ = [
     "SettingsView",
     "SkeletonBlock",
     "SpecsView",
+    "DrivesView",
     "SquircleAvatarWidget",
     "StartupView",
     "StorageBreakdownView",

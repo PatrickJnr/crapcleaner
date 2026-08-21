@@ -41,8 +41,8 @@ from crapcleaner.utils.format import (
     format_size,
 )
 from crapcleaner.utils.platform import (
+    drive_display_kind,
     is_windows,
-    linux_drive_display_kind,
     linux_drive_display_name,
 )
 
@@ -430,10 +430,7 @@ class DriveCard(QFrame):
         top_row.addWidget(self.title)
         top_row.addStretch(1)
 
-        if is_windows():
-            badge_text = "SYSTEM" if drive.upper().startswith("C") else "LOCAL"
-        else:
-            badge_text = linux_drive_display_kind(drive)
+        badge_text = drive_display_kind(drive)
         self.type_badge = QLabel(badge_text)
         self.type_badge.setProperty("badge", "true")
         self.type_badge.setStyleSheet("font-size: 9px; padding: 1px 5px;")

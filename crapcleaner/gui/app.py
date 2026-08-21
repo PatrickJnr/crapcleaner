@@ -30,6 +30,7 @@ from crapcleaner.gui.views import (
     CleanupView,
     DashboardView,
     DockerView,
+    DrivesView,
     DuplicatesView,
     HistoryView,
     LargeFilesView,
@@ -74,6 +75,7 @@ class MainWindow(QMainWindow):
         "ai",
         "docker",
         "specs",
+        "drives",
         "memory",
     )
     # Pages whose availability the capability registry decides, in navigation order.
@@ -100,6 +102,9 @@ class MainWindow(QMainWindow):
         self._scan_cache = None
         self._restore_geometry()
         self._last_highlighted: str = ""
+        #: nav key -> badge text, from whichever source knew the number last.
+        self._nav_counts: dict[str, str] = {}
+        self._counts_worker = None
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -156,6 +161,7 @@ class MainWindow(QMainWindow):
         "ai_view": ("ai", AiDataView),
         "docker_view": ("docker", DockerView),
         "specs_view": ("specs", SpecsView),
+        "drives_view": ("drives", DrivesView),
         "memory_view": ("memory", MemoryView),
         "startup_view": (STARTUP, StartupView),
         "services_view": (SERVICES, ServicesView),
@@ -286,6 +292,7 @@ class MainWindow(QMainWindow):
         self._ensure_page(key)
         self.stack.setCurrentIndex(self._PAGE_KEYS.index(key))
         self.sidebar.set_active(key)
+        self.refresh_nav_badges()
         if key == "dashboard":
             self.dashboard.refresh()
         elif key == "history":
@@ -293,8 +300,9 @@ class MainWindow(QMainWindow):
         elif key == "specs":
             if self.specs_view._specs is None:
                 self.specs_view.refresh_specs()
-        elif key == "storage":
-            self.storage_view.refresh_health()
+        elif key == "drives":
+            if not self.drives_view._drives:
+                self.drives_view.refresh_drives()
         elif key == "memory":
             self.memory_view.refresh()
         elif key == "startup":
@@ -309,6 +317,73 @@ class MainWindow(QMainWindow):
         elif key == "updates" and self.updates_view is not None:
             if not self.updates_view._report:
                 self.updates_view.refresh()
+
+    # --- sidebar badges -------------------------------------------------------
+
+    #: page key -> the attribute holding its loaded data, and how to count it. A page
+    #: that was never opened holds nothing and contributes nothing, so this is read from
+    #: `self._views` rather than through the attributes, which would build the page.
+    _BADGE_SOURCES = {
+        "startup": ("_items", lambda items: sum(1 for i in items if i.enabled)),
+        "services": ("_services", lambda svcs: sum(1 for s in svcs if s.status == "Running")),
+        "drives": ("_drives", lambda disks: sum(1 for d in disks if not d.is_unmapped)),
+        "app_updates": ("_all_updates", len),
+        "updates": ("_report", lambda report: len(report.available_updates)),
+    }
+
+    #: Badges that mean "something is waiting for you" rather than "here is a number".
+    _ATTENTION_BADGES = ("updates", "app_updates", "cleanup")
+
+    def showEvent(self, event):
+        """Count once the window is actually on screen.
+
+        Not in __init__: the probes are real I/O, and a window that is constructed but
+        never shown - every test that builds one - has no sidebar for them to fill.
+        """
+        super().showEvent(event)
+        self._start_nav_counts()
+
+    def _start_nav_counts(self):
+        """Fill the badges once at launch from probes that are cheap or already cached."""
+        if self._counts_worker is not None:
+            return
+        from crapcleaner.gui.workers import NavCountsWorker
+
+        worker = NavCountsWorker(parent=self)
+        self._counts_worker = worker
+        worker.done.connect(self._on_nav_counts)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_nav_counts(self, counts: dict):
+        for key, text in counts.items():
+            # A page the user has since opened knows better than a launch-time probe.
+            self._nav_counts.setdefault(key, text)
+        self.refresh_nav_badges()
+
+    def refresh_nav_badges(self):
+        """Push the current counts onto the sidebar, preferring live view data."""
+        counts = dict(self._nav_counts)
+
+        for key, (field, summarise) in self._BADGE_SOURCES.items():
+            view = self._views.get(key)
+            if view is None:
+                continue
+            data = getattr(view, field, None)
+            if data is None:
+                continue
+            # An opened page is authoritative, including when it found nothing: a stale
+            # "3 updates" after installing all three is worse than no badge.
+            try:
+                total = summarise(data)
+            except Exception:
+                continue
+            counts[key] = str(total) if total else ""
+
+        for key in self.sidebar._buttons:
+            text = counts.get(key, "")
+            level = "accent" if text and key in self._ATTENTION_BADGES else ""
+            self.sidebar.set_badge(key, text, level)
 
     def review_and_clean(self):
         self.navigate("cleanup")
@@ -502,10 +577,10 @@ class MainWindow(QMainWindow):
         )
         self.history_view.refresh()
 
-        if report.total_size > 0:
-            self.sidebar.set_badge("cleanup", format_size(report.total_size))
-        else:
-            self.sidebar.set_badge("cleanup", "")
+        self._nav_counts["cleanup"] = (
+            format_size(report.total_size) if report.total_size > 0 else ""
+        )
+        self.refresh_nav_badges()
 
         if report.cancelled:
             self.statusBar().showMessage("Scan cancelled.", 5000)

@@ -119,6 +119,18 @@ def get_services_report(force_refresh: bool = False) -> list[ServiceItem]:
     return list(services)
 
 
+def cached_services_report() -> list[ServiceItem] | None:
+    """The last inspection, however old, or None if there has not been one.
+
+    Age is deliberately ignored where `get_services_report` honours it: the caller
+    paints this immediately and refreshes right after, and a list a minute old beats an
+    empty table for the four seconds the real query takes.
+    """
+    with _cache_lock:
+        cached = _cached_services
+    return list(cached[1]) if cached is not None else None
+
+
 def clear_services_cache() -> None:
     global _cached_services
     with _cache_lock:

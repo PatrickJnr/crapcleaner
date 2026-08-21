@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from crapcleaner.utils import disk_cache
 from crapcleaner.utils.platform import (
     get_drive_info,
     is_linux,
@@ -35,6 +36,14 @@ class DiskHealthInfo:
     trim_enabled: bool | None
     health_status: str  # Healthy, Warning, Unhealthy, Unknown
     operational_status: str
+    #: Reliability counters, where the drive reports them and the caller is elevated.
+    #: None means "not available", which is not the same as a zero reading.
+    temperature_c: int | None = None
+    wear_percent: int | None = None
+    power_on_hours: int | None = None
+    start_stop_cycles: int | None = None
+    read_errors: int | None = None
+    write_errors: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,8 +58,27 @@ class DiskHealthInfo:
             "trim_enabled": self.trim_enabled,
             "health_status": self.health_status,
             "operational_status": self.operational_status,
+            "temperature_c": self.temperature_c,
+            "wear_percent": self.wear_percent,
+            "power_on_hours": self.power_on_hours,
+            "start_stop_cycles": self.start_stop_cycles,
+            "read_errors": self.read_errors,
+            "write_errors": self.write_errors,
         }
 
+
+def _as_counter(value: Any) -> int | None:
+    """A reliability reading, or None when the drive or the caller's rights withheld it."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+#: Key for the health report kept between launches.
+_CACHE_NAME = "storage_health"
 
 HEALTH_CACHE_TTL = 60.0
 
@@ -76,22 +104,67 @@ def get_storage_health_report(
     """
     global _cached_report
     now = time.monotonic()
+    signature = _drive_signature()
+
     if not force_refresh:
         with _cache_lock:
             cached = _cached_report
         if cached is not None and now - cached[0] < ttl:
             return list(cached[1])
 
+        # An answer from an earlier launch is still true while the same drives are
+        # attached, and re-querying costs seconds of PowerShell. A caller asking for a
+        # zero lifetime wants a fresh reading, so the stored one is skipped too.
+        if ttl > 0:
+            stored = _from_payload(disk_cache.load(_CACHE_NAME, signature))
+            if stored:
+                with _cache_lock:
+                    _cached_report = (now, stored)
+                return _refresh_free_space(stored)
+
     report = _query_storage_health()
     with _cache_lock:
         _cached_report = (time.monotonic(), report)
+    if report:
+        disk_cache.store(_CACHE_NAME, signature, [d.to_dict() for d in report])
     return list(report)
+
+
+def _drive_signature() -> list[str]:
+    """The attached drives, which is what decides whether a cached answer still holds."""
+    try:
+        return sorted(list_drives())
+    except Exception:
+        return []
+
+
+def _from_payload(payload: Any) -> list[DiskHealthInfo]:
+    if not isinstance(payload, list):
+        return []
+    try:
+        return [DiskHealthInfo(**entry) for entry in payload]
+    except (TypeError, ValueError):
+        # Written by a different version of the model: treat as a miss.
+        return []
+
+
+def _refresh_free_space(disks: list[DiskHealthInfo]) -> list[DiskHealthInfo]:
+    """Capacity and free space move constantly, so they are never served from a cache."""
+    for disk in disks:
+        try:
+            info = get_drive_info(disk.device_id)
+        except Exception:
+            continue
+        disk.capacity = int(info.get("total") or disk.capacity)
+        disk.free_space = int(info.get("free") or disk.free_space)
+    return list(disks)
 
 
 def clear_storage_health_cache() -> None:
     global _cached_report
     with _cache_lock:
         _cached_report = None
+    disk_cache.clear(_CACHE_NAME)
 
 
 _FSUTIL_TRIM = re.compile(r"(?:([A-Za-z]+)\s+)?DisableDeleteNotify\s*=\s*(\d+)")
@@ -136,6 +209,11 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
         "Get-Partition | Where-Object DriveLetter | ForEach-Object { "
         "$p = $_; "
         "$pd = Get-PhysicalDisk | Where-Object DeviceId -eq $p.DiskNumber; "
+        # Reliability counters need elevation and are not offered by every controller,
+        # so a null here means "not available", never a healthy zero.
+        "$rc = $null; "
+        "if ($pd) { try { $rc = $pd | Get-StorageReliabilityCounter -ErrorAction Stop } "
+        "catch { $rc = $null } }; "
         "[PSCustomObject]@{"
         'DriveLetter = "$($p.DriveLetter):"; '
         "DiskNumber = $p.DiskNumber; "
@@ -145,9 +223,15 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
         "Size = $p.Size; "
         'HealthStatus = if ($pd) { $pd.HealthStatus } else { "Unknown" }; '
         'OperationalStatus = if ($pd) { $pd.OperationalStatus } else { "Unknown" }; '
+        "Temperature = if ($rc) { $rc.Temperature } else { $null }; "
+        "Wear = if ($rc) { $rc.Wear } else { $null }; "
+        "PowerOnHours = if ($rc) { $rc.PowerOnHours } else { $null }; "
+        "StartStopCycles = if ($rc) { $rc.StartStopCycleCount } else { $null }; "
+        "ReadErrors = if ($rc) { $rc.ReadErrorsTotal } else { $null }; "
+        "WriteErrors = if ($rc) { $rc.WriteErrorsTotal } else { $null }; "
         "} } | ConvertTo-Json"
     )
-    result = run_command(["powershell", "-NoProfile", "-Command", ps_cmd], timeout=8.0)
+    result = run_command(["powershell", "-NoProfile", "-Command", ps_cmd], timeout=25.0)
     raw_json = str(result.get("stdout", "")).strip()
 
     seen_drives: set[str] = set()
@@ -206,6 +290,12 @@ def _get_windows_storage_health() -> list[DiskHealthInfo]:
                         trim_enabled=trim_en if is_solid_state else False,
                         health_status=health,
                         operational_status=op_status,
+                        temperature_c=_as_counter(item.get("Temperature")),
+                        wear_percent=_as_counter(item.get("Wear")),
+                        power_on_hours=_as_counter(item.get("PowerOnHours")),
+                        start_stop_cycles=_as_counter(item.get("StartStopCycles")),
+                        read_errors=_as_counter(item.get("ReadErrors")),
+                        write_errors=_as_counter(item.get("WriteErrors")),
                     )
                 )
         except Exception:

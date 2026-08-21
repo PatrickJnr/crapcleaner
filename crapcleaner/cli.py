@@ -40,6 +40,24 @@ from crapcleaner.utils.platform import (
 )
 
 
+def _drive_counters(disk: Any) -> str:
+    """The reliability counters this drive actually reported, as one line.
+
+    A counter the controller does not expose is absent, not zero, so it is left out
+    rather than printed as a reading.
+    """
+    readings = [
+        ("Temp", disk.temperature_c, "C"),
+        ("Wear", disk.wear_percent, "%"),
+        ("Powered on", f"{disk.power_on_hours:,}" if disk.power_on_hours else None, "h"),
+        ("Read errors", disk.read_errors, ""),
+        ("Write errors", disk.write_errors, ""),
+    ]
+    return "  ".join(
+        f"{name}: {value}{suffix}" for name, value, suffix in readings if value is not None
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="crapcleaner",
@@ -105,6 +123,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--disk-health",
         action="store_true",
         help="Inspect storage device health, SSD/HDD media type, and TRIM status.",
+    )
+    parser.add_argument(
+        "--drives",
+        action="store_true",
+        help="Physical disks with their volumes, reliability counters, and TRIM state.",
+    )
+    parser.add_argument(
+        "--analyze-drive",
+        metavar="VOLUME",
+        help="Measure fragmentation on one volume (a drive letter, or a mount point on Linux).",
+    )
+    parser.add_argument(
+        "--optimize-drive",
+        metavar="VOLUME",
+        help=(
+            "Optimise one volume: retrim a solid-state drive or defragment a hard disk. "
+            "Dry run unless --execute."
+        ),
     )
     parser.add_argument(
         "--storage",
@@ -592,6 +628,9 @@ def run(argv: list[str] | None = None) -> int:
             args.recycle_bin,
             args.empty_recycle_bin,
             args.disk_health,
+            args.drives,
+            args.analyze_drive,
+            args.optimize_drive,
             args.storage is not None,
             args.file_types is not None,
             args.large_files,
@@ -874,6 +913,81 @@ def run(argv: list[str] | None = None) -> int:
                 print(f"  TRIM Status: {trim_str}")
                 print("-" * 80)
         return 0
+
+    if args.drives:
+        from crapcleaner.system.drive_actions import scheduled_optimization_status
+        from crapcleaner.system.drives import get_drives_report
+
+        disks = [d for d in get_drives_report() if not d.is_unmapped]
+        if args.export:
+            rendered = export_report(
+                disks,
+                report_type="drives",
+                export_format=args.export,
+                output_path=args.output,
+            )
+            if not args.output:
+                print(rendered)
+            return 0
+        if args.json:
+            print(json.dumps([d.to_dict() for d in disks], indent=2))
+            return 0
+
+        state, detail = scheduled_optimization_status()
+        print("=" * 80)
+        print(" Drives")
+        print("=" * 80)
+        print(f"Scheduled optimisation: {state}. {detail}".rstrip())
+        print("-" * 80)
+        for disk in disks:
+            print(f"{disk.model}  [{disk.media_type} / {disk.bus_type}]  {disk.health_status}")
+            counters = _drive_counters(disk)
+            if counters:
+                print(f"  {counters}")
+            elif not is_admin():
+                print("  Reliability counters: unavailable, needs admin")
+            else:
+                print("  Reliability counters: not reported by this drive")
+            for volume in disk.volumes:
+                used = max(volume.capacity - volume.free_space, 0)
+                trim = "on" if volume.trim_enabled else ("off" if volume.trim_supported else "n/a")
+                print(
+                    f"  {volume.letter:<8} {volume.filesystem or '-':<6} "
+                    f"{format_size(used)} of {format_size(volume.capacity)}"
+                    f"  ({format_size(volume.free_space)} free)  TRIM {trim}"
+                )
+            print("-" * 80)
+        return 0
+
+    if args.analyze_drive:
+        from crapcleaner.system.drive_actions import analyze_volume
+
+        ok, message, reading = analyze_volume(args.analyze_drive)
+        if args.json:
+            print(json.dumps({"ok": ok, "message": message, "fragmentation": reading}, indent=2))
+        else:
+            print(message)
+        return 0 if ok else 1
+
+    if args.optimize_drive:
+        from crapcleaner.system.drive_actions import optimize_volume
+
+        if not args.execute:
+            # The same default the cleanup and memory actions use: say what would run,
+            # and make the caller ask for it. This one can take hours on a hard disk.
+            print(
+                f"Dry run: would optimise {args.optimize_drive} - "
+                "retrim a solid-state drive, or defragment a hard disk. "
+                "Re-run with --execute to perform it."
+            )
+            return 0
+
+        ok, message = optimize_volume(args.optimize_drive)
+        if args.json:
+            print(json.dumps({"ok": ok, "message": message}, indent=2))
+        else:
+            print(message)
+        return 0 if ok else 1
 
     if args.storage is not None:
         target_path = (

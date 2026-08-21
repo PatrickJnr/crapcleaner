@@ -66,7 +66,7 @@ def get_drive_info(drive: str = "C:") -> dict[str, int | str]:
             "label": label,
             "filesystem": filesystem,
             "display_name": label or f"Drive {drive.rstrip(chr(92))}",
-            "display_kind": "LOCAL",
+            "display_kind": windows_drive_display_kind(drive),
         }
 
     target = drive if drive and drive != "C:" else "/"
@@ -216,6 +216,50 @@ def linux_drive_display_name(mount_point: str) -> str:
         tail = normalized[len("/var/home/") :].strip("/")
         return f"Home Volume ({tail})" if tail else "Home Volume"
     return normalized
+
+
+#: GetDriveTypeW results worth naming; anything else is decided by the device path.
+_WINDOWS_DRIVE_TYPES = {2: "REMOVABLE", 4: "NETWORK", 5: "OPTICAL", 6: "RAMDISK"}
+
+
+def windows_drive_display_kind(drive: str) -> str:
+    """Classify a Windows drive letter.
+
+    GetDriveTypeW reports a virtual mount such as Google Drive as a fixed disk, so a
+    fixed result is confirmed against the device it resolves to: a real volume maps to
+    ``\\Device\\HarddiskVolumeN``, while a virtual one maps to a volume GUID.
+    """
+    if not is_windows():
+        return "LOCAL"
+    letter = (drive or "").strip().rstrip(":\\/")[:1].upper()
+    if not letter.isalpha():
+        return "LOCAL"
+
+    try:
+        import ctypes
+
+        kind = _WINDOWS_DRIVE_TYPES.get(
+            ctypes.windll.kernel32.GetDriveTypeW(f"{letter}:\\"),
+        )
+        if kind:
+            return kind
+
+        buffer = ctypes.create_unicode_buffer(1024)
+        if not ctypes.windll.kernel32.QueryDosDeviceW(f"{letter}:", buffer, 1024):
+            return "LOCAL"
+        target = buffer.value
+    except (AttributeError, OSError, ValueError):
+        return "LOCAL"
+
+    if not target.startswith("\\Device\\HarddiskVolume"):
+        return "VIRTUAL"
+    system_drive = os.environ.get("SystemDrive", "C:")[:1].upper()
+    return "SYSTEM" if letter == system_drive else "LOCAL"
+
+
+def drive_display_kind(drive: str) -> str:
+    """The badge for one drive on whichever platform is running."""
+    return windows_drive_display_kind(drive) if is_windows() else linux_drive_display_kind(drive)
 
 
 def linux_drive_display_kind(mount_point: str) -> str:

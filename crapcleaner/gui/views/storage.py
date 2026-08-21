@@ -346,7 +346,10 @@ def _worst(row: list[float], side: float) -> float:
 
 
 class StorageBreakdownView(QWidget):
-    """Hierarchical storage analyzer, file type breakdown, and drive health explorer."""
+    """Hierarchical storage analyzer and file type breakdown.
+
+    Drive hardware and health live in the Drives view.
+    """
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
@@ -355,8 +358,6 @@ class StorageBreakdownView(QWidget):
         self._current_node = None
         self._file_types_data = []
         self._vm_data = []
-        self._health_data = []
-        self._health_worker = None
         self._expand_worker: QThread | None = None
         self._grid_stack = []
         self._build_ui()
@@ -369,7 +370,7 @@ class StorageBreakdownView(QWidget):
         root_lay.addWidget(
             page_header(
                 "Storage Breakdown & Drive Analyzer",
-                "Explore disk consumption hierarchy, inspect distribution by file type, and diagnose storage health.",
+                "Explore disk consumption hierarchy and inspect distribution by file type.",
             )
         )
 
@@ -477,26 +478,6 @@ class StorageBreakdownView(QWidget):
         self.progress_label.setStyleSheet(f"font-size: 11px; color: {_c(self._theme, 'muted')};")
         self.progress_label.setVisible(False)
         root_lay.addWidget(self.progress_label)
-
-        self.health_card = QFrame()
-        self.health_card.setProperty("card", "true")
-        h_lay = QHBoxLayout(self.health_card)
-        h_lay.setContentsMargins(16, 12, 16, 12)
-        h_lay.setSpacing(16)
-
-        self.health_info_label = QLabel(
-            "<b>Storage Device Health:</b> Loading diagnostics...\nTRIM Status: Checking..."
-        )
-        self.health_info_label.setWordWrap(True)
-        h_lay.addWidget(self.health_info_label, 1)
-
-        self._refresh_health_btn = QPushButton("Refresh Health")
-        self._refresh_health_btn.setIcon(material_icon("refresh", _c(self._theme, "text")))
-        self._refresh_health_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._refresh_health_btn.clicked.connect(lambda: self.refresh_health(force=True))
-        h_lay.addWidget(self._refresh_health_btn)
-
-        root_lay.addWidget(self.health_card)
 
         tab_row = QHBoxLayout()
         tab_row.setSpacing(8)
@@ -615,7 +596,6 @@ class StorageBreakdownView(QWidget):
         self.content_stack.addWidget(changes_card)
 
         root_lay.addWidget(self.content_stack, 1)
-        self.refresh_health()
 
     def _reload_storage_favorites(self):
         settings = load_settings()
@@ -652,12 +632,10 @@ class StorageBreakdownView(QWidget):
     def _apply_storage_preset(self, path: str):
         if path and os.path.exists(path):
             self.path_edit.setText(path)
-            self.refresh_health()
 
     def _on_drive_changed(self, text: str):
         if text:
             self.path_edit.setText(text if not is_windows() else f"{text}\\")
-            self.refresh_health()
 
     def _browse_path(self):
         folder = QFileDialog.getExistingDirectory(
@@ -665,7 +643,6 @@ class StorageBreakdownView(QWidget):
         )
         if folder:
             self.path_edit.setText(folder)
-            self.refresh_health()
 
     def _set_active_section(self, section_key: str):
         for key, btn in self._section_buttons.items():
@@ -674,63 +651,6 @@ class StorageBreakdownView(QWidget):
             btn.style().polish(btn)
         idx_map = {"TREE": 0, "TYPES": 1, "OLD": 2, "VMS": 3, "CHANGES": 4}
         self.content_stack.setCurrentIndex(idx_map.get(section_key, 0))
-
-    def refresh_health(self, force: bool = False):
-        from crapcleaner.gui.workers import HealthWorker, is_worker_running
-
-        if is_worker_running(getattr(self, "_health_worker", None)):
-            return
-
-        self.health_info_label.setText("<b>Storage Device Health:</b> Checking...")
-        _refresh_btn = getattr(self, "_refresh_health_btn", None)
-        if _refresh_btn is not None:
-            _refresh_btn.setEnabled(False)
-
-        worker = HealthWorker(force_refresh=force, parent=self)
-        self._health_worker = worker
-        worker.done.connect(self._on_health_loaded)
-        worker.failed.connect(
-            lambda msg: self.health_info_label.setText(f"Unable to read health metrics: {msg}")
-        )
-        worker.finished.connect(
-            lambda: (
-                setattr(self, "_health_worker", None)
-                if getattr(self, "_health_worker", None) is worker
-                else None
-            )
-        )
-        worker.finished.connect(worker.deleteLater)
-        worker.start()
-
-    def _on_health_loaded(self, health_data: list):
-        self._health_data = health_data
-        _refresh_btn = getattr(self, "_refresh_health_btn", None)
-        if _refresh_btn is not None:
-            _refresh_btn.setEnabled(True)
-        if not health_data:
-            self.health_info_label.setText("<b>Storage Device Health:</b> No data available.")
-            return
-        curr_drive = ""
-        if hasattr(self, "drive_combo") and self.drive_combo.currentText():
-            curr_drive = self.drive_combo.currentText().strip().rstrip("\\").upper()
-        elif hasattr(self, "path_edit") and self.path_edit.text():
-            curr_drive = self.path_edit.text()[:2].rstrip("\\").upper()
-        d = next(
-            (
-                item
-                for item in health_data
-                if item.device_id.upper().rstrip("\\") == curr_drive
-                or item.device_id.upper().startswith(curr_drive)
-            ),
-            health_data[0],
-        )
-        trim_str = "Enabled" if d.trim_enabled else ("Supported" if d.trim_supported else "N/A")
-        cap_str = format_size(d.capacity) if d.capacity else "N/A"
-        free_str = f" · Free: {format_size(d.free_space)}" if d.free_space else ""
-        self.health_info_label.setText(
-            f"<b>Drive:</b> {d.device_id} ({d.model}) · <b>Type:</b> {d.media_type} ({d.bus_type})<br>"
-            f"<b>Capacity:</b> {cap_str}{free_str} · <b>Status:</b> {d.health_status} · <b>TRIM:</b> {trim_str}"
-        )
 
     def run_analysis(self):
         target_path = self.path_edit.text().strip()
@@ -777,7 +697,6 @@ class StorageBreakdownView(QWidget):
     def closeEvent(self, event):
         from crapcleaner.gui.workers import stop_worker
 
-        stop_worker(getattr(self, "_health_worker", None))
         stop_worker(getattr(self, "_analysis_worker", None))
         super().closeEvent(event)
 

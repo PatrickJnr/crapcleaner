@@ -117,3 +117,52 @@ def test_unavailable_capability_pages_resolve_to_none():
 def test_unknown_attribute_still_raises(window):
     with pytest.raises(AttributeError):
         window.definitely_not_a_view
+
+
+# --- sidebar badges -----------------------------------------------------------
+
+
+def test_refreshing_the_badges_does_not_build_a_single_page(window):
+    """The badges read pages that exist; reading one that does not would defeat the
+    whole point of building them lazily."""
+    window.refresh_nav_badges()
+
+    assert set(window._views) == {"dashboard"}
+
+
+def test_a_launch_count_reaches_the_sidebar(window):
+    window._on_nav_counts({"drives": "5", "startup": "12"})
+
+    assert window.sidebar._buttons["drives"]._badge.text() == "5"
+    assert window.sidebar._buttons["startup"]._badge.text() == "12"
+
+
+def test_an_opened_page_overrides_the_launch_count(window):
+    """A page the user has opened knows the number better than a start-up probe."""
+    window._on_nav_counts({"drives": "5"})
+    window.drives_view._drives = [_FakeDisk(), _FakeDisk()]
+    window.refresh_nav_badges()
+
+    assert window.sidebar._buttons["drives"]._badge.text() == "2"
+
+
+def test_a_page_that_now_finds_nothing_clears_its_badge(window):
+    """A stale "5 drives" after they were unplugged is worse than no badge at all."""
+    window._on_nav_counts({"drives": "5"})
+    window.drives_view._drives = []
+    window.refresh_nav_badges()
+
+    assert window.sidebar._buttons["drives"]._badge.text() == ""
+    assert window.sidebar._buttons["drives"]._badge.isHidden()
+
+
+def test_counting_starts_once_and_only_once(window):
+    with patch("crapcleaner.gui.workers.NavCountsWorker") as worker:
+        window._start_nav_counts()
+        window._start_nav_counts()
+
+    worker.assert_called_once()
+
+
+class _FakeDisk:
+    is_unmapped = False
