@@ -9,19 +9,43 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture(autouse=True)
-def isolated_config(tmp_path, monkeypatch):
-    """Point APPDATA/LOCALAPPDATA at a temp dir so settings/history stay isolated."""
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path / "profile"))
-    monkeypatch.setenv("OneDrive", str(tmp_path / "onedrive"))
-    monkeypatch.setenv("OneDriveConsumer", str(tmp_path / "onedrive_consumer"))
-    # The same isolation for POSIX: without these the config and history resolve to the
-    # real home directory, so settings written by one test are read by the next.
-    monkeypatch.setenv("HOME", str(tmp_path / "profile"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "profile" / ".config"))
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "profile" / ".cache"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "profile" / ".local" / "share"))
+def isolated_config(tmp_path, tmp_path_factory, monkeypatch):
+    """Point APPDATA/LOCALAPPDATA at a temp dir so settings/history stay isolated.
+
+    The directories live beside `tmp_path` rather than inside it, and they are created
+    rather than merely named. Both matter:
+
+    * A tool that cannot write to the location these variables give it falls back to the
+      working directory instead of failing - PowerShell puts its module cache there -
+      which litters the repository with files no test asked for.
+    * `tmp_path` is also the tree a storage test builds and then measures, so creating
+      anything inside it changes the directory count that test is asserting on.
+    """
+    env_root = tmp_path_factory.mktemp("env")
+    for name, path in (
+        ("APPDATA", env_root / "appdata"),
+        ("LOCALAPPDATA", env_root / "localappdata"),
+        ("USERPROFILE", env_root / "profile"),
+        ("OneDrive", env_root / "onedrive"),
+        ("OneDriveConsumer", env_root / "onedrive_consumer"),
+        # The same isolation for POSIX: without these the config and history resolve to
+        # the real home directory, so settings written by one test are read by the next.
+        ("HOME", env_root / "profile"),
+        ("XDG_CONFIG_HOME", env_root / "profile" / ".config"),
+        ("XDG_CACHE_HOME", env_root / "profile" / ".cache"),
+        ("XDG_DATA_HOME", env_root / "profile" / ".local" / "share"),
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv(name, str(path))
+
+    # PowerShell writes a module analysis cache on almost every launch, and a worker
+    # thread that outlives its test launches one with whatever environment is current by
+    # then. Naming the file outright is the only placement that does not depend on that
+    # timing; left to itself it lands in the working directory, which is the repository.
+    monkeypatch.setenv(
+        "PSModuleAnalysisCachePath",
+        str(env_root / "localappdata" / "ModuleAnalysisCache"),
+    )
     return tmp_path
 
 
