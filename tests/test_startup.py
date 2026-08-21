@@ -18,6 +18,7 @@ from crapcleaner.system.startup import (
     remove_startup_item,
     set_startup_item_enabled,
 )
+from crapcleaner.utils.platform import is_windows
 
 
 def test_startup_item_to_dict():
@@ -250,6 +251,9 @@ def test_extract_executable_path_walks_an_unquoted_path_with_spaces(tmp_path):
     assert _extract_executable_path(str(target)) == str(target)
 
 
+@pytest.mark.skipif(
+    not is_windows(), reason="%VAR% is Windows syntax; POSIX expandvars leaves it as written"
+)
 def test_extract_executable_path_expands_environment_variables(tmp_path, monkeypatch):
     target = tmp_path / "Common Files" / "svc.exe"
     target.parent.mkdir(parents=True)

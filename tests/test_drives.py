@@ -240,8 +240,11 @@ def test_only_a_real_drive_letter_reaches_a_command():
 
 
 def test_a_bad_letter_is_refused_before_running_anything():
-    with patch.object(drive_actions, "run_command") as run:
-        ok, message, percent = drive_actions.analyze_volume("C: & calc")
+    # A drive letter is the Windows shape of the argument; the Linux path refuses the
+    # same input as an unmounted path, which is its own test.
+    with patch.object(drive_actions, "is_windows", return_value=True):
+        with patch.object(drive_actions, "run_command") as run:
+            ok, message, percent = drive_actions.analyze_volume("C: & calc")
 
     assert ok is False
     assert percent is None

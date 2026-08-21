@@ -210,7 +210,7 @@ def test_a_virtual_mount_is_not_reported_as_a_local_disk():
         return 1
 
     with patch.object(platform_mod, "is_windows", return_value=True):
-        with patch.object(platform_mod.ctypes, "windll") as windll:
+        with patch.object(platform_mod.ctypes, "windll", create=True) as windll:
             windll.kernel32.GetDriveTypeW.return_value = 3  # DRIVE_FIXED
             windll.kernel32.QueryDosDeviceW.side_effect = fake_query
             assert platform_mod.windows_drive_display_kind("G:") == "VIRTUAL"
@@ -227,7 +227,7 @@ def test_a_real_volume_is_local_and_the_system_drive_is_named():
 
     with patch.object(platform_mod, "is_windows", return_value=True):
         with patch.dict(platform_mod.os.environ, {"SystemDrive": "C:"}):
-            with patch.object(platform_mod.ctypes, "windll") as windll:
+            with patch.object(platform_mod.ctypes, "windll", create=True) as windll:
                 windll.kernel32.GetDriveTypeW.return_value = 3
                 windll.kernel32.QueryDosDeviceW.side_effect = fake_query
                 assert platform_mod.windows_drive_display_kind("C:") == "SYSTEM"
@@ -240,7 +240,7 @@ def test_removable_and_network_drives_are_named_without_a_device_lookup():
     from crapcleaner.utils import platform as platform_mod
 
     with patch.object(platform_mod, "is_windows", return_value=True):
-        with patch.object(platform_mod.ctypes, "windll") as windll:
+        with patch.object(platform_mod.ctypes, "windll", create=True) as windll:
             windll.kernel32.GetDriveTypeW.return_value = 2
             assert platform_mod.windows_drive_display_kind("E:") == "REMOVABLE"
             windll.kernel32.GetDriveTypeW.return_value = 4

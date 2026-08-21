@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from unittest.mock import patch
 
+import pytest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from crapcleaner.gui.views import drives as drives_view_mod
@@ -54,6 +55,21 @@ def _sample_drives():
             ],
         ),
     ]
+
+
+@pytest.fixture(autouse=True)
+def _a_windows_machine():
+    """Every test here describes a Windows session with the optimisation tools present.
+
+    Patched for the whole test rather than only while the view is built: a test that
+    calls into the view afterwards - an analysis result, a confirmation dialog - reads
+    the platform again, and would otherwise assert Windows wording against whatever the
+    machine running the suite happens to be. The Linux tests override this.
+    """
+    with patch.object(drives_view_mod, "is_windows", return_value=True):
+        with patch.object(drives_view_mod, "can_elevate", return_value=True):
+            with patch.object(drives_view_mod, "optimisation_supported", return_value=True):
+                yield
 
 
 @contextmanager
