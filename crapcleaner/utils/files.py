@@ -155,9 +155,11 @@ def reveal_in_file_manager(path: str, select: bool = True) -> bool:
 
     try:
         if os.name == "nt":
-            if select and not os.path.isdir(target):
-                # explorer wants this exact single-argument form for /select.
-                subprocess.Popen(["explorer", f"/select,{target}"])
+            if select and not os.path.isdir(target) and '"' not in target:
+                # explorer only honours /select when the switch is unquoted, which an
+                # argument list cannot express once the path contains a space. A '"' is
+                # not a legal Windows path character, so nothing can escape the quoting.
+                subprocess.Popen(f'explorer /select,"{target}"')
             else:
                 subprocess.Popen(["explorer", target])
             return True

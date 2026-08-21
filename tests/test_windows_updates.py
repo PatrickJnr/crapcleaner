@@ -116,6 +116,11 @@ def _fake_windows_run(args, timeout=30.0, **kwargs):
     cmd_str = " ".join(args)
     if "sc.exe" in cmd_str:
         return {"stdout": "STATE : 4 RUNNING", "returncode": 0}
+    if "GetTotalHistoryCount" in cmd_str:
+        return {
+            "stdout": json.dumps({"RebootRequired": True, "Failures": []}),
+            "returncode": 0,
+        }
     if "Microsoft.Update.Session" in cmd_str:
         return {"stdout": json.dumps(_SAMPLE_AVAILABLE), "returncode": 0}
     if "Get-HotFix" in cmd_str:
@@ -165,8 +170,8 @@ def test_check_updates_windows_hresult_explanation():
 
     assert report.error is not None
     assert "0x80244011" in report.error
-    assert "Update Server Connection Failure" in report.error
-    assert "SOAP" in report.error
+    assert "Update Server Not Configured" in report.error
+    assert "WUServer" in report.error
 
 
 def test_install_updates_windows_elevation_check():
@@ -416,3 +421,149 @@ def test_a_failed_gui_launch_is_not_reported_as_success():
 
     assert ok is False
     assert "denied" in message
+
+
+def test_the_search_sweeps_every_registered_update_service():
+    """Windows Update Settings aggregates all services, so one empty default is not "none"."""
+    ps = updates_windows._PS_FIND_PENDING
+    assert "Microsoft.Update.ServiceManager" in ps
+    assert "$Alt.ServiceID = $svc.ServiceID" in ps
+    assert "$Alt.ServerSelection = 3" in ps
+    # Only swept when the default service came back with nothing, to keep the common
+    # case down to a single network scan.
+    assert "if ($Found.Count -eq 0) {" in ps
+
+
+def test_check_and_install_search_for_the_same_updates():
+    """A divergence here means the app lists updates that Install then refuses to see."""
+    assert updates_windows._PS_FIND_PENDING in updates_windows._PS_QUERY_UPDATES
+    assert updates_windows._PS_FIND_PENDING in updates_windows._PS_INSTALL
+    assert (
+        "$SearchResult.Updates"
+        not in updates_windows._PS_INSTALL.split(updates_windows._PS_FIND_PENDING)[1]
+    )
+
+
+def _state_stdout(payload):
+    return {"stdout": json.dumps(payload), "returncode": 0}
+
+
+def test_a_pending_reboot_is_carried_into_the_report():
+    report = SystemUpdateReport(backend="Windows Update")
+    with patch.object(
+        updates_windows,
+        "run_command",
+        return_value=_state_stdout({"RebootRequired": True, "Failures": []}),
+    ):
+        updates_windows._collect_state(report)
+
+    assert report.reboot_required is True
+    assert report.error is None
+
+
+def _pending(title):
+    return SystemUpdateItem(
+        id=title,
+        title=title,
+        kb_numbers=[],
+        description="",
+        size_bytes=0,
+        categories=[],
+        severity="Important",
+        is_downloaded=False,
+        is_mandatory=False,
+        support_url="",
+    )
+
+
+def test_a_failed_attempt_on_a_still_pending_update_is_reported():
+    """A pending update whose last attempt failed is the one case worth surfacing."""
+    title = "2026-08 .NET 10.0.11 Security Update (KB5122106)"
+    report = SystemUpdateReport(backend="Windows Update", available_updates=[_pending(title)])
+    with patch.object(
+        updates_windows,
+        "run_command",
+        return_value=_state_stdout(
+            {
+                "RebootRequired": False,
+                "Failures": [{"Title": title, "Code": "0x80240034"}],
+            }
+        ),
+    ):
+        updates_windows._collect_state(report)
+
+    assert report.error is not None
+    assert "KB5122106" in report.error
+    assert "0x80240034" in report.error
+    assert report.available_updates[0].status == "Failed"
+
+
+def test_a_failure_for_an_already_installed_update_is_ignored():
+    """Windows retries the download of updates it already installed; that is not a fault."""
+    report = SystemUpdateReport(backend="Windows Update")
+    with patch.object(
+        updates_windows,
+        "run_command",
+        return_value=_state_stdout(
+            {
+                "RebootRequired": False,
+                "Failures": [
+                    {"Title": "2026-08 Security Update (KB5121003)", "Code": "0x80240034"}
+                ],
+            }
+        ),
+    ):
+        updates_windows._collect_state(report)
+
+    assert report.error is None
+
+
+def test_differing_failure_codes_are_not_explained_as_one():
+    report = SystemUpdateReport(
+        backend="Windows Update",
+        available_updates=[_pending("Update A"), _pending("Update B")],
+    )
+    with patch.object(
+        updates_windows,
+        "run_command",
+        return_value=_state_stdout(
+            {
+                "RebootRequired": False,
+                "Failures": [
+                    {"Title": "Update A", "Code": "0x80240034"},
+                    {"Title": "Update B", "Code": "0x80246002"},
+                ],
+            }
+        ),
+    ):
+        updates_windows._collect_state(report)
+
+    assert "Update A" in report.error
+    assert "Update B" in report.error
+    assert "0x80240034" not in report.error
+
+
+def test_a_scan_error_is_not_overwritten_by_install_history():
+    """The reason the scan failed matters more than what failed to install last week."""
+    report = SystemUpdateReport(backend="Windows Update", error="Scan failed")
+    with patch.object(
+        updates_windows,
+        "run_command",
+        return_value=_state_stdout(
+            {"RebootRequired": True, "Failures": [{"Title": "X", "Code": "0x80240034"}]}
+        ),
+    ):
+        updates_windows._collect_state(report)
+
+    assert report.error == "Scan failed"
+    assert report.reboot_required is True
+
+
+def test_unreadable_state_output_leaves_the_report_untouched():
+    report = SystemUpdateReport(backend="Windows Update")
+    for payload in ({"stdout": "ERROR:boom", "returncode": 1}, {"stdout": "", "returncode": 0}):
+        with patch.object(updates_windows, "run_command", return_value=payload):
+            updates_windows._collect_state(report)
+
+    assert report.reboot_required is False
+    assert report.error is None

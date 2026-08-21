@@ -1,5 +1,6 @@
 """Unit tests for the platform-neutral Startup Manager and both of its backends."""
 
+import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -237,3 +238,23 @@ def test_unsupported_platform_refuses_gracefully():
         ok, msg = add_startup_item("App", "/bin/app")
         assert ok is False
         assert "not available" in msg.lower()
+
+
+def test_extract_executable_path_walks_an_unquoted_path_with_spaces(tmp_path):
+    """Windows accepts unquoted Run values, so splitting on the first space is wrong."""
+    target = tmp_path / "Program Files" / "App" / "app.exe"
+    target.parent.mkdir(parents=True)
+    target.write_text("x", encoding="utf-8")
+
+    assert _extract_executable_path(f"{target} --minimized") == str(target)
+    assert _extract_executable_path(str(target)) == str(target)
+
+
+def test_extract_executable_path_expands_environment_variables(tmp_path, monkeypatch):
+    target = tmp_path / "Common Files" / "svc.exe"
+    target.parent.mkdir(parents=True)
+    target.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("CC_TEST_ROOT", str(tmp_path))
+
+    unexpanded = os.path.join("%CC_TEST_ROOT%", "Common Files", "svc.exe")
+    assert _extract_executable_path(f"{unexpanded} /background") == str(target)

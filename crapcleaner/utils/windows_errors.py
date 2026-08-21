@@ -14,8 +14,8 @@ WINDOWS_ERROR_MAP: dict[str, tuple[str, str]] = {
         "The update server returned an invalid response or XML data could not be parsed.",
     ),
     "0x80244011": (
-        "Update Server Connection Failure",
-        "Could not connect to the Windows Update server (SOAP fault). Check your internet connection, proxy settings, or VPN.",
+        "Update Server Not Configured",
+        "The update client was pointed at a managed (WSUS) server, but no WUServer policy is set on this machine.",
     ),
     "0x80244016": (
         "HTTP 400 Bad Request",

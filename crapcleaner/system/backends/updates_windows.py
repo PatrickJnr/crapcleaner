@@ -22,15 +22,43 @@ _DEFAULT_INSTALLER_ACCOUNT = "NT AUTHORITY\\SYSTEM"
 
 OFFLINE_MESSAGE = "Update scan skipped: offline mode is on, so Windows Update was not contacted."
 
+#: Fills $Found with every pending update the machine is offered. Windows Update Settings
+#: aggregates offers from all registered services, so an empty result from the default
+#: service alone is not the same as having nothing pending.
+_PS_FIND_PENDING = (
+    "$Session = New-Object -ComObject Microsoft.Update.Session; "
+    "$Criteria = 'IsInstalled=0 and IsHidden=0'; "
+    "$Found = New-Object System.Collections.ArrayList; "
+    "$Seen = @{}; "
+    "function Add-Results($col) { "
+    "foreach ($u in $col) { "
+    "$key = if ($u.Identity) { $u.Identity.UpdateID } else { $u.Title }; "
+    "if (-not $Seen.ContainsKey($key)) { $Seen[$key] = $true; [void]$Found.Add($u) } "
+    "} "
+    "}; "
+    "$Searcher = $Session.CreateUpdateSearcher(); "
+    "$Searcher.Online = $true; "
+    "$SearchResult = $Searcher.Search($Criteria); "
+    "Add-Results $SearchResult.Updates; "
+    "if ($Found.Count -eq 0) { "
+    "$Sm = New-Object -ComObject Microsoft.Update.ServiceManager; "
+    "foreach ($svc in $Sm.Services) { "
+    "if (-not $svc.OffersWindowsUpdates) { continue }; "
+    "try { "
+    "$Alt = $Session.CreateUpdateSearcher(); "
+    "$Alt.Online = $true; "
+    "$Alt.ServerSelection = 3; "
+    "$Alt.ServiceID = $svc.ServiceID; "
+    "Add-Results $Alt.Search($Criteria).Updates "
+    "} catch { } "
+    "} "
+    "}; "
+)
+
 _PS_QUERY_UPDATES = (
     "$ErrorActionPreference = 'Stop'; "
-    "try { "
-    "$Session = New-Object -ComObject Microsoft.Update.Session; "
-    "$Searcher = $Session.CreateUpdateSearcher(); "
-    "$Searcher.ServerSelection = 1; "
-    "$SearchResult = $Searcher.Search('IsInstalled=0 and IsHidden=0'); "
-    "$updates = @(); "
-    "foreach ($u in $SearchResult.Updates) { "
+    "try { " + _PS_FIND_PENDING + "$updates = @(); "
+    "foreach ($u in $Found) { "
     "$kb = @(); if ($u.KBArticleIDs) { $kb = $u.KBArticleIDs }; "
     "$cats = @(); if ($u.Categories) { foreach ($c in $u.Categories) { $cats += $c.Name } }; "
     "$urls = @(); if ($u.MoreInfoUrls) { $urls = $u.MoreInfoUrls }; "
@@ -63,22 +91,53 @@ _PS_QUERY_HISTORY = (
     "}"
 )
 
+#: Reboot state plus recent failed install attempts. A search reports what Windows will
+#: offer next, which is not the same as what it last tried and could not complete.
+_PS_QUERY_STATE = (
+    "try { "
+    "$reboot = $false; "
+    "try { $reboot = (New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired } catch { }; "
+    "$failures = @(); "
+    "try { "
+    "$Searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher(); "
+    "$total = $Searcher.GetTotalHistoryCount(); "
+    "if ($total -gt 0) { "
+    "$cutoff = (Get-Date).AddDays(-7); "
+    "$seen = @{}; "
+    "foreach ($e in $Searcher.QueryHistory(0, [Math]::Min(100, $total))) { "
+    # History is newest first, so the first record for a title is its current outcome.
+    # An update that failed and was later reinstalled must not count as still failing.
+    "if ($seen.ContainsKey($e.Title)) { continue }; "
+    "$seen[$e.Title] = $true; "
+    "if ($e.ResultCode -ne 4) { continue }; "
+    "if ($e.Date -lt $cutoff) { continue }; "
+    "$failures += [PSCustomObject]@{"
+    "Title = $e.Title; "
+    "Date = $e.Date.ToString('s'); "
+    "Code = ('0x' + ('{0:X8}' -f $e.HResult)); "
+    "} "
+    "} "
+    "} "
+    "} catch { }; "
+    "[PSCustomObject]@{ RebootRequired = [bool]$reboot; Failures = @($failures) } | "
+    "ConvertTo-Json -Depth 3 -Compress "
+    "} catch { "
+    "Write-Output ('ERROR:' + $_.Exception.Message) "
+    "}"
+)
+
 _PS_INSTALL = (
     "$ErrorActionPreference = 'Stop'; "
-    "try { "
-    "$Session = New-Object -ComObject Microsoft.Update.Session; "
-    "$Searcher = $Session.CreateUpdateSearcher(); "
-    "$SearchResult = $Searcher.Search('IsInstalled=0 and IsHidden=0'); "
-    "if ($SearchResult.Updates.Count -eq 0) { "
+    "try { " + _PS_FIND_PENDING + "if ($Found.Count -eq 0) { "
     "Write-Output 'NO_UPDATES'; exit 0; "
     "} "
     "$UpdatesToDownload = New-Object -ComObject Microsoft.Update.UpdateColl; "
-    "foreach ($u in $SearchResult.Updates) { $UpdatesToDownload.Add($u) | Out-Null }; "
+    "foreach ($u in $Found) { $UpdatesToDownload.Add($u) | Out-Null }; "
     "$Downloader = $Session.CreateUpdateDownloader(); "
     "$Downloader.Updates = $UpdatesToDownload; "
     "$Downloader.Download(); "
     "$UpdatesToInstall = New-Object -ComObject Microsoft.Update.UpdateColl; "
-    "foreach ($u in $SearchResult.Updates) { if ($u.IsDownloaded) { $UpdatesToInstall.Add($u) | Out-Null } }; "
+    "foreach ($u in $Found) { if ($u.IsDownloaded) { $UpdatesToInstall.Add($u) | Out-Null } }; "
     "if ($UpdatesToInstall.Count -eq 0) { Write-Output 'DOWNLOAD_FAILED'; exit 0; } "
     "$Installer = $Session.CreateUpdateInstaller(); "
     "$Installer.Updates = $UpdatesToInstall; "
@@ -201,7 +260,55 @@ def _collect_history(report: "SystemUpdateReport") -> None:
         )
 
 
-def check(include_history: bool = True, timeout: float = 30.0) -> "SystemUpdateReport":
+def _collect_state(report: "SystemUpdateReport") -> None:
+    """Record a pending reboot and any update Windows recently failed to install."""
+    res = run_command(_PS + [_PS_QUERY_STATE], timeout=30.0)
+    stdout = str(res.get("stdout", "")).strip()
+    if not stdout or stdout.startswith("ERROR:"):
+        return
+
+    try:
+        data = json.loads(stdout)
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+
+    report.reboot_required = bool(data.get("RebootRequired", False))
+
+    failures = data.get("Failures") or []
+    if isinstance(failures, dict):
+        failures = [failures]
+    if not failures or report.error:
+        return
+
+    # Windows keeps retrying the download of updates it has already installed, so a failed
+    # history entry on its own means nothing. Only an update that is *still pending* and
+    # whose last attempt failed is worth reporting.
+    pending = {u.title: u for u in report.available_updates}
+    failures = [f for f in failures if str(f.get("Title") or "") in pending]
+    if not failures:
+        return
+
+    for failure in failures:
+        item = pending[str(failure.get("Title"))]
+        item.status = "Failed"
+        item.description = (
+            f"{item.description}\n" if item.description else ""
+        ) + f"Last attempt failed: {explain_windows_error(str(failure.get('Code') or ''))}"
+
+    titles = "; ".join(str(f.get("Title") or "An update") for f in failures[:3])
+    if len(failures) > 3:
+        titles += f"; and {len(failures) - 3} more"
+    codes = {str(f.get("Code") or "") for f in failures}
+    detail = explain_windows_error(codes.pop()) if len(codes) == 1 else ""
+    report.error = (
+        f"Windows could not install {len(failures)} pending update(s): {titles}."
+        f"{' ' + detail if detail else ''}"
+    )
+
+
+def check(include_history: bool = True, timeout: float = 180.0) -> "SystemUpdateReport":
     from crapcleaner.system.system_updates import SystemUpdateReport
 
     report = SystemUpdateReport(backend="Windows Update", service_status=service_status())
@@ -209,6 +316,7 @@ def check(include_history: bool = True, timeout: float = 30.0) -> "SystemUpdateR
         report.error = OFFLINE_MESSAGE
     else:
         _collect_available(report, timeout)
+        _collect_state(report)
     if include_history:
         _collect_history(report)
     return report

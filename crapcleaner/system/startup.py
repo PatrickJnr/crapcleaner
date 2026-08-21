@@ -67,6 +67,15 @@ def extract_executable_path(command: str) -> str:
         end_idx = cmd.find('"', 1)
         if end_idx != -1:
             return cmd[1:end_idx].strip()
+    # CreateProcess resolves an unquoted path by trying successively longer prefixes,
+    # so "C:\Program Files\App\app.exe --min" is not the token "C:\Program".
+    words = cmd.split(" ")
+    for i in range(1, len(words) + 1):
+        prefix = " ".join(words[:i]).strip("\"'>")
+        for candidate in (os.path.expandvars(prefix), os.path.expandvars(prefix) + ".exe"):
+            if candidate and os.path.isfile(candidate):
+                return candidate
+
     try:
         parts = shlex.split(cmd, posix=False)
         if parts:

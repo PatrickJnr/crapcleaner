@@ -501,6 +501,9 @@ class StartupView(QWidget):
     def _on_table_double_clicked(self, table_item: QTableWidgetItem):
         if self._populating:
             return
+        # Column 0 is the enable checkbox; a double-click there is two toggles, not a reveal.
+        if table_item.column() == 0:
+            return
         item = self._item_for_row(table_item.row())
         if item:
             self._open_file_location(item)

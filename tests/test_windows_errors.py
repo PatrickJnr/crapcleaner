@@ -18,9 +18,8 @@ def test_explain_hresult_0x80244011():
     raw = "Exception from HRESULT: 0x80244011"
     explained = explain_windows_error(raw)
     assert "0x80244011" in explained
-    assert "Update Server Connection Failure" in explained
-    assert "SOAP" in explained
-    assert "internet connection" in explained.lower() or "proxy" in explained.lower()
+    assert "Update Server Not Configured" in explained
+    assert "WUServer" in explained
 
 
 def test_explain_hresult_0x8024002e_policy():

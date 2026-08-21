@@ -21,31 +21,40 @@ def _captured(calls):
     return [c[0][0] for c in calls if c[0]]
 
 
-def test_windows_uses_explorer_with_list_arguments(sample):
+def test_windows_leaves_the_select_switch_unquoted(sample):
     with patch.object(files_mod.os, "name", "nt"):
         with patch.object(files_mod.subprocess, "Popen") as popen:
             assert reveal_in_file_manager(sample) is True
 
-    args = popen.call_args[0][0]
-    assert isinstance(args, list), "arguments must never be a command string"
-    assert args[0] == "explorer"
-    assert args[1] == f"/select,{os.path.abspath(sample)}"
+    cmd = popen.call_args[0][0]
+    assert cmd == f'explorer /select,"{os.path.abspath(sample)}"'
 
 
-def test_a_quote_in_the_filename_cannot_alter_the_command(tmp_path):
-    """Interpolating a path into a command string is how quoting bugs become bugs."""
-    odd = tmp_path / "we'ird name.txt"
+def test_a_path_with_spaces_still_selects_rather_than_opening_the_file(tmp_path):
+    """A quoted /select switch is ignored by explorer, which then shell-opens the path."""
+    odd = tmp_path / "Start Menu" / "we'ird name.txt.disabled"
+    odd.parent.mkdir()
     odd.write_text("x", encoding="utf-8")
 
     with patch.object(files_mod.os, "name", "nt"):
         with patch.object(files_mod.subprocess, "Popen") as popen:
             reveal_in_file_manager(str(odd))
 
-    args = popen.call_args[0][0]
-    assert isinstance(args, list)
-    # The whole path travels as one argument, quotes and spaces included.
-    assert args[1].endswith("we'ird name.txt")
-    assert len(args) == 2
+    cmd = popen.call_args[0][0]
+    assert cmd.startswith("explorer /select,")
+    assert cmd.endswith("we'ird name.txt.disabled\"")
+
+
+def test_a_double_quote_in_the_path_never_reaches_the_command_string(sample):
+    """'"' is not legal in a Windows path, so its presence means fall back to a list."""
+    with patch.object(files_mod.os, "name", "nt"):
+        with patch.object(files_mod.os.path, "abspath", return_value='C:\\a"b\\x.txt'):
+            with patch.object(files_mod.os.path, "exists", return_value=True):
+                with patch.object(files_mod.os.path, "isdir", return_value=False):
+                    with patch.object(files_mod.subprocess, "Popen") as popen:
+                        assert reveal_in_file_manager(sample) is True
+
+    assert isinstance(popen.call_args[0][0], list)
 
 
 def test_linux_never_invokes_explorer(sample):

@@ -100,7 +100,9 @@ def is_available() -> bool:
     return _backend() is not None
 
 
-def check_system_updates(include_history: bool = True, timeout: float = 30.0) -> SystemUpdateReport:
+def check_system_updates(
+    include_history: bool = True, timeout: float = 180.0
+) -> SystemUpdateReport:
     """Search for pending system updates and, optionally, recent update history."""
     backend = _backend()
     if backend is None:
