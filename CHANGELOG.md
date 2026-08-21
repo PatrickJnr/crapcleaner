@@ -5,6 +5,37 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-21
+
+A dedicated Drives section, and a working update check.
+
+### Added
+
+- **Drives**, a section of its own. Each physical disk lists its model, media and bus, and whatever reliability counters the controller actually reports - temperature, wear, powered-on hours, read and write errors. Under it sit that disk's volumes with capacity, filesystem, TRIM state, fragmentation and a per-volume Analyse and Optimise, plus Analyse All and Optimise All across every volume at once. Counters an unelevated session cannot read, and drives that report none, are said once for the machine rather than repeated under every row.
+- **Drive maintenance on Linux, not only Windows.** The same three questions are answered by `e4defrag -c`, `fstrim` and `fstrim.timer` where Windows uses `Win32_Volume.DefragAnalysis`, `Optimize-Volume` and the `ScheduledDefrag` task. A filesystem `e4defrag` cannot read is refused by name rather than given a number borrowed from a tool that does not understand it, and e4defrag's 0-100 fragmentation score is labelled a score, because it is not a percentage.
+- **Counts in the sidebar.** Reclaimable space, disks, enabled startup entries, running services and pending updates appear as a badge beside the page that owns them. They come from probes that are cheap or already cached, and a page you have opened overrides them - including when it finds nothing, since a stale count is worse than none.
+- **The same drive work from the command line:** `--drives` for the inventory with its counters, `--analyze-drive` for fragmentation, and `--optimize-drive`, which is a dry run until `--execute` is given, as the cleanup and memory actions already are. Both accept a drive letter on Windows or a mount point on Linux, and `--drives` supports `--json` and `--export`.
+- **An inventory that survives the process.** Drive hardware, storage health and graphics adapters are written to a signature-keyed cache in the configuration directory, so only the first launch after the hardware changes pays for the query. Capacity, free space and uptime are never cached.
+
+### Fixed
+
+- **"Check for Updates" always failed with `0x80244011`** while Windows Settings worked: the searcher was pinned to `ServerSelection = 1`, which is the managed-server option, on a machine with no WSUS server configured. The error map called this a SOAP fault from the update server, which sent anyone reading it looking in the wrong place.
+- **Updates Windows Settings offered were reported as none.** Settings aggregates the offers of every registered update service; the search asked only the default one. Every registered service that offers Windows updates is now searched when the default one comes back empty, and the same search drives both the check and the install, so the two can never disagree about what is pending.
+- **"3 updates failed to install" alongside an "UP TO DATE" badge.** Windows keeps retrying updates it has already installed, so a failed entry in the update history means nothing on its own. Only an update that is still pending and whose most recent attempt failed is reported.
+- **"Open file location" opened Documents, and renaming an entry to `.disabled` opened the "Open with" dialog.** `explorer` only honours `/select` when the switch is unquoted, and an argument list cannot express that once the path contains a space - so Explorer received one quoted string, could not parse it, and fell back to the default folder.
+- **"Target file not found: C:\Program".** A `Run` value is not required to quote its executable, and `CreateProcess` resolves an unquoted one by trying successively longer prefixes. Splitting on whitespace made `C:\Program Files\App\app.exe --min` into `C:\Program`. The same prefix walk is now used.
+- **The Dashboard labelled a Google Drive mount `LOCAL`** while the Drives tab had it right: `GetDriveTypeW` reports a virtual drive as fixed, and only `QueryDosDeviceW` distinguishes it.
+- **`__pycache__` was counted twice** wherever OneDrive redirects a folder that sits inside the user profile: both roots were scanned, and every file below the nested one was found through each. 377 reported `.pyc` files were 191 real ones.
+- **The update list rated every driver and definition update "Unspecified".** Microsoft sets a severity only for security bulletins, so the column was describing the state of a field as though it were a verdict on the update.
+- **The sidebar was taller than the window is allowed to be.** Nav buttons are a fixed height, so the rail could not compress: it needed 1013 pixels against a 660-pixel minimum window, and everything below the fold was silently cut off. Navigation now scrolls between a pinned brand and footer.
+
+### Changed
+
+- **The drive health card left Storage Breakdown** for the Drives section, where the rest of the per-disk detail now lives.
+- **Drives and Services open with what is already known** and refresh in the background, rather than showing an empty page while the query runs. Inspecting services takes about four seconds; the page no longer waits for it before showing anything.
+- **PC Specs no longer re-queries the graphics adapters on every visit.** The adapter probe was 96% of the cost of the page and its answer only changes when a driver does, so it is keyed on the installed adapters and their driver versions.
+- **App Updates and System Updates no longer share an icon.** They sat next to each other in the sidebar under the same glyph, and the eight-item System group they were part of is now three shorter groups.
+
 ## [1.2.1] - 2026-08-20
 
 Self-update could not replace the application.

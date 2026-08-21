@@ -133,8 +133,14 @@ selectable. Everything is previewed before anything is removed.
 
 - **PC Specs** — OS, CPU, motherboard and BIOS, RAM slots, GPU, network interfaces, and
   storage devices, with skeleton placeholders while the queries run.
-- **Storage health** — media type (NVMe / SATA SSD / HDD), bus, filesystem, capacity,
-  and TRIM status. Cached briefly and shared across views.
+- **Drives** — every physical disk with its media and bus, and whatever reliability
+  counters the controller reports: temperature, wear, powered-on hours, read and write
+  errors. Its volumes nest underneath with capacity, filesystem, TRIM state and
+  fragmentation, and each can be analysed or optimised on demand — `Optimize-Volume` and
+  `Win32_Volume.DefragAnalysis` on Windows, `fstrim` and `e4defrag -c` on Linux, with
+  Windows' `ScheduledDefrag` task or `fstrim.timer` reported alongside. Hardware that
+  cannot be optimised, such as a cloud mount, is left out and counted rather than listed
+  with buttons that would fail.
 - **Live vitals** — network throughput, CPU load, RAM pressure, GPU load, temperature
   and VRAM, with rolling sparklines. A figure the hardware does not expose reads `N/A`,
   never `0`.
@@ -305,6 +311,8 @@ scripts keep working.
 | `--installers` | Installers sitting in Downloads and on the Desktop |
 | `--recycle-bin`, `--empty-recycle-bin` | Inspect or empty the Recycle Bin / Trash |
 | `--disk-health` | Media type, bus, filesystem, TRIM status |
+| `--drives` | Physical disks with their volumes, reliability counters, and TRIM state |
+| `--analyze-drive VOLUME`, `--optimize-drive VOLUME` | Measure fragmentation; retrim or defragment (dry run unless `--execute`) |
 | `--specs` | Hardware and OS specifications |
 | `--memory`, `--memory-clean ID` | Memory report; run a memory action (dry run unless `--execute`) |
 | `--startup`, `--services`, `--system-updates` | System management through this platform's backend. App updates are a GUI view |
@@ -461,7 +469,7 @@ crapcleaner/
   categories/     Category providers, one module per domain
   core/           Scan and cleanup engine, protected paths, preview, cache
   analysis/       Storage, duplicates, large files, file types, recycle bin
-  system/         Specs, health, memory, startup, services, updates
+  system/         Specs, drives, health, memory, startup, services, updates
     capabilities.py   What this platform supports, and what it calls things
     backends/         Per-OS implementations
   gui/            PySide6 interface (views, theme, workers, effects)
