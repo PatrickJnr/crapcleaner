@@ -360,12 +360,27 @@ class TestBuildProvenance:
         ]
 
         assert len(attestations) == 1
-        subjects = attestations[0]["with"]["subject-path"].split()
-        assert {os.path.basename(path) for path in subjects} == {
-            "CrapCleaner.exe",
-            "crapcleaner-linux-x86_64",
-            "crapcleaner-linux-x86_64.tar.gz",
+        subjects = {
+            os.path.basename(path) for path in attestations[0]["with"]["subject-path"].split()
         }
+
+        # Taken from what the release actually publishes rather than a list kept by
+        # hand: adding a binary and forgetting to attest it is the failure this guards
+        # against, and a hand-written list only catches it if someone remembers to
+        # extend it too.
+        release = next(
+            step
+            for step in publish["steps"]
+            if str(step.get("uses", "")).startswith("softprops/action-gh-release@")
+        )
+        published = {os.path.basename(path) for path in release["with"]["files"].split()}
+        binaries = published - {"checksums.txt"}
+
+        assert binaries, "the release publishes nothing to attest"
+        assert subjects == binaries, (
+            f"published but unattested: {sorted(binaries - subjects)}; "
+            f"attested but unpublished: {sorted(subjects - binaries)}"
+        )
 
     def test_the_publishing_job_holds_the_tokens_attestation_needs(self):
         permissions = _workflow_yaml("release.yml")["jobs"]["publish-release"]["permissions"]

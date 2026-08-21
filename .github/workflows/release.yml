@@ -149,12 +149,56 @@ jobs:
           REPORTED=$(./dist/crapcleaner-linux-x86_64 --version | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1)
           echo "reported $REPORTED, expected $EXPECTED"
           test "$REPORTED" = "$EXPECTED"
+      - name: Build the AppImage
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # An AppDir is just a tree with a desktop entry, an icon, and an AppRun that
+          # starts the thing. The binary is already self-contained, so nothing else
+          # needs collecting into it.
+          mkdir -p AppDir/usr/bin
+          cp dist/crapcleaner-linux-x86_64 AppDir/usr/bin/crapcleaner
+          chmod +x AppDir/usr/bin/crapcleaner
+
+          # Drawn from the application's own icon code, so the packaged icon cannot
+          # drift from the one it shows in its window.
+          python scripts/render_icon.py AppDir/crapcleaner.png 256
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          cp AppDir/crapcleaner.png AppDir/usr/share/icons/hicolor/256x256/apps/crapcleaner.png
+
+          cp packaging/crapcleaner.desktop AppDir/crapcleaner.desktop
+          mkdir -p AppDir/usr/share/applications
+          cp packaging/crapcleaner.desktop AppDir/usr/share/applications/crapcleaner.desktop
+
+          cat > AppDir/AppRun <<'APPRUN'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/crapcleaner" "$@"
+          APPRUN
+          sed -i 's/^          //' AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          # GitHub runners have no FUSE, so appimagetool cannot mount itself.
+          ./appimagetool --appimage-extract-and-run AppDir dist/CrapCleaner-x86_64.AppImage
+          chmod +x dist/CrapCleaner-x86_64.AppImage
+      - name: Verify the AppImage Reports the Release Version
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          EXPECTED=$(python -c "from crapcleaner.constants import VERSION; print(VERSION)")
+          # Extract rather than mount, for the same missing-FUSE reason.
+          REPORTED=$(./dist/CrapCleaner-x86_64.AppImage --appimage-extract-and-run --version             | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1)
+          echo "AppImage reported $REPORTED, expected $EXPECTED"
+          test "$REPORTED" = "$EXPECTED"
       - name: Package Tarball and Checksum
         run: |
           cd dist
           tar -czvf crapcleaner-linux-x86_64.tar.gz crapcleaner-linux-x86_64
           sha256sum crapcleaner-linux-x86_64 > checksum-linux.txt
           sha256sum crapcleaner-linux-x86_64.tar.gz >> checksum-linux.txt
+          sha256sum CrapCleaner-x86_64.AppImage >> checksum-linux.txt
           cat checksum-linux.txt
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v7
@@ -163,6 +207,7 @@ jobs:
           path: |
             dist/crapcleaner-linux-x86_64
             dist/crapcleaner-linux-x86_64.tar.gz
+            dist/CrapCleaner-x86_64.AppImage
             dist/checksum-linux.txt
 
   publish-release:
@@ -195,8 +240,10 @@ jobs:
           cp release-dist/windows/CrapCleaner.exe release-assets/
           cp release-dist/linux/crapcleaner-linux-x86_64 release-assets/
           cp release-dist/linux/crapcleaner-linux-x86_64.tar.gz release-assets/
+          cp release-dist/linux/CrapCleaner-x86_64.AppImage release-assets/
+          chmod +x release-assets/CrapCleaner-x86_64.AppImage
           cd release-assets
-          sha256sum CrapCleaner.exe crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz > checksums.txt
+          sha256sum CrapCleaner.exe crapcleaner-linux-x86_64 crapcleaner-linux-x86_64.tar.gz             CrapCleaner-x86_64.AppImage > checksums.txt
           cat checksums.txt
       - name: Attest Build Provenance
         uses: actions/attest-build-provenance@v4
@@ -205,6 +252,7 @@ jobs:
             release-assets/CrapCleaner.exe
             release-assets/crapcleaner-linux-x86_64
             release-assets/crapcleaner-linux-x86_64.tar.gz
+            release-assets/CrapCleaner-x86_64.AppImage
       - name: Determine Target Tag
         id: tag_info
         run: |
@@ -229,6 +277,7 @@ jobs:
             release-assets/CrapCleaner.exe
             release-assets/crapcleaner-linux-x86_64
             release-assets/crapcleaner-linux-x86_64.tar.gz
+            release-assets/CrapCleaner-x86_64.AppImage
             release-assets/checksums.txt
           draft: false
           prerelease: false

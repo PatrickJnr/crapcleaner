@@ -40,6 +40,7 @@ logger = get_logger("self_update")
 GITHUB_REPO = "PatrickJnr/crapcleaner"
 WINDOWS_ASSET = "CrapCleaner.exe"
 LINUX_ASSET = "crapcleaner-linux-x86_64"
+APPIMAGE_ASSET = "CrapCleaner-x86_64.AppImage"
 CHECKSUM_ASSET = "checksums.txt"
 
 #: Read in chunks so a 60 MB download is not held in memory twice.
@@ -62,8 +63,28 @@ class DownloadedUpdate:
 
 
 # --------------------------------------------------------------- eligibility
+def appimage_path() -> str:
+    """The .AppImage file this process was started from, or "" when it was not.
+
+    Inside an AppImage `sys.executable` points into the read-only squashfs mounted at
+    /tmp/.mount_*, so replacing it is neither possible nor what the user means. The
+    runtime exports APPIMAGE with the path of the file they actually downloaded, and
+    that is the thing to replace.
+    """
+    # Taken as given rather than resolved: the runtime always exports an absolute
+    # path, and normalising a POSIX path on another platform only corrupts it.
+    return os.environ.get("APPIMAGE", "").strip()
+
+
+def install_target() -> str:
+    """The file an update should replace."""
+    return appimage_path() or os.path.abspath(sys.executable)
+
+
 def install_kind() -> str:
-    """How this copy was installed: 'onefile', 'onedir', or 'source'."""
+    """How this copy was installed: 'appimage', 'onefile', 'onedir', or 'source'."""
+    if appimage_path():
+        return "appimage"
     if not getattr(sys, "frozen", False):
         return "source"
     # PyInstaller's one-file build unpacks to a temporary directory recorded in
@@ -93,7 +114,7 @@ _MANAGER_PREFIXES: tuple[tuple[str, str], ...] = (
 
 def package_manager_command() -> str | None:
     """The upgrade command of the package manager that owns this copy, if any."""
-    path = sys.executable.replace("\\", "/")
+    path = (appimage_path() or sys.executable).replace("\\", "/")
     lowered = path.lower()
     for fragment, command in _MANAGER_FRAGMENTS:
         if fragment in lowered:
@@ -124,7 +145,14 @@ def can_self_update() -> tuple[bool, str]:
 
 
 def asset_name() -> str:
-    return WINDOWS_ASSET if is_windows() else LINUX_ASSET
+    """The release asset that matches how this copy is packaged.
+
+    An AppImage replaces itself with an AppImage. Handing it the bare binary would
+    strip the desktop entry and icon the user installed it for.
+    """
+    if is_windows():
+        return WINDOWS_ASSET
+    return APPIMAGE_ASSET if appimage_path() else LINUX_ASSET
 
 
 # ------------------------------------------------------------------ download
@@ -194,7 +222,7 @@ def download_update(
             "cannot be verified. Update manually from the releases page."
         )
 
-    target = os.path.abspath(sys.executable)
+    target = install_target()
     directory = os.path.dirname(target)
     try:
         handle, temp_path = tempfile.mkstemp(prefix=".crapcleaner-update-", dir=directory)

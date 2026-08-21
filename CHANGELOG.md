@@ -5,6 +5,19 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-21
+
+Linux gets an AppImage.
+
+### Added
+
+- **An AppImage for Linux**, published alongside the plain binary and the tarball. It carries its own desktop entry and icon, so a file manager and an application menu treat it as an application rather than as an unnamed executable, and nothing is installed system-wide. The plain binary stays for headless and scripted use, where an AppImage is awkward, and every existing download link keeps working.
+- The packaged icon is rendered from the application's own drawing code during the build rather than stored as a file, so it cannot drift from the icon the window actually shows.
+
+### Fixed
+
+- **Self-update from inside an AppImage would have failed before it started.** `sys.executable` points into the read-only squashfs mounted at `/tmp/.mount_*`, so the download could not even create its temporary file beside it, and replacing that path was never what the user meant. The runtime exports `APPIMAGE` with the path of the file they downloaded, and that is now what an update replaces. An AppImage also updates to an AppImage: handing it the bare binary would have stripped the desktop entry and icon it was installed for.
+
 ## [1.3.2] - 2026-08-21
 
 The updated build refused to start after replacing itself.

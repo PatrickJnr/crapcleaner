@@ -11,7 +11,7 @@
 
 ### Download
 
-**[Windows (.exe)](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner.exe)**  ·  **[Linux (x86_64)](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/crapcleaner-linux-x86_64)**  ·  [All releases and checksums](https://github.com/PatrickJnr/crapcleaner/releases/latest)
+**[Windows (.exe)](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner.exe)**  ·  **[Linux (AppImage)](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner-x86_64.AppImage)**  ·  [All releases and checksums](https://github.com/PatrickJnr/crapcleaner/releases/latest)
 
 Portable single files. Nothing to install, no account, no background service, and no
 data about you or your machine is sent anywhere. Every cleanup is previewed first and
@@ -246,7 +246,8 @@ aliases collapse into one entry, pseudo/container/boot mounts are hidden, and sc
 From [Releases](https://github.com/PatrickJnr/crapcleaner/releases/latest):
 
 - **Windows x64** — [`CrapCleaner.exe`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner.exe). Double-click for the interface, or pass any option below to the same file: `CrapCleaner.exe --scan --json`.
-- **Linux x86_64** — [`crapcleaner-linux-x86_64`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/crapcleaner-linux-x86_64), built against glibc 2.35 (Ubuntu 22.04) so it also runs on newer Debian, Fedora and Arch. `chmod +x` after downloading.
+- **Linux AppImage** — [`CrapCleaner-x86_64.AppImage`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/CrapCleaner-x86_64.AppImage), the one most people want: `chmod +x` it and run it, and it brings its own desktop entry and icon.
+- **Linux x86_64 binary** — [`crapcleaner-linux-x86_64`](https://github.com/PatrickJnr/crapcleaner/releases/latest/download/crapcleaner-linux-x86_64) for headless or scripted use, where an AppImage is awkward. Both are built against glibc 2.35 (Ubuntu 22.04) so they also run on newer Debian, Fedora and Arch, and both `chmod +x` after downloading.
 
 Every release ships `checksums.txt` with SHA-256 sums. Each binary also carries a
 build provenance attestation, so you can confirm which commit and workflow produced it:

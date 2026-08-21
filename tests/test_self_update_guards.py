@@ -1,5 +1,6 @@
 """The self-updater must not fight a package manager, nor leave nothing behind."""
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -295,3 +296,90 @@ class TestTheInstallerDoesNotInheritTheOneFileBootstrap:
 
         assert "env" in seen, "without an explicit environment the child inherits this one"
         assert not [name for name in seen["env"] if name.startswith("_PYI")]
+
+
+class _Downloaded:
+    """The smallest stand-in for urlopen's response that download_update needs."""
+
+    def __init__(self, payload: bytes):
+        self._payload = payload
+        self._sent = False
+        self.headers = {"Content-Length": str(len(payload))}
+
+    def read(self, size: int) -> bytes:
+        if self._sent:
+            return b""
+        self._sent = True
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestAnAppImageReplacesTheFileTheUserDownloaded:
+    """Inside an AppImage sys.executable points into a read-only squashfs mount.
+
+    Writing next to it is impossible, and replacing it would not be what the user
+    means: the file they have is the .AppImage. The runtime exports APPIMAGE with its
+    path, and that is the thing to replace.
+    """
+
+    def test_the_target_is_the_appimage_not_the_mount(self, monkeypatch):
+        monkeypatch.setenv("APPIMAGE", "/home/someone/Apps/CrapCleaner-x86_64.AppImage")
+        monkeypatch.setattr(module.sys, "executable", "/tmp/.mount_CrapC12/usr/bin/crapcleaner")
+
+        assert module.install_target() == "/home/someone/Apps/CrapCleaner-x86_64.AppImage"
+        assert module.install_kind() == "appimage"
+
+    def test_without_the_variable_nothing_changes(self, monkeypatch):
+        monkeypatch.delenv("APPIMAGE", raising=False)
+
+        assert module.appimage_path() == ""
+        assert module.install_target() == os.path.abspath(module.sys.executable)
+
+    def test_an_appimage_may_replace_itself(self, monkeypatch):
+        monkeypatch.setenv("APPIMAGE", "/home/someone/Apps/CrapCleaner-x86_64.AppImage")
+
+        allowed, reason = module.can_self_update()
+
+        assert allowed is True, reason
+
+    def test_it_downloads_an_appimage_rather_than_the_bare_binary(self, monkeypatch):
+        """Swapping in the plain binary would strip the desktop entry and icon."""
+        monkeypatch.setattr(module, "is_windows", lambda: False)
+        monkeypatch.setenv("APPIMAGE", "/home/someone/Apps/CrapCleaner-x86_64.AppImage")
+
+        assert module.asset_name() == module.APPIMAGE_ASSET
+
+        monkeypatch.delenv("APPIMAGE", raising=False)
+        assert module.asset_name() == module.LINUX_ASSET
+
+    def test_windows_is_unaffected_by_a_stray_variable(self, monkeypatch):
+        monkeypatch.setattr(module, "is_windows", lambda: True)
+        monkeypatch.setenv("APPIMAGE", "/nonsense")
+
+        assert module.asset_name() == module.WINDOWS_ASSET
+
+    def test_the_download_lands_beside_the_appimage(self, tmp_path, monkeypatch):
+        """The mount is read-only, so a temporary file there cannot even be created."""
+        appimage = tmp_path / "CrapCleaner-x86_64.AppImage"
+        appimage.write_bytes(b"\x7fELF old")
+        monkeypatch.setenv("APPIMAGE", str(appimage))
+        monkeypatch.setattr(module, "is_windows", lambda: False)
+        monkeypatch.setattr(module.sys, "executable", "/tmp/.mount_CrapC12/usr/bin/crapcleaner")
+
+        payload = b"\x7fELF new"
+        digest = hashlib.sha256(payload).hexdigest()
+        monkeypatch.setattr(
+            module, "_fetch_text", lambda url, timeout=15.0: f"{digest}  {module.APPIMAGE_ASSET}"
+        )
+        monkeypatch.setattr(module.urllib.request, "urlopen", lambda *a, **k: _Downloaded(payload))
+
+        update = module.download_update("1.4.0")
+
+        assert update.target == str(appimage)
+        assert os.path.dirname(update.path) == str(tmp_path)
+        assert update.sha256 == digest

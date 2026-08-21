@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CrapCleaner
+GenericName=Disk Cleanup and Storage Analyzer
+Comment=Reclaim disk space, find duplicates and large files, and inspect drive health
+Exec=crapcleaner
+Icon=crapcleaner
+Terminal=false
+Categories=Utility;System;Filesystem;
+Keywords=cleanup;disk;storage;duplicates;cache;trash;drives;
+StartupWMClass=CrapCleaner
