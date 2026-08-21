@@ -263,10 +263,15 @@ rem Absolute paths: a GNU find or tasklist earlier in PATH - Git for Windows shi
 rem reads the pid as a filename, fails, and the wait below would end immediately.
 set "FIND=%SystemRoot%\\System32\\find.exe"
 set "TASKLIST=%SystemRoot%\\System32\\tasklist.exe"
+set "PROBE=%TEMP%\\crapcleaner-wait-{pid}.txt"
 
 set /a WAITED=0
 :wait
-"%TASKLIST%" /FI "PID eq {pid}" 2>nul | "%FIND%" "{pid}" >nul
+rem Through a file rather than a pipe. cmd builds a pipe by starting two more copies of
+rem itself, which it cannot do without a console, and this script is deliberately
+rem started without one: piping here killed it on its first command.
+"%TASKLIST%" /FI "PID eq {pid}" /NH >"%PROBE%" 2>nul
+"%FIND%" "{pid}" "%PROBE%" >nul 2>&1
 if errorlevel 1 goto swap
 set /a WAITED+=1
 if %WAITED% GEQ 60 goto swap
@@ -274,6 +279,7 @@ ping -n 2 127.0.0.1 >nul
 goto wait
 
 :swap
+del /F /Q "%PROBE%" >nul 2>&1
 rem A one-file build keeps a second process alive briefly after the application exits,
 rem so the executable can still be locked here. Retry rather than abandoning the update
 rem on the first refusal.
@@ -411,12 +417,13 @@ def apply_update(update: DownloadedUpdate, relaunch_args: str = "") -> str:
     script = write_installer_script(update, relaunch_args=relaunch_args)
     try:
         if is_windows():
+            # CREATE_NO_WINDOW only. Adding DETACHED_PROCESS leaves the script with no
+            # console at all, and cmd cannot build a pipe or run a FOR /F without one -
+            # it died on the first command of the wait loop and nothing was ever
+            # swapped. A hidden console is invisible in the same way and still works.
             subprocess.Popen(
                 ["cmd.exe", "/c", script],
-                creationflags=(
-                    getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                    | getattr(subprocess, "DETACHED_PROCESS", 0)
-                ),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 close_fds=True,
             )
         else:

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -165,3 +166,64 @@ class TestTheInstallerScriptDoesNotDependOnPath:
 
         assert "tries" in body
         assert "kill -0" in body, "the wait must not shell out to a command PATH can shadow"
+
+
+class TestTheInstallerScriptRunsWithoutAConsole:
+    """The script is started hidden, and cmd cannot build a pipe without a console.
+
+    tasklist | find killed it on its first command: nothing was ever swapped, no branch
+    that writes to the log was reached, and the downloaded file was left beside the
+    application. The absolute paths added earlier were correct and made no difference,
+    because the pipe itself was the problem.
+    """
+
+    def _script(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(module, "is_windows", lambda: True)
+        path = module.write_installer_script(_update(tmp_path))
+        body = Path(path).read_text(encoding="utf-8")
+        os.remove(path)
+        return body
+
+    def test_the_wait_loop_uses_no_pipe(self, tmp_path, monkeypatch):
+        body = self._script(tmp_path, monkeypatch)
+
+        for line in body.splitlines():
+            if line.lstrip().startswith("rem"):
+                continue
+            assert "|" not in line, f"a pipe needs a console the script does not have: {line}"
+
+    def test_the_wait_loop_still_decides_on_the_pid(self, tmp_path, monkeypatch):
+        """Removing the pipe must not remove the waiting."""
+        body = self._script(tmp_path, monkeypatch)
+
+        assert "tasklist.exe" in body
+        assert "find.exe" in body
+        assert ":wait" in body and "goto wait" in body
+
+    def test_the_probe_file_is_cleaned_up(self, tmp_path, monkeypatch):
+        body = self._script(tmp_path, monkeypatch)
+
+        assert "PROBE" in body
+        assert 'del /F /Q "%PROBE%"' in body
+
+
+def test_the_installer_is_started_with_a_console_it_simply_does_not_show(tmp_path, monkeypatch):
+    """DETACHED_PROCESS gives the script no console at all, which is what broke it."""
+    import subprocess as sp
+
+    seen = {}
+
+    def fake_popen(args, **kwargs):
+        seen.update(kwargs)
+        seen["args"] = args
+        return SimpleNamespace(pid=1234)
+
+    monkeypatch.setattr(module, "is_windows", lambda: True)
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(module, "_verify_replaceable", lambda target: None)
+
+    module.apply_update(_update(tmp_path))
+
+    flags = seen["creationflags"]
+    assert flags & sp.CREATE_NO_WINDOW, "the console must exist but stay hidden"
+    assert not flags & getattr(sp, "DETACHED_PROCESS", 0), "no console means no pipe, no FOR /F"

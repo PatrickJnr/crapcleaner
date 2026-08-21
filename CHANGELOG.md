@@ -5,6 +5,18 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-08-21
+
+The self-update never ran its installer.
+
+### Fixed
+
+- **The update downloaded, verified, and then did nothing**, leaving the new build beside the application as a hidden `.crapcleaner-update-` file. The installer script was started with `DETACHED_PROCESS`, which leaves it with no console at all, and `cmd` builds a pipe by starting two more copies of itself - which it cannot do without one. The first command of the script is `tasklist | find`, so the script died there, every time. Nothing was swapped, no `.bak` was ever written, neither branch that reports a failure was reached, and the script never deleted itself: a machine that had tried to update several times had an orphaned installer script for each attempt. The script now runs with a console that is simply not shown, and its wait goes through a file rather than a pipe, so it no longer depends on console behaviour at all.
+
+  This was the same symptom 1.2.1 addressed and did not fix. That release corrected *which* `find` and `tasklist` ran, by calling them through absolute paths, which was right and made no difference: the pipe between them was what failed, not the programs either side of it.
+
+  A build older than this one still carries the broken updater, so its next self-update will fail in the same way; the fix applies to updates started from 1.3.1 onwards. Any `.crapcleaner-update-` file an earlier attempt left behind is the verified new build and is safe to delete.
+
 ## [1.3.0] - 2026-08-21
 
 A dedicated Drives section, and a working update check.
