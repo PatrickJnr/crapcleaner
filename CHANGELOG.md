@@ -5,6 +5,19 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-08-25
+
+The cleanup dialog asks one question instead of two.
+
+### Changed
+
+- **The cleanup dialog now offers one choice of three rather than two checkboxes.** A run either simulates, recycles, or deletes outright, and two checkboxes encoded that as four combinations, one of which - a dry run that also recycles - stood for nothing. They are radio buttons now: *dry run*, *delete to the Recycle Bin*, *delete permanently*. Permanent deletion used to be reachable only by noticing that unticking a box about the Recycle Bin was how you asked for it; it is its own row, named for what it does. The dialog opens on whichever deletion mode Settings holds, so the saved preference still decides what a real run does by default.
+
+### Fixed
+
+- **"Move files to Recycle Bin" ignored every click.** It was disabled whenever dry run was on, which is on by default. That was deliberate - a dry run deletes nothing - but nothing on screen said so, and the stylesheet gave the disabled state away only in the small indicator box while leaving the label at full brightness. The row read as live and behaved as dead. The choice is a radio group now, so the state has nowhere left to hide, and disabled checkboxes across the rest of the application dim their label as well as their box.
+- **A ticked checkbox is drawn with a tick.** It was filled with the accent colour and nothing else, which reads as a colour swatch rather than as a chosen option, and on the softer themes barely read at all. The tick is drawn from the Material icon font already bundled for the rest of the interface, in whichever colour stays legible on that theme accent.
+
 ## [1.4.0] - 2026-08-21
 
 Linux gets an AppImage.

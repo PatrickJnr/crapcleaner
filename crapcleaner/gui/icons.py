@@ -182,6 +182,37 @@ def _pix(size: int) -> QPixmap:
     return pm
 
 
+@lru_cache(maxsize=32)
+def glyph_png(name: str, color: str, size: int = 16) -> str:
+    """A glyph written to disk, as a forward-slash path, or "" if it could not be.
+
+    Qt stylesheets can only take an image by path, so a sub-control that needs one -
+    the tick inside a checked checkbox - cannot be handed a pixmap we already hold.
+    """
+    from crapcleaner.config import config_dir
+
+    if not font_available():
+        return ""
+    target = Path(config_dir()) / "glyphs" / f"{name}-{color.lstrip('#')}-{size}.png"
+    try:
+        if not target.exists():
+            pm = _pix(size * _DEVICE_SCALE)
+            painter = QPainter(pm)
+            painter.setRenderHint(
+                QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+            )
+            draw_glyph(painter, QRectF(0, 0, size, size), name, color, size)
+            painter.end()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not pm.save(str(target), "PNG"):
+                return ""
+        return target.as_posix()
+    except OSError:
+        # A read-only or unwritable config dir costs the tick, not the application.
+        _logger.debug("could not write glyph %s", target, exc_info=True)
+        return ""
+
+
 @lru_cache(maxsize=128)
 def icon(name: str, color: str) -> QIcon:
     """Return a cached themed icon for the given logical name."""

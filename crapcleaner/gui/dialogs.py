@@ -5,7 +5,7 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
+    QButtonGroup,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QRadioButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -543,6 +544,7 @@ class ConfirmCleanupDialog(QDialog):
         self.resize(620, 520)
         self._categories = categories
         self._excluded_paths: set[str] = set()
+        self._use_recycle_bin_default = use_recycle_bin_default
 
         total = sum(c.size for c in categories)
         layout = QVBoxLayout(self)
@@ -610,16 +612,23 @@ class ConfirmCleanupDialog(QDialog):
         opt_lay.setContentsMargins(12, 10, 12, 10)
         opt_lay.setSpacing(6)
 
-        self.dry_run_check = QCheckBox("Dry run — simulate scan without deleting any files")
-        self.dry_run_check.setChecked(dry_run_default)
-        opt_lay.addWidget(self.dry_run_check)
+        # One run does one of these three things, so they are one choice rather than
+        # two checkboxes with a combination that means nothing.
+        self.dry_run_radio = QRadioButton("Dry run — simulate the cleanup, delete nothing")
+        self.recycle_radio = QRadioButton("Delete, moving files to the Recycle Bin (recoverable)")
+        self.permanent_radio = QRadioButton("Delete permanently — this cannot be undone")
 
-        self.recycle_check = QCheckBox(
-            "Move files to Recycle Bin (recoverable) instead of permanent deletion"
-        )
-        self.recycle_check.setChecked(use_recycle_bin_default)
-        self.recycle_check.setEnabled(not dry_run_default)
-        opt_lay.addWidget(self.recycle_check)
+        self.mode_group = QButtonGroup(self)
+        for radio in (self.dry_run_radio, self.recycle_radio, self.permanent_radio):
+            self.mode_group.addButton(radio)
+            opt_lay.addWidget(radio)
+
+        if dry_run_default:
+            self.dry_run_radio.setChecked(True)
+        elif use_recycle_bin_default:
+            self.recycle_radio.setChecked(True)
+        else:
+            self.permanent_radio.setChecked(True)
         layout.addWidget(opt_card)
 
         self.review_button = QPushButton("Review files…")
@@ -644,9 +653,8 @@ class ConfirmCleanupDialog(QDialog):
             clean.setProperty("primary", checked)
             clean.style().unpolish(clean)
             clean.style().polish(clean)
-            self.recycle_check.setEnabled(not checked)
 
-        self.dry_run_check.toggled.connect(on_dry_run_toggle)
+        self.dry_run_radio.toggled.connect(on_dry_run_toggle)
 
     def _filter_tree(self, text: str):
         text = text.strip().lower()
@@ -657,10 +665,19 @@ class ConfirmCleanupDialog(QDialog):
                 item.setHidden(not match)
 
     def is_dry_run(self) -> bool:
-        return self.dry_run_check.isChecked()
+        return self.dry_run_radio.isChecked()
 
     def use_recycle_bin(self) -> bool:
-        return self.recycle_check.isChecked()
+        """Whether a real cleanup would recycle rather than delete outright.
+
+        A dry run deletes nothing, so it reports the saved preference rather than
+        claiming the permanent deletion its radio does not stand for.
+        """
+        if self.permanent_radio.isChecked():
+            return False
+        if self.recycle_radio.isChecked():
+            return True
+        return self._use_recycle_bin_default
 
     def _review_files(self):
         """Open the manifest, and remember anything the user unticked."""

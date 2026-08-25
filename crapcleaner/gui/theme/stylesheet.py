@@ -7,6 +7,7 @@ colour scheme is a data change and restyling widgets is a code change.
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import QApplication
 
+from crapcleaner.gui.icons import glyph_png
 from crapcleaner.gui.theme.palettes import palette_for
 
 
@@ -15,6 +16,9 @@ def _build_stylesheet(p: dict) -> str:
     from crapcleaner.gui.theme.palettes import derive_ink
 
     p = derive_ink(p)
+    # A checked box that is only filled in reads as a colour swatch, not as a tick.
+    tick = glyph_png("check", p["on_accent"], 14)
+    tick_rule = f'image: url("{tick}");' if tick else ""
     return f"""
     QMainWindow, QDialog, QWidget#CentralWidget, QWidget#WindowRoot {{
         background-color: {p["window"]};
@@ -308,6 +312,35 @@ def _build_stylesheet(p: dict) -> str:
     QCheckBox::indicator:checked {{
         background-color: {p["accent"]};
         border-color: {p["accent"]};
+        {tick_rule}
+    }}
+    QRadioButton {{
+        spacing: 8px;
+        color: {p["text"]};
+        background: transparent;
+    }}
+    QRadioButton:disabled {{
+        color: {p["muted"]};
+    }}
+    QRadioButton::indicator {{
+        width: 16px;
+        height: 16px;
+        border: 1px solid {p["border2"]};
+        border-radius: 9px;
+        background: {p["surface"]};
+    }}
+    QRadioButton::indicator:hover {{
+        border-color: {p["accent"]};
+    }}
+    QRadioButton::indicator:checked {{
+        width: 8px;
+        height: 8px;
+        border: 5px solid {p["accent"]};
+        border-radius: 9px;
+        background: {p["surface"]};
+    }}
+    QCheckBox:disabled {{
+        color: {p["muted"]};
     }}
     QCheckBox::indicator:disabled {{
         background: {p["border"]};
