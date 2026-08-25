@@ -567,10 +567,11 @@ class ConfirmCleanupDialog(QDialog):
         h_lay.addWidget(intro)
 
         if locked_by:
+            app_word = "this application" if len(locked_by) == 1 else "these applications"
+            verb = "is" if len(locked_by) == 1 else "are"
             warning = QLabel(
-                f"<b>{', '.join(locked_by)}</b> "
-                f"{'is' if len(locked_by) == 1 else 'are'} running. Files still in use are "
-                "skipped and listed in the report - close the browser first for a full clean."
+                f"⚠️ <b>{', '.join(locked_by)}</b> {verb} currently running. "
+                f"Files held in use by active processes will be safely skipped — close {app_word} for a full clean."
             )
             warning.setWordWrap(True)
             warning.setProperty("level", "warn")

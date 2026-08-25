@@ -46,7 +46,21 @@ def test_ordinary_cache_file_is_allowed_by_both(tmp_path):
 
 @pytest.mark.parametrize(
     "name",
-    ["id_rsa", "known_hosts", "logins.json", "key4.db", "NTUSER.DAT", "cookies"],
+    [
+        "id_rsa",
+        "known_hosts",
+        "logins.json",
+        "key4.db",
+        "NTUSER.DAT",
+        "cookies",
+        ".env",
+        ".env.local",
+        ".secrets",
+        "credentials.json",
+        "service_account.json",
+        "server.key",
+        "cert.pem",
+    ],
 )
 def test_protected_filenames_blocked_by_both(tmp_path, name):
     folder = tmp_path / "data"
@@ -55,7 +69,9 @@ def test_protected_filenames_blocked_by_both(tmp_path, name):
     _agree(str(folder), name)
 
 
-@pytest.mark.parametrize("protected_dir", [".git", ".ssh", ".gnupg", ".aws", ".kube"])
+@pytest.mark.parametrize(
+    "protected_dir", [".git", ".ssh", ".gnupg", ".aws", ".kube", ".vault", ".docker"]
+)
 def test_protected_directory_components_blocked_by_both(tmp_path, protected_dir):
     folder = tmp_path / "project" / protected_dir / "objects"
     folder.mkdir(parents=True)

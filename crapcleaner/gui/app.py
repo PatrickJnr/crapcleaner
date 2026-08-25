@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
 )
 
 from crapcleaner import __version__
-from crapcleaner.categories.browsers import running_browser_names
 from crapcleaner.config import load_settings, take_recovery_notice, update_settings
 from crapcleaner.core.cache import ScanCache
 from crapcleaner.gui.dialogs import ConfirmCleanupDialog, HelpSafetyDialog, ReportDialog
@@ -61,6 +60,7 @@ from crapcleaner.system.capabilities import (
     SYSTEM_UPDATES,
     is_supported,
 )
+from crapcleaner.system.process_guard import running_processes_for_categories
 from crapcleaner.utils.format import format_datetime, format_size
 
 
@@ -603,10 +603,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Cleanup", "Select at least one category to clean.")
             return
         use_recycle_bin = self._settings.get("use_recycle_bin", True)
-        locked_by = running_browser_names([c.id for c in categories])
+        locked_by = running_processes_for_categories([c.id for c in categories])
         if locked_by:
             self.statusBar().showMessage(
-                f"{', '.join(locked_by)} running - locked cache files will be skipped.", 8000
+                f"{', '.join(locked_by)} running - active cache files will be skipped.", 8000
             )
         excluded_paths: set[str] = set()
         if self._settings.get("confirm_cleanup", True):

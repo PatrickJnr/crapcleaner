@@ -93,6 +93,43 @@ def test_validate_cleanup_path_blocks_credentials_windows():
     assert "Protected path blocked" in reason
 
 
+def test_protects_secrets_and_environment_files():
+    for name in (
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        ".env.test",
+        ".secrets",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        "credentials.json",
+        "service_account.json",
+        "client_secret.json",
+        "secrets.json",
+        "master.key",
+    ):
+        assert explain_protection(f"/home/user/project/{name}") is not None, name
+        is_safe, reason = validate_cleanup_path(f"/home/user/project/{name}")
+        assert not is_safe, name
+        assert "Protected" in reason or "Environment" in reason or "credential" in reason
+
+
+def test_protects_cryptographic_keys_and_vaults():
+    for name in ("server.key", "privkey.pem", "cert.pem", "passwords.kdbx", "vault.pfx"):
+        assert explain_protection(f"/home/user/project/{name}") is not None, name
+        is_safe, reason = validate_cleanup_path(f"/home/user/project/{name}")
+        assert not is_safe, name
+
+
+def test_protects_cloud_and_container_directories():
+    for dir_name in (".vault", ".password-store", ".gcp", ".docker"):
+        assert explain_protection(f"/home/user/{dir_name}/config") is not None, dir_name
+        is_safe, reason = validate_cleanup_path(f"/home/user/{dir_name}/config")
+        assert not is_safe, dir_name
+
+
 def test_get_protected_rules_summary():
     summary = get_protected_rules_summary()
     assert len(summary) >= 3

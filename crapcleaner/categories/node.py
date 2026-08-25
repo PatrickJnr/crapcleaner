@@ -3,11 +3,12 @@
 import os
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
-from crapcleaner.utils.platform import get_local_appdata
+from crapcleaner.utils.platform import get_local_appdata, get_user_profile
 
 
 def get_categories() -> list[CleanupCategory]:
     local = get_local_appdata()
+    user = get_user_profile()
 
     return [
         CleanupCategory(
@@ -41,6 +42,22 @@ def get_categories() -> list[CleanupCategory]:
             ],
         ),
         CleanupCategory(
+            id="pnpm_cache",
+            name="pnpm cache",
+            group="Node.js",
+            description="Metadata and downloaded tarball cache used by pnpm. Re-downloaded on demand.",
+            safety_level=SafetyLevel.SAFE,
+            what_it_contains="Package metadata indexes and downloaded package tarballs cached by pnpm.",
+            why_it_grows="pnpm caches metadata and downloaded packages across runs for fast resolution.",
+            why_safe_to_delete="pnpm re-downloads package metadata as needed; project node_modules and hardlinked package stores remain intact.",
+            regeneration_behavior="Refills on subsequent pnpm install or add operations.",
+            targets=[
+                CacheTarget(path=os.path.join(local, "pnpm", "cache")),
+                CacheTarget(path=os.path.join(user, ".cache", "pnpm")),
+                CacheTarget(path=os.path.join(user, ".local", "share", "pnpm", "cache")),
+            ],
+        ),
+        CleanupCategory(
             id="pnpm_store",
             name="pnpm store (prune)",
             group="Node.js",
@@ -51,5 +68,37 @@ def get_categories() -> list[CleanupCategory]:
             why_safe_to_delete="This runs 'pnpm store prune' rather than deleting the folder: packages a project still references are kept and existing node_modules keep working. The store is shared by every project on the machine, so any version dropped here is re-downloaded from the registry the next time any project asks for it.",
             regeneration_behavior="Installs continue to work; the store refills as new packages are fetched.",
             action="pnpm_store_prune",
+        ),
+        CleanupCategory(
+            id="bun_cache",
+            name="Bun package cache",
+            group="Node.js",
+            description="Downloaded package archives and git checkouts cached by the Bun runtime. Re-downloaded on demand.",
+            safety_level=SafetyLevel.SAFE,
+            what_it_contains="Downloaded npm-compatible package tarballs and git clones cached by the Bun runtime.",
+            why_it_grows="Bun saves all downloaded package versions to disk for zero-copy installation speed.",
+            why_safe_to_delete="Bun re-downloads package archives from the registry on demand; project node_modules and source files are not modified.",
+            regeneration_behavior="Rebuilt during subsequent 'bun install' or 'bun add' commands.",
+            targets=[
+                CacheTarget(path=os.path.join(user, ".bun", "install", "cache")),
+                CacheTarget(path=os.path.join(local, "bun", "install", "cache")),
+            ],
+        ),
+        CleanupCategory(
+            id="deno_cache",
+            name="Deno module cache",
+            group="Node.js",
+            description="Downloaded remote HTTPS modules and compiled TypeScript/V8 bytecode caches for Deno.",
+            safety_level=SafetyLevel.SAFE,
+            what_it_contains="Downloaded remote HTTPS dependencies and compiled JavaScript/Wasm bytecode caches for Deno.",
+            why_it_grows="Deno downloads and caches remote dependencies globally upon first script execution.",
+            why_safe_to_delete="Deno re-fetches and compiles remote URLs upon execution or when running 'deno cache --reload'.",
+            regeneration_behavior="Rebuilt automatically when running Deno scripts.",
+            targets=[
+                CacheTarget(path=os.path.join(user, ".deno", "deps")),
+                CacheTarget(path=os.path.join(user, ".cache", "deno")),
+                CacheTarget(path=os.path.join(local, "deno", "deps")),
+                CacheTarget(path=os.path.join(local, "deno", "cache")),
+            ],
         ),
     ]

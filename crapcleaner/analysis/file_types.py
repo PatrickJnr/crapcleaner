@@ -120,12 +120,27 @@ FILE_CATEGORY_MAP: dict[str, str] = {
     ".sh": "Developer files",
     ".bat": "Developer files",
     ".ps1": "Developer files",
+    ".zig": "Developer files",
+    ".tsx": "Developer files",
+    ".jsx": "Developer files",
+    ".vue": "Developer files",
+    ".svelte": "Developer files",
+    ".kt": "Developer files",
+    ".swift": "Developer files",
+    ".proto": "Developer files",
+    ".whl": "Developer files",
+    ".jxl": "Images",
+    ".parquet": "AI models & Data",
+    ".arrow": "AI models & Data",
+    ".feather": "AI models & Data",
     ".iso": "Virtual machines & Disks",
     ".vhd": "Virtual machines & Disks",
     ".vhdx": "Virtual machines & Disks",
     ".vmdk": "Virtual machines & Disks",
     ".vdi": "Virtual machines & Disks",
     ".qcow2": "Virtual machines & Disks",
+    ".sfs": "Virtual machines & Disks",
+    ".squashfs": "Virtual machines & Disks",
     ".ova": "Virtual machines & Disks",
     ".ovf": "Virtual machines & Disks",
     ".img": "Virtual machines & Disks",
@@ -151,10 +166,17 @@ class FileTypeSummary:
     percentage: float = 0.0
     extensions: list[str] = field(default_factory=list)
 
+    @property
+    def human_size(self) -> str:
+        from crapcleaner.utils.format import format_size
+
+        return format_size(self.total_size)
+
     def to_dict(self) -> dict:
         return {
             "category": self.category,
             "total_size": self.total_size,
+            "human_size": self.human_size,
             "file_count": self.file_count,
             "percentage": round(self.percentage, 2),
             "extensions": self.extensions,

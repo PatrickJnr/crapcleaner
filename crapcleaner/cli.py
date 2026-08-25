@@ -15,7 +15,6 @@ from crapcleaner.analysis.installers import scan_installers
 from crapcleaner.analysis.large_files import scan_large_files
 from crapcleaner.analysis.recycle_bin import empty_trash, get_recycle_bin_info
 from crapcleaner.analysis.storage import analyze_storage_hierarchy
-from crapcleaner.categories.browsers import running_browser_names
 from crapcleaner.config import load_settings
 from crapcleaner.core.actions import run_action
 from crapcleaner.core.cleaner import clean_categories
@@ -29,6 +28,7 @@ from crapcleaner.models.category import CleanupCategory, SafetyLevel
 from crapcleaner.models.report import CleanupReport, ScanReport
 from crapcleaner.registry import find_categories, get_all_categories
 from crapcleaner.reports import export_report
+from crapcleaner.system.process_guard import running_processes_for_categories
 from crapcleaner.system.storage_health import get_storage_health_report
 from crapcleaner.utils.format import format_datetime, format_size, parse_size
 from crapcleaner.utils.platform import (
@@ -1436,12 +1436,12 @@ def run(argv: list[str] | None = None) -> int:
             return 1
 
         stream = JsonlProgress(args.progress_jsonl)
-        locked_by = running_browser_names([c.id for c in categories])
+        locked_by = running_processes_for_categories([c.id for c in categories])
         if locked_by and not dry_run:
-            stream.emit("warning", reason="browsers_running", browsers=locked_by)
+            stream.emit("warning", reason="processes_running", applications=locked_by)
             if not stream.enabled:
                 print(
-                    f"warning: {', '.join(locked_by)} running - locked cache files will be skipped.",
+                    f"warning: {', '.join(locked_by)} running - active cache files will be skipped.",
                     file=sys.stderr,
                 )
 

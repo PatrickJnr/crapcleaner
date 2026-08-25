@@ -14,6 +14,7 @@ from queue import Empty, SimpleQueue
 
 from crapcleaner.utils.disk_size import SIZE_LOGICAL, size_for
 from crapcleaner.utils.files import is_link_like
+from crapcleaner.utils.format import format_size
 from crapcleaner.utils.platform import is_linux
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -29,11 +30,24 @@ class StorageNode:
     children: list["StorageNode"] = field(default_factory=list)
     percentage_of_parent: float = 0.0
 
+    @property
+    def human_size(self) -> str:
+        return format_size(self.size)
+
+    @property
+    def largest_child(self) -> "StorageNode | None":
+        return self.children[0] if self.children else None
+
+    @property
+    def is_leaf(self) -> bool:
+        return len(self.children) == 0
+
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "path": self.path,
             "size": self.size,
+            "human_size": self.human_size,
             "file_count": self.file_count,
             "dir_count": self.dir_count,
             "percentage_of_parent": round(self.percentage_of_parent, 2),
@@ -99,6 +113,58 @@ class StorageIndex:
         if path not in self.nodes:
             return None
         return _assemble_from(self.nodes, self.children, path, 0, max_depth, max_children)
+
+    def get_top_directories(
+        self, n: int = 20, min_size: int = 0, exclude_root: str | None = None
+    ) -> list[StorageNode]:
+        """Return the top N largest directories recorded in the index."""
+        candidates = [
+            node
+            for path, node in self.nodes.items()
+            if node.size >= min_size and (exclude_root is None or path != exclude_root)
+        ]
+        candidates.sort(key=lambda node: node.size, reverse=True)
+        return candidates[:n]
+
+    def get_largest_leaf_directories(self, n: int = 20, min_size: int = 0) -> list[StorageNode]:
+        """Return directories that have no subdirectories measured (leaf folders)."""
+        leaves = [
+            node
+            for path, node in self.nodes.items()
+            if not self.children.get(path) and node.size >= min_size
+        ]
+        leaves.sort(key=lambda node: node.size, reverse=True)
+        return leaves[:n]
+
+    def measured_roots(self) -> list[StorageNode]:
+        """The top of each measured tree: the only nodes whose totals may be summed.
+
+        Every `node.size` already includes its descendants, so adding up all of
+        `nodes` counts each byte once per ancestor.
+        """
+        claimed = {child for kids in self.children.values() for child in kids}
+        return [node for path, node in self.nodes.items() if path not in claimed]
+
+    def summary(self, root_path: str | None = None) -> dict:
+        """Provide global metric summary of measured storage."""
+        root_node = self.nodes.get(root_path) if root_path else None
+        tops = [root_node] if root_node is not None else self.measured_roots()
+        total_size = sum(n.size for n in tops)
+        total_files = sum(n.file_count for n in tops)
+        return {
+            "total_directories": len(self.nodes),
+            "total_size": total_size,
+            "human_size": format_size(total_size),
+            "total_files": total_files,
+            "root_path": root_path,
+        }
+
+    def find_directories(self, query: str, max_results: int = 50) -> list[StorageNode]:
+        """Search measured directories matching query string."""
+        q = query.lower()
+        matches = [node for path, node in self.nodes.items() if q in path.lower()]
+        matches.sort(key=lambda node: node.size, reverse=True)
+        return matches[:max_results]
 
 
 def _should_skip_linux_subtree(path: str) -> bool:

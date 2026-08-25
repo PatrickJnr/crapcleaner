@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from crapcleaner.utils.files import walk_safe
-from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_windows
+from crapcleaner.utils.platform import get_local_appdata, get_user_profile, is_linux, is_windows
 
 
 @dataclass
@@ -149,6 +149,35 @@ def detect_virtual_machine_storage() -> list[VmStorageItem]:
                                 size=sz,
                                 last_modified=mtime,
                                 guidance="Hyper-V virtual disk. Compact via Hyper-V Manager or Edit-VHD cmdlet in PowerShell.",
+                            )
+                        )
+
+    if is_linux():
+        qemu_dirs = [
+            os.path.join(user, ".local", "share", "gnome-boxes", "images"),
+            os.path.join(user, ".local", "share", "libvirt", "images"),
+            "/var/lib/libvirt/images",
+        ]
+        for root in qemu_dirs:
+            if not os.path.isdir(root):
+                continue
+            for dirpath, _dirnames, filenames in walk_safe(root):
+                for name in filenames:
+                    if name.lower().endswith((".qcow2", ".raw", ".img")):
+                        full = os.path.join(dirpath, name)
+                        try:
+                            st = os.stat(full)
+                            mtime = datetime.fromtimestamp(st.st_mtime)
+                            sz = st.st_size
+                        except OSError:
+                            continue
+                        items.append(
+                            VmStorageItem(
+                                platform="QEMU / KVM / GNOME Boxes",
+                                path=full,
+                                size=sz,
+                                last_modified=mtime,
+                                guidance="QEMU/KVM virtual disk image. Reclaim unused sparse space using 'qemu-img convert -O qcow2'.",
                             )
                         )
 
