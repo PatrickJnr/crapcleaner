@@ -7,6 +7,17 @@ from crapcleaner.system.process_guard import (
     get_running_process_snapshot,
     running_processes_for_categories,
 )
+from crapcleaner.utils.platform import is_windows
+
+
+def _snapshot(*app_keys: str) -> str:
+    """A listing naming those apps, as this platform's process command would print it.
+
+    Hard-coding `chrome.exe` passed on Windows and matched nothing on Linux, where
+    `ps -eo comm=` prints `chrome`.
+    """
+    index = 0 if is_windows() else 1
+    return "".join(f"{APP_DEFINITIONS[key][index]}\n" for key in app_keys)
 
 
 def test_app_definitions_structure():
@@ -20,7 +31,7 @@ def test_app_definitions_structure():
 
 
 def test_running_processes_for_browsers():
-    snapshot = "chrome.exe\nfirefox.exe\n"
+    snapshot = _snapshot("chrome", "firefox")
     running = running_processes_for_categories(
         ["chrome_cache", "firefox_cache"], process_snapshot=snapshot
     )
@@ -29,7 +40,7 @@ def test_running_processes_for_browsers():
 
 
 def test_running_processes_for_developer_tools():
-    snapshot = "code.exe\nclaude.exe\ncursor.exe\n"
+    snapshot = _snapshot("vscode", "claude_desktop", "cursor")
     running = running_processes_for_categories(
         ["vscode_caches", "claude_desktop_caches", "cursor_caches"],
         process_snapshot=snapshot,
@@ -40,7 +51,7 @@ def test_running_processes_for_developer_tools():
 
 
 def test_running_processes_for_apps_and_launchers():
-    snapshot = "discord.exe\nspotify.exe\nsteam.exe\n"
+    snapshot = _snapshot("discord", "spotify", "steam")
     running = running_processes_for_categories(
         ["discord_cache", "spotify_cache", "steam_caches"],
         process_snapshot=snapshot,
@@ -51,7 +62,7 @@ def test_running_processes_for_apps_and_launchers():
 
 
 def test_unrelated_categories_return_no_running_warning():
-    snapshot = "chrome.exe\ncode.exe\n"
+    snapshot = _snapshot("chrome", "vscode")
     running = running_processes_for_categories(
         ["windows_temp", "system_logs", "dotnet_caches"],
         process_snapshot=snapshot,

@@ -96,7 +96,7 @@ def process_names(snapshot: str) -> set[str]:
         if line.startswith('"'):
             # tasklist /FO CSV: "image name","pid","session",...
             line = line.split('","', 1)[0].strip('"')
-        name = os.path.basename(line).strip()
+        name = os.path.basename(line).strip().lower()
         if name:
             names.add(name)
     return names
