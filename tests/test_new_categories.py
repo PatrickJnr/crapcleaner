@@ -68,4 +68,3 @@ def test_all_registered_categories():
         assert c.safety_level
         assert c.what_it_contains
         assert c.why_safe_to_delete
-

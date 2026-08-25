@@ -166,6 +166,7 @@ class FileTypeSummary:
     @property
     def human_size(self) -> str:
         from crapcleaner.utils.format import format_size
+
         return format_size(self.total_size)
 
     def to_dict(self) -> dict:
@@ -177,7 +178,6 @@ class FileTypeSummary:
             "percentage": round(self.percentage, 2),
             "extensions": self.extensions,
         }
-
 
 
 @dataclass

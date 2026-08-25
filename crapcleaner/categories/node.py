@@ -102,4 +102,3 @@ def get_categories() -> list[CleanupCategory]:
             ],
         ),
     ]
-

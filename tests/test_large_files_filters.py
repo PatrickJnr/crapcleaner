@@ -34,9 +34,7 @@ def test_scan_large_files_filters(tmp_path):
     assert len(all_large) == 3
 
     # Category filter
-    videos_only = scan_large_files(
-        str(tmp_path), threshold_bytes=5000, category_filter={"Video"}
-    )
+    videos_only = scan_large_files(str(tmp_path), threshold_bytes=5000, category_filter={"Video"})
     assert len(videos_only) == 1
     assert videos_only[0].extension == ".mp4"
 

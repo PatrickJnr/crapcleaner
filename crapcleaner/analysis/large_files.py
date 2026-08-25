@@ -278,4 +278,3 @@ def scan_large_files_multi(
     if max_results is not None and max_results > 0:
         return all_files[:max_results]
     return all_files
-

@@ -137,4 +137,3 @@ def test_get_protected_rules_summary():
     assert "Protected Root" in rule_types
     assert "Protected Directory Pattern" in rule_types
     assert "Protected File Pattern" in rule_types
-

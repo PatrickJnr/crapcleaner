@@ -159,7 +159,6 @@ class StorageIndex:
         return matches[:max_results]
 
 
-
 def _should_skip_linux_subtree(path: str) -> bool:
     if not is_linux():
         return False

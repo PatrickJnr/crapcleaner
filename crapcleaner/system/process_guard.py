@@ -28,14 +28,24 @@ APP_DEFINITIONS: dict[str, tuple[str, str, str, list[str]]] = {
     "zen": ("zen.exe", "zen", "Zen Browser", ["zen"]),
     # Developer IDEs & Tools
     "vscode": ("code.exe", "code", "VS Code", ["vscode", "code"]),
-    "vscode_insiders": ("code - insiders.exe", "code-insiders", "VS Code Insiders", ["vscode_insiders"]),
+    "vscode_insiders": (
+        "code - insiders.exe",
+        "code-insiders",
+        "VS Code Insiders",
+        ["vscode_insiders"],
+    ),
     "cursor": ("cursor.exe", "cursor", "Cursor", ["cursor"]),
     "windsurf": ("windsurf.exe", "windsurf", "Windsurf", ["windsurf"]),
     "kiro": ("kiro.exe", "kiro", "Kiro", ["kiro"]),
     "claude_desktop": ("claude.exe", "claude", "Claude Desktop", ["claude_desktop", "claude"]),
     "github_desktop": ("githubdesktop.exe", "github-desktop", "GitHub Desktop", ["github_desktop"]),
     "zed": ("zed.exe", "zed", "Zed", ["zed"]),
-    "android_studio": ("studio64.exe", "studio", "Android Studio", ["android_gradle_daemon", "android_studio"]),
+    "android_studio": (
+        "studio64.exe",
+        "studio",
+        "Android Studio",
+        ["android_gradle_daemon", "android_studio"],
+    ),
     "jetbrains": ("idea64.exe", "idea", "JetBrains IDEs", ["jetbrains_caches", "jetbrains"]),
     # Communication & Media
     "discord": ("discord.exe", "discord", "Discord", ["discord_cache", "discord"]),
@@ -45,7 +55,12 @@ APP_DEFINITIONS: dict[str, tuple[str, str, str, list[str]]] = {
     "steam": ("steam.exe", "steam", "Steam", ["steam_caches", "steam_caches_linux", "steam"]),
     "heroic": ("heroic.exe", "heroic", "Heroic Games Launcher", ["heroic_cache_linux", "heroic"]),
     "lutris": ("lutris.exe", "lutris", "Lutris", ["lutris_bottles_cache_linux", "lutris"]),
-    "epic": ("epicgameslauncher.exe", "epicgameslauncher", "Epic Games Launcher", ["launcher_caches", "epic"]),
+    "epic": (
+        "epicgameslauncher.exe",
+        "epicgameslauncher",
+        "Epic Games Launcher",
+        ["launcher_caches", "epic"],
+    ),
     # AI Apps
     "lmstudio": ("lm studio.exe", "lm-studio", "LM Studio", ["ai_app_cache", "lmstudio"]),
     "jan": ("jan.exe", "jan", "Jan.ai", ["ai_app_cache", "jan"]),

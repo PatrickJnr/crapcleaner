@@ -145,8 +145,12 @@ def find_duplicates(
     hardlinks_of: dict[str, list[str]] = {}
     visited = 0
 
-    include_exts = {e.lower().lstrip(".") for e in include_extensions} if include_extensions else None
-    exclude_exts = {e.lower().lstrip(".") for e in exclude_extensions} if exclude_extensions else None
+    include_exts = (
+        {e.lower().lstrip(".") for e in include_extensions} if include_extensions else None
+    )
+    exclude_exts = (
+        {e.lower().lstrip(".") for e in exclude_extensions} if exclude_extensions else None
+    )
 
     # Stage 1: walk directories and group by size. Protected content is filtered out
     # here, not at deletion time: a credential store listed as a "duplicate" is an
@@ -241,6 +245,7 @@ def find_duplicates(
         needs_sample.extend((size, path) for path in paths)
 
     if needs_sample:
+
         def _process_sample(item: tuple[int, str]) -> tuple[int, str, str | None]:
             size, path = item
             if stop_event is not None and stop_event.is_set():
@@ -342,4 +347,3 @@ def summarize_duplicates(groups: list[DuplicateGroup]) -> dict:
         "reclaimable_bytes": reclaimable,
         "largest_group_reclaimable": largest_group.reclaimable if largest_group else 0,
     }
-

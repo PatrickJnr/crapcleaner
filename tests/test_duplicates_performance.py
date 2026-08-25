@@ -1,6 +1,5 @@
 """Tests for duplicate finder performance optimizations and filter capabilities."""
 
-
 from crapcleaner.analysis.duplicates import (
     DuplicateGroup,
     _hash_sample,
@@ -33,16 +32,12 @@ def test_find_duplicates_extension_filters(tmp_path):
     d2.write_bytes(b"pdf_content_12345")
 
     # Filter to only .png
-    png_groups = find_duplicates(
-        [str(tmp_path)], min_size_bytes=1, include_extensions={"png"}
-    )
+    png_groups = find_duplicates([str(tmp_path)], min_size_bytes=1, include_extensions={"png"})
     assert len(png_groups) == 1
     assert all(f.endswith(".png") for f in png_groups[0].files)
 
     # Exclude .png
-    pdf_groups = find_duplicates(
-        [str(tmp_path)], min_size_bytes=1, exclude_extensions={"png"}
-    )
+    pdf_groups = find_duplicates([str(tmp_path)], min_size_bytes=1, exclude_extensions={"png"})
     assert len(pdf_groups) == 1
     assert all(f.endswith(".pdf") for f in pdf_groups[0].files)
 
@@ -58,9 +53,7 @@ def test_find_duplicates_max_size_filter(tmp_path):
     s1.write_bytes(b"y" * 100)
     s2.write_bytes(b"y" * 100)
 
-    groups = find_duplicates(
-        [str(tmp_path)], min_size_bytes=1, max_size_bytes=1000
-    )
+    groups = find_duplicates([str(tmp_path)], min_size_bytes=1, max_size_bytes=1000)
     assert len(groups) == 1
     assert groups[0].size == 100
 

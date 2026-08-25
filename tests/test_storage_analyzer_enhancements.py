@@ -1,6 +1,5 @@
 """Tests for StorageNode and StorageIndex analysis enhancements."""
 
-
 from crapcleaner.analysis.storage import StorageIndex, StorageNode, analyze_storage_hierarchy
 
 

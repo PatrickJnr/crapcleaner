@@ -96,6 +96,7 @@ _PROTECTED_DIR_NAMES = frozenset(
     }
 )
 
+
 def _is_protected_filename(base_name: str) -> tuple[bool, str]:
     """Check if a base filename represents a critical credential or protected secret."""
     lowered = base_name.lower()
@@ -106,7 +107,6 @@ def _is_protected_filename(base_name: str) -> tuple[bool, str]:
     if lowered.endswith((".pem", ".key", ".pkcs12", ".pfx", ".kdbx")):
         return True, f"Protected cryptographic key or password vault: {base_name}"
     return False, ""
-
 
 
 def _norm(path: str) -> str:
