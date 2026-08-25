@@ -68,3 +68,10 @@ def test_all_registered_categories():
         assert c.safety_level
         assert c.what_it_contains
         assert c.why_safe_to_delete
+
+
+def test_script_extensions_stay_in_developer_files():
+    from crapcleaner.analysis.file_types import FILE_CATEGORY_MAP
+
+    for ext in (".sh", ".bat", ".ps1"):
+        assert FILE_CATEGORY_MAP[ext] == "Developer files"

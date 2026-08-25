@@ -9,13 +9,14 @@ from datetime import datetime
 
 from crapcleaner.core.protected_paths import GuardStack
 from crapcleaner.utils.files import walk_safe_entries
-
-#: Skipped wherever they appear. Matched against the directory's own name, never as a
 from crapcleaner.utils.format import format_size
 from crapcleaner.utils.platform import get_program_data, get_windows_dir, is_windows
 
 #: Skipped wherever they appear. Matched against the directory's own name, never as a
 #: substring of the path: that would also skip `Games\MyGame\WindowsNoEditor`.
+#: How many files between progress callbacks.
+_PROGRESS_EVERY = 2000
+
 SKIP_DIR_NAMES = frozenset(
     {
         "$recycle.bin",
@@ -201,10 +202,6 @@ def scan_large_files(
             ext_normalized = os.path.splitext(entry.name)[1].lower().lstrip(".")
             if ext_filters is not None and ext_normalized not in ext_filters:
                 continue
-            file_cat = _file_type(entry.path)
-            if cat_filters is not None and file_cat.lower() not in cat_filters:
-                continue
-
             name = entry.name
             full = entry.path
             try:
@@ -212,9 +209,12 @@ def scan_large_files(
                 visited += 1
             except OSError:
                 continue
-            if progress_cb is not None and visited % 2000 == 0:
+            if progress_cb is not None and visited % _PROGRESS_EVERY == 0:
                 progress_cb(visited)
             if st.st_size < threshold_bytes:
+                continue
+            file_cat = _file_type(full)
+            if cat_filters is not None and file_cat.lower() not in cat_filters:
                 continue
             try:
                 mtime = datetime.fromtimestamp(st.st_mtime)
@@ -252,17 +252,21 @@ def scan_large_files_multi(
 ) -> list[LargeFile]:
     """Scan across multiple directories or drive mount points for large files."""
     all_files: list[LargeFile] = []
-    visited_total = 0
+    finished_roots = 0
+    in_root = 0
 
     def _sub_progress(count: int) -> None:
-        nonlocal visited_total
-        visited_total += count
+        # scan_large_files reports its own running total; adding it as a delta
+        # made every callback compound the counts already reported.
+        nonlocal in_root
+        in_root = count
         if progress_cb is not None:
-            progress_cb(visited_total)
+            progress_cb(finished_roots + count)
 
     for root in roots:
         if stop_event is not None and stop_event.is_set():
             break
+        in_root = 0
         files = scan_large_files(
             root=root,
             threshold_bytes=threshold_bytes,
@@ -273,6 +277,7 @@ def scan_large_files_multi(
             extension_filter=extension_filter,
         )
         all_files.extend(files)
+        finished_roots += in_root
 
     all_files.sort(key=lambda item: item.size, reverse=True)
     if max_results is not None and max_results > 0:

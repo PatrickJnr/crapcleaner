@@ -7,7 +7,6 @@ passwords, cookies, browsing history, and extensions.
 
 import glob
 import os
-from collections.abc import Iterable
 
 from crapcleaner.models.category import CacheTarget, CleanupCategory, SafetyLevel
 from crapcleaner.utils.platform import (
@@ -16,25 +15,7 @@ from crapcleaner.utils.platform import (
     get_user_profile,
     is_linux,
     is_windows,
-    run_command,
 )
-
-_BROWSER_PROCESS_MAP = {
-    "chrome": "chrome.exe",
-    "chromium": "chromium.exe",
-    "edge": "msedge.exe",
-    "brave": "brave.exe",
-    "opera": "opera.exe",
-    "operagx": "opera.exe",
-    "vivaldi": "vivaldi.exe",
-    "thorium": "thorium.exe",
-    "arc": "Arc.exe",
-    "firefox": "firefox.exe",
-    "librewolf": "librewolf.exe",
-    "waterfox": "waterfox.exe",
-    "floorp": "floorp.exe",
-    "zen": "zen.exe",
-}
 
 BROWSER_DISPLAY_NAMES = {
     "chrome": "Google Chrome",
@@ -52,63 +33,6 @@ BROWSER_DISPLAY_NAMES = {
     "floorp": "Floorp",
     "zen": "Zen Browser",
 }
-
-
-def _process_listing() -> str:
-    """One lowercase snapshot of running process names, or "" if unavailable."""
-    if is_windows():
-        res = run_command(["tasklist", "/FO", "CSV", "/NH"], timeout=8.0)
-    elif is_linux():
-        res = run_command(["ps", "-eo", "comm="], timeout=8.0)
-    else:
-        return ""
-    if res.get("returncode") != 0:
-        return ""
-    return str(res.get("stdout", "")).lower()
-
-
-def running_browsers(browser_ids: Iterable[str]) -> list[str]:
-    """Which of `browser_ids` currently have a running process.
-
-    A single process listing answers for every browser at once; asking per browser
-    would spawn a dozen subprocesses in front of a cleanup the user is waiting on.
-    """
-    wanted = {
-        bid: _BROWSER_PROCESS_MAP[bid]
-        for bid in dict.fromkeys(browser_ids)
-        if bid in _BROWSER_PROCESS_MAP
-    }
-    if not wanted:
-        return []
-    listing = _process_listing()
-    if not listing:
-        return []
-    running = []
-    for bid, proc_name in wanted.items():
-        needle = proc_name.lower() if is_windows() else proc_name[:-4].lower()
-        if needle in listing:
-            running.append(bid)
-    return running
-
-
-def is_browser_running(browser_id: str) -> bool:
-    """Whether the given browser is currently running."""
-    return bool(running_browsers([browser_id.lower()]))
-
-
-def running_browser_names(category_ids: Iterable[str]) -> list[str]:
-    """Display names of browsers that are running and own one of `category_ids`.
-
-    Their cache files are locked while they run, so a cleanup will skip some of
-    them; the user is told rather than the browser being closed for them.
-    """
-    ids = list(category_ids)
-    involved = [
-        bid
-        for bid in _BROWSER_PROCESS_MAP
-        if any(cid == bid or cid.startswith(f"{bid}_") for cid in ids)
-    ]
-    return [BROWSER_DISPLAY_NAMES.get(bid, bid) for bid in running_browsers(involved)]
 
 
 def _chromium_profiles(root: str) -> list[str]:
@@ -305,7 +229,7 @@ def get_categories() -> list[CleanupCategory]:
             _firefox_categories("floorp", "Floorp", os.path.join(local, "Floorp", "Profiles"))
         )
         categories.extend(
-            _firefox_categories("zen", "Zen Browser", os.path.join(appdata, "zen", "Profiles"))
+            _firefox_categories("zen", "Zen Browser", os.path.join(local, "zen", "Profiles"))
         )
 
     elif is_linux():

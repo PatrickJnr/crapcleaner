@@ -39,9 +39,13 @@ def find_empty_folders(
         return []
 
     results: list[EmptyFolderInfo] = []
+    empty: set[str] = set()
     guards = GuardStack()
     root_norm = os.path.abspath(root)
 
+    # ponytail: bottom-up, so protected subtrees are walked before being rejected and
+    # GuardStack always falls back to a full resolve(). Switch to a top-down walk with
+    # in-place pruning if this is ever pointed at a whole drive.
     for dirpath, dirnames, filenames in os.walk(root_norm, topdown=False):
         if stop_event is not None and stop_event.is_set():
             break
@@ -50,35 +54,37 @@ def find_empty_folders(
         if not guard.directory_allowed:
             continue
 
+        if filenames:
+            continue
+        # A folder holding nothing but empty folders goes with them; reporting only the
+        # leaves meant a chain N deep needed N scans to clear.
+        if any(os.path.join(dirpath, name) not in empty for name in dirnames):
+            continue
+
+        empty.add(dirpath)
+
         rel = os.path.relpath(dirpath, root_norm)
         depth = 0 if rel == "." else len(rel.split(os.sep))
         if depth < min_depth:
             continue
 
-        # Check if dir is currently empty on disk
+        mtime = None
         try:
-            with os.scandir(dirpath) as it:
-                is_empty = next(it, None) is None
+            st = os.stat(dirpath)
+            mtime = datetime.fromtimestamp(st.st_mtime)
         except OSError:
-            continue
+            pass
 
-        if is_empty:
-            mtime = None
-            try:
-                st = os.stat(dirpath)
-                mtime = datetime.fromtimestamp(st.st_mtime)
-            except OSError:
-                pass
-
-            info = EmptyFolderInfo(
+        results.append(
+            EmptyFolderInfo(
                 path=dirpath,
                 name=os.path.basename(dirpath),
                 depth=depth,
                 modified_at=mtime,
             )
-            results.append(info)
-            if max_results is not None and len(results) >= max_results:
-                break
+        )
 
     results.sort(key=lambda item: (item.depth, item.path), reverse=True)
+    if max_results is not None and max_results > 0:
+        return results[:max_results]
     return results

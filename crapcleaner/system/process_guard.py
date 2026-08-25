@@ -5,6 +5,7 @@ and AI apps) whose caches or logs may be locked during cleanup, warning the user
 before execution without ever forcefully killing processes.
 """
 
+import os
 from collections.abc import Iterable
 
 from crapcleaner.utils.platform import is_linux, is_windows, run_command
@@ -81,6 +82,26 @@ def get_running_process_snapshot() -> str:
     return str(res.get("stdout", "")).lower()
 
 
+def process_names(snapshot: str) -> set[str]:
+    """The distinct process names in a snapshot.
+
+    Substring-matching the raw text made every short name a trap: `zen` matches
+    `zenity`, `arc` matches `arch`, `jan` matches any `janitor`.
+    """
+    names: set[str] = set()
+    for line in snapshot.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('"'):
+            # tasklist /FO CSV: "image name","pid","session",...
+            line = line.split('","', 1)[0].strip('"')
+        name = os.path.basename(line).strip()
+        if name:
+            names.add(name)
+    return names
+
+
 def running_processes_for_categories(
     category_ids: Iterable[str], process_snapshot: str | None = None
 ) -> list[str]:
@@ -93,6 +114,7 @@ def running_processes_for_categories(
     if not snapshot:
         return []
 
+    present = process_names(snapshot)
     running_apps: list[str] = []
     seen_names: set[str] = set()
 
@@ -108,7 +130,7 @@ def running_processes_for_categories(
             continue
 
         target_proc = win_proc.lower() if is_windows() else linux_proc.lower()
-        if target_proc in snapshot:
+        if target_proc in present:
             if display_name not in seen_names:
                 seen_names.add(display_name)
                 running_apps.append(display_name)

@@ -61,3 +61,24 @@ def test_scan_large_files_multi(tmp_path):
     assert len(results) == 2
     assert results[0].size == 30000  # Sorted by size descending
     assert results[1].size == 20000
+
+
+def test_scan_large_files_multi_progress_does_not_compound(tmp_path, monkeypatch):
+    from crapcleaner.analysis import large_files
+
+    monkeypatch.setattr(large_files, "_PROGRESS_EVERY", 2)
+
+    roots = []
+    for i in range(2):
+        root = tmp_path / f"progress{i}"
+        root.mkdir()
+        for j in range(4):
+            (root / f"f{j}.bin").write_bytes(b"x" * 16)
+        roots.append(str(root))
+
+    seen: list[int] = []
+    scan_large_files_multi(roots, threshold_bytes=1, progress_cb=seen.append)
+
+    assert seen, "progress was never reported"
+    assert seen == sorted(seen)
+    assert seen[-1] <= 8, f"progress overshot the 8 files that exist: {seen}"

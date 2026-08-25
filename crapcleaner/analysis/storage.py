@@ -136,13 +136,21 @@ class StorageIndex:
         leaves.sort(key=lambda node: node.size, reverse=True)
         return leaves[:n]
 
+    def measured_roots(self) -> list[StorageNode]:
+        """The top of each measured tree: the only nodes whose totals may be summed.
+
+        Every `node.size` already includes its descendants, so adding up all of
+        `nodes` counts each byte once per ancestor.
+        """
+        claimed = {child for kids in self.children.values() for child in kids}
+        return [node for path, node in self.nodes.items() if path not in claimed]
+
     def summary(self, root_path: str | None = None) -> dict:
         """Provide global metric summary of measured storage."""
         root_node = self.nodes.get(root_path) if root_path else None
-        total_size = root_node.size if root_node else sum(n.size for n in self.nodes.values())
-        total_files = (
-            root_node.file_count if root_node else sum(n.file_count for n in self.nodes.values())
-        )
+        tops = [root_node] if root_node is not None else self.measured_roots()
+        total_size = sum(n.size for n in tops)
+        total_files = sum(n.file_count for n in tops)
         return {
             "total_directories": len(self.nodes),
             "total_size": total_size,

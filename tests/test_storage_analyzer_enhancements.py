@@ -62,3 +62,17 @@ def test_storage_index_query_methods(tmp_path):
     matches = index.find_directories("mid_dir")
     assert len(matches) == 1
     assert matches[0].name == "mid_dir"
+
+
+def test_summary_without_a_root_path_does_not_double_count(tmp_path):
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    (nested / "payload.bin").write_bytes(b"x" * 10000)
+
+    index = StorageIndex()
+    analyze_storage_hierarchy(str(tmp_path), max_depth=4, index_out=index)
+
+    # Every node.size already covers its descendants, so only the roots may be summed.
+    for summary in (index.summary(), index.summary(str(tmp_path / "never_scanned"))):
+        assert summary["total_size"] == 10000
+        assert summary["total_files"] == 1

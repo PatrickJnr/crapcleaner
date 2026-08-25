@@ -15,8 +15,6 @@ import pytest
 
 from crapcleaner.analysis.duplicates import find_duplicates
 from crapcleaner.analysis.storage import analyze_storage_hierarchy
-from crapcleaner.categories import browsers as browsers_module
-from crapcleaner.categories.browsers import running_browser_names
 from crapcleaner.core.cleaner import clean_categories
 from crapcleaner.core.preview import generate_cleanup_preview
 from crapcleaner.core.scanner import ScanEngine
@@ -25,8 +23,9 @@ from crapcleaner.registry import get_all_categories
 from crapcleaner.reports import export_report
 from crapcleaner.system import live_metrics, storage_health
 from crapcleaner.system.hardware import DriveSpec, SystemSpecs, print_specs_summary
+from crapcleaner.system.process_guard import running_processes_for_categories
 from crapcleaner.utils.files import walk_safe
-from crapcleaner.utils.platform import run_command
+from crapcleaner.utils.platform import is_windows, run_command
 
 
 def _pyc_category(root: str) -> CleanupCategory:
@@ -183,17 +182,28 @@ class TestSafeTraversal:
 class TestBrowserLockWarning:
     """BUG-07: a running browser is reported, never terminated."""
 
+    SNAPSHOT = '"chrome.exe","123","Console","1","50,000 K"' if is_windows() else "chrome"
+
     def test_running_browser_is_named_for_its_categories(self):
-        with patch.object(browsers_module, "_process_listing", return_value="chrome.exe\n"):
-            assert running_browser_names(["chrome_cache", "firefox_cache"]) == ["Google Chrome"]
+        assert running_processes_for_categories(
+            ["chrome_cache", "firefox_cache"], process_snapshot=self.SNAPSHOT
+        ) == ["Google Chrome"]
 
     def test_unrelated_categories_produce_no_warning(self):
-        with patch.object(browsers_module, "_process_listing", return_value="chrome.exe\n"):
-            assert running_browser_names(["windows_temp", "dotnet_caches"]) == []
+        assert (
+            running_processes_for_categories(
+                ["windows_temp", "dotnet_caches"], process_snapshot=self.SNAPSHOT
+            )
+            == []
+        )
 
     def test_missing_process_listing_is_not_reported_as_idle_browsers(self):
-        with patch.object(browsers_module, "_process_listing", return_value=""):
-            assert running_browser_names(["chrome_cache"]) == []
+        assert running_processes_for_categories(["chrome_cache"], process_snapshot="") == []
+
+    def test_a_longer_process_name_does_not_match_a_shorter_browser(self):
+        # `zen` used to match `zenity`: the whole listing was matched as one string.
+        snapshot = "zenity.exe" if is_windows() else "zenity"
+        assert running_processes_for_categories(["zen_cache"], process_snapshot=snapshot) == []
 
 
 class TestRecursiveCsvExport:
