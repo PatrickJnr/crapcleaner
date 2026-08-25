@@ -131,30 +131,26 @@ def get_categories() -> list[CleanupCategory]:
 
     categories: list[CleanupCategory] = []
 
-    lm_cache = os.path.join(user, ".lmstudio", "cache")
-    hf_refs = os.path.join(local, "huggingface", "hub", ".cache")
-
-    cache_targets: list[CacheTarget] = []
-    if os.path.isdir(lm_cache):
-        cache_targets.append(CacheTarget(path=lm_cache))
-    if os.path.isdir(hf_refs):
-        cache_targets.append(CacheTarget(path=hf_refs))
-
-    if cache_targets:
-        categories.append(
-            CleanupCategory(
-                id="ai_app_cache",
-                name="AI application caches",
-                group="AI",
-                description="Small cache folders from AI tools (LM Studio cache, Hugging Face metadata). Model weights are NEVER included.",
-                safety_level=SafetyLevel.REVIEW,
-                what_it_contains="LM Studio's cache folder and the Hugging Face hub metadata cache - catalogue listings, model cards, and download bookkeeping.",
-                why_it_grows="Browsing or searching for models stores a record of each one, and downloads leave their bookkeeping behind.",
-                why_safe_to_delete="The model weight directories are deliberately outside this category, so nothing you have downloaded is removed; only metadata about models is. The tools re-fetch that metadata from the network when you next browse, so an offline machine will show an empty catalogue until it can reach the hub again.",
-                regeneration_behavior="Rebuilt the next time you open the model browser or download something.",
-                targets=cache_targets,
-            )
+    ai_cache_targets = [
+        CacheTarget(path=os.path.join(user, ".lmstudio", "cache")),
+        CacheTarget(path=os.path.join(local, "huggingface", "hub", ".cache")),
+        CacheTarget(path=os.path.join(user, ".cache", "huggingface", "hub", ".cache")),
+        CacheTarget(path=os.path.join(user, "jan", "cache")),
+    ]
+    categories.append(
+        CleanupCategory(
+            id="ai_app_cache",
+            name="AI application caches",
+            group="AI",
+            description="Small cache folders from AI tools (LM Studio cache, Hugging Face metadata, Jan.ai cache). Model weights are NEVER included.",
+            safety_level=SafetyLevel.REVIEW,
+            what_it_contains="LM Studio's cache folder, Jan.ai cache, and the Hugging Face hub metadata cache - catalogue listings, model cards, and download bookkeeping.",
+            why_it_grows="Browsing or searching for models stores a record of each one, and downloads leave their bookkeeping behind.",
+            why_safe_to_delete="The model weight directories are deliberately outside this category, so nothing you have downloaded is removed; only metadata about models is. The tools re-fetch that metadata from the network when you next browse, so an offline machine will show an empty catalogue until it can reach the hub again.",
+            regeneration_behavior="Rebuilt the next time you open the model browser or download something.",
+            targets=ai_cache_targets,
         )
+    )
 
     categories.append(
         CleanupCategory(

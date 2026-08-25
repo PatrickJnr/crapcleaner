@@ -29,8 +29,37 @@ _PROTECTED_FILENAMES = frozenset(
         "id_ecdsa.pub",
         "id_dsa",
         "id_dsa.pub",
+        "id_ecdsa_sk",
+        "id_ecdsa_sk.pub",
+        "id_ed25519_sk",
+        "id_ed25519_sk.pub",
         "known_hosts",
         "authorized_keys",
+        ".env",
+        ".env.local",
+        ".env.development",
+        ".env.production",
+        ".env.test",
+        ".env.staging",
+        ".env.example",
+        ".env.defaults",
+        ".netrc",
+        ".secrets",
+        ".secrets.baseline",
+        "credentials.json",
+        "service_account.json",
+        "client_secret.json",
+        "client_secrets.json",
+        "secrets.json",
+        "secrets.yaml",
+        "secrets.yml",
+        "secrets.toml",
+        ".npmrc",
+        ".pypirc",
+        ".dockercfg",
+        "master.key",
+        "credentials.yml.enc",
+        ".htpasswd",
         "login data",
         "login data for account",
         "cookies",
@@ -58,10 +87,26 @@ _PROTECTED_DIR_NAMES = frozenset(
         ".aws",
         ".azure",
         ".kube",
+        ".gcp",
+        ".docker",
+        ".vault",
+        ".password-store",
         "system volume information",
         "$recycle.bin",
     }
 )
+
+def _is_protected_filename(base_name: str) -> tuple[bool, str]:
+    """Check if a base filename represents a critical credential or protected secret."""
+    lowered = base_name.lower()
+    if lowered in _PROTECTED_FILENAMES:
+        return True, f"Protected critical file or credential: {base_name}"
+    if lowered.startswith((".env.", ".env_")):
+        return True, f"Environment configuration file containing secrets: {base_name}"
+    if lowered.endswith((".pem", ".key", ".pkcs12", ".pfx", ".kdbx")):
+        return True, f"Protected cryptographic key or password vault: {base_name}"
+    return False, ""
+
 
 
 def _norm(path: str) -> str:
@@ -273,8 +318,9 @@ def _explain_protection_norm(norm_target: str) -> str | None:
             return f"Exact match with protected root: {reason}"
 
     base_name = os.path.basename(norm_target).lower()
-    if base_name in _PROTECTED_FILENAMES:
-        return f"Protected critical file or credential: {base_name}"
+    is_prot, prot_reason = _is_protected_filename(base_name)
+    if is_prot:
+        return prot_reason
 
     parts = [part.lower() for part in Path(norm_target).parts]
     for d_name in _PROTECTED_DIR_NAMES:
@@ -287,6 +333,13 @@ def _explain_protection_norm(norm_target: str) -> str | None:
         or "edge" in parts
         or "brave" in parts
         or "firefox" in parts
+        or "zen" in parts
+        or "librewolf" in parts
+        or "waterfox" in parts
+        or "floorp" in parts
+        or "vivaldi" in parts
+        or "opera" in parts
+        or "arc" in parts
     ) and (
         base_name
         in ("login data", "cookies", "key4.db", "logins.json", "places.sqlite", "bookmarks")
@@ -299,7 +352,22 @@ def _explain_protection_norm(norm_target: str) -> str | None:
     return None
 
 
-_BROWSER_PROFILE_PARTS = frozenset({"google", "chrome", "edge", "brave", "firefox"})
+_BROWSER_PROFILE_PARTS = frozenset(
+    {
+        "google",
+        "chrome",
+        "edge",
+        "brave",
+        "firefox",
+        "zen",
+        "librewolf",
+        "waterfox",
+        "floorp",
+        "vivaldi",
+        "opera",
+        "arc",
+    }
+)
 _BROWSER_CREDENTIAL_FILES = frozenset(
     {"login data", "cookies", "key4.db", "logins.json", "places.sqlite", "bookmarks"}
 )
@@ -398,7 +466,10 @@ class DirectoryGuard:
             return False
 
         lowered = name.lower()
-        if lowered in _PROTECTED_FILENAMES or lowered in _PROTECTED_DIR_NAMES:
+        if lowered in _PROTECTED_DIR_NAMES:
+            return False
+        is_prot, _ = _is_protected_filename(lowered)
+        if is_prot:
             return False
         if self._is_browser_profile and lowered in _BROWSER_CREDENTIAL_FILES:
             return False
@@ -477,14 +548,14 @@ def get_protected_rules_summary() -> list[dict[str, str]]:
         {
             "rule_type": "Protected Directory Pattern",
             "target": ", ".join(sorted(_PROTECTED_DIR_NAMES)),
-            "reason": "Git repositories, SSH keys, GPG keys, and system metadata folders",
+            "reason": "Git repositories, SSH keys, GPG keys, cloud credentials, and system metadata folders",
         }
     )
     summary.append(
         {
             "rule_type": "Protected File Pattern",
             "target": ", ".join(sorted(_PROTECTED_FILENAMES)),
-            "reason": "Passwords, credentials, cookies, bookmarks, and system registry hives",
+            "reason": "Environment files, secrets, API tokens, cryptographic keys, passwords, cookies, bookmarks, and registry hives",
         }
     )
     return summary

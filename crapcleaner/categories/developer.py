@@ -88,6 +88,33 @@ def get_categories() -> list[CleanupCategory]:
         _electron_tool_categories("windsurf", "Windsurf", os.path.join(appdata, "Windsurf"))
     )
     categories.extend(_electron_tool_categories("kiro", "Kiro", os.path.join(appdata, "Kiro")))
+    categories.extend(
+        _electron_tool_categories(
+            "claude_desktop", "Claude Desktop", os.path.join(appdata, "Claude")
+        )
+    )
+
+    pub_targets = [
+        CacheTarget(path=os.path.join(user, ".pub-cache", "hosted")),
+        CacheTarget(path=os.path.join(user, ".pub-cache", "git")),
+        CacheTarget(path=os.path.join(local, "Pub", "Cache", "hosted")),
+        CacheTarget(path=os.path.join(local, "Pub", "Cache", "git")),
+    ]
+    categories.append(
+        CleanupCategory(
+            id="pub_cache",
+            name="Dart & Flutter pub cache",
+            group="Developer tools",
+            description="Downloaded hosted packages and git repository clones for Dart and Flutter. Re-downloaded when building.",
+            safety_level=SafetyLevel.LOW_RISK,
+            what_it_contains="Downloaded package archives and git clones from pub.dev stored in .pub-cache.",
+            why_it_grows="The Dart/Flutter package manager stores all downloaded dependencies across all projects.",
+            why_safe_to_delete="Packages are re-downloaded from pub.dev on subsequent 'flutter pub get' or 'dart pub get' runs. Project files are unaffected.",
+            regeneration_behavior="Re-downloaded seamlessly on future builds or pub get commands.",
+            reversible=True,
+            targets=pub_targets,
+        )
+    )
 
     categories.append(
         CleanupCategory(
@@ -288,24 +315,6 @@ def get_categories() -> list[CleanupCategory]:
             targets=sbox_targets,
         )
     )
-
-    bun_root = os.path.join(user, ".bun", "install", "cache")
-    if os.path.isdir(bun_root):
-        categories.append(
-            CleanupCategory(
-                id="bun_cache",
-                name="Bun package cache",
-                group="Developer tools",
-                description="Global package cache for the Bun JavaScript runtime and package manager.",
-                safety_level=SafetyLevel.SAFE,
-                what_it_contains="Cached npm package archives managed by Bun.",
-                why_it_grows="Bun caches packages in ~/.bun to speed up repeated installs.",
-                why_safe_to_delete="Packages are re-downloaded as needed.",
-                regeneration_behavior="Rebuilt during 'bun install'.",
-                reversible=True,
-                targets=[CacheTarget(path=bun_root)],
-            )
-        )
 
     android_targets = []
     for candidate in (

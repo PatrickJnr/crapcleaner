@@ -33,6 +33,7 @@ _BROWSER_PROCESS_MAP = {
     "librewolf": "librewolf.exe",
     "waterfox": "waterfox.exe",
     "floorp": "floorp.exe",
+    "zen": "zen.exe",
 }
 
 BROWSER_DISPLAY_NAMES = {
@@ -49,6 +50,7 @@ BROWSER_DISPLAY_NAMES = {
     "librewolf": "LibreWolf",
     "waterfox": "Waterfox",
     "floorp": "Floorp",
+    "zen": "Zen Browser",
 }
 
 
@@ -302,6 +304,9 @@ def get_categories() -> list[CleanupCategory]:
         categories.extend(
             _firefox_categories("floorp", "Floorp", os.path.join(local, "Floorp", "Profiles"))
         )
+        categories.extend(
+            _firefox_categories("zen", "Zen Browser", os.path.join(appdata, "zen", "Profiles"))
+        )
 
     elif is_linux():
         categories.extend(
@@ -359,5 +364,6 @@ def get_categories() -> list[CleanupCategory]:
             _firefox_categories("waterfox", "Waterfox", os.path.join(user, ".waterfox"))
         )
         categories.extend(_firefox_categories("floorp", "Floorp", os.path.join(user, ".floorp")))
+        categories.extend(_firefox_categories("zen", "Zen Browser", os.path.join(user, ".zen")))
 
     return categories
