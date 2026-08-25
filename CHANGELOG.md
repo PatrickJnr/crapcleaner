@@ -5,6 +5,30 @@ All notable changes to **CrapCleaner** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-08-25
+
+Caches for current tooling, and protected secrets.
+
+### Added
+
+- **Cleanup categories for the tooling people actually run now**: pnpm's store, Bun's cache, Deno's cache, and Dart and Flutter's pub cache. The AI application caches are one category rather than several near-duplicates.
+- **QEMU and libvirt disk images are found on Linux**, under `gnome-boxes`, `libvirt/images`, and `/var/lib/libvirt/images`, so the machines taking the most space are visible on the platform that hosts them.
+- **The analyzers answer questions the interface had to compute for itself**: the largest directories and the largest leaf directories in a scan, a search across measured paths, a summary of a duplicate set, empty folders beneath a root, and a large-file scan across several roots at once with category and extension filters.
+
+### Changed
+
+- **Secret material is protected from cleanup by name, not by luck.** Keys, certificates, and credential files - `.env`, `.pem`, `.key`, `.pfx`, `.kdbx`, `.netrc`, `.npmrc`, `.pypirc`, `.secrets`, `.htpasswd`, `.dockercfg`, hardware-backed SSH keys - are refused, along with the `.docker`, `.gcp`, and `.vault` directories. None of these was ever a cleanup target; the guardrail means a future category cannot make one by accident.
+- **The running-application warning covers more than browsers.** It knew about fourteen browsers and nothing else, so a cleanup could walk into a locked IDE, chat client, or game launcher cache and simply skip files without saying why. It now recognises editors, communication apps, launchers, and AI applications from one process listing, and names them the same way.
+
+### Fixed
+
+- **Progress during a multi-root large-file scan compounded.** Each root reports its own running total, which was added as though it were a delta, so a 5000-file root reported 2000 then 6000.
+- **A storage summary counted every folder in the tree.** Each directory's size already covers its descendants, so adding them all up counted every byte once per ancestor: a tree holding 10000 bytes reported 30000. It sums the top of each measured tree.
+- **`.sh`, `.bat` and `.ps1` stopped being developer files**, dropped from the file-type map while it was being extended.
+- **Zen Browser's cache was never found on Windows.** It was looked for beside the profiles under `APPDATA`, but the cache lives under `LOCALAPPDATA`, as it does for every other Firefox fork.
+- **A short process name matched a longer one.** Matching ran as a substring test against the whole process listing, so `zen` matched `zenity` and `arc` matched `arch`. Names are compared whole.
+- **An empty folder chain took one scan per level to clear**, because only the deepest folder was reported. A folder holding nothing but empty folders now goes with them.
+
 ## [1.4.1] - 2026-08-25
 
 The cleanup dialog asks one question instead of two.
