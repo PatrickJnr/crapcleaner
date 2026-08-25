@@ -61,6 +61,35 @@ def _hash_prefix(path: str, prefix_size: int = _PREFIX_SIZE) -> str | None:
         return None
 
 
+def _hash_sample(path: str, file_size: int, sample_size: int = _PREFIX_SIZE) -> str | None:
+    """Hash head, middle, and tail samples of a file for fast elimination of large false matches."""
+    if file_size <= sample_size * 3:
+        return _hash_full_file(path)
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            # Head
+            head = fh.read(sample_size)
+            if not head:
+                return None
+            h.update(head)
+            # Middle
+            fh.seek((file_size - sample_size) // 2)
+            mid = fh.read(sample_size)
+            if not mid:
+                return None
+            h.update(mid)
+            # Tail
+            fh.seek(max(0, file_size - sample_size))
+            tail = fh.read(sample_size)
+            if not tail:
+                return None
+            h.update(tail)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
 def _hash_full_file(path: str, chunk_size: int = _HASH_CHUNK_SIZE) -> str | None:
     """Compute the full SHA-256 checksum of a file."""
     h = hashlib.sha256()
@@ -106,12 +135,18 @@ def find_duplicates(
     progress_cb: Callable[[int, int], None] | None = None,
     max_workers: int = 4,
     max_groups: int | None = None,
+    include_extensions: set[str] | list[str] | None = None,
+    exclude_extensions: set[str] | list[str] | None = None,
+    max_size_bytes: int | None = None,
 ) -> list[DuplicateGroup]:
     """Find duplicate files across one or more root folders using multi-stage hashing."""
     by_size: dict[int, list[str]] = {}
     #: path -> other names for the same file.
     hardlinks_of: dict[str, list[str]] = {}
     visited = 0
+
+    include_exts = {e.lower().lstrip(".") for e in include_extensions} if include_extensions else None
+    exclude_exts = {e.lower().lstrip(".") for e in exclude_extensions} if exclude_extensions else None
 
     # Stage 1: walk directories and group by size. Protected content is filtered out
     # here, not at deletion time: a credential store listed as a "duplicate" is an
@@ -131,12 +166,20 @@ def find_duplicates(
                     return []
                 if not guard.allows_file(entry.name):
                     continue
+                if include_exts is not None or exclude_exts is not None:
+                    ext = os.path.splitext(entry.name)[1].lower().lstrip(".")
+                    if include_exts is not None and ext not in include_exts:
+                        continue
+                    if exclude_exts is not None and ext in exclude_exts:
+                        continue
                 try:
                     st = entry.stat(follow_symlinks=False)
                     visited += 1
                 except OSError:
                     continue
                 if st.st_size < min_size_bytes:
+                    continue
+                if max_size_bytes is not None and st.st_size > max_size_bytes:
                     continue
 
                 by_size.setdefault(st.st_size, []).append(entry.path)
@@ -187,16 +230,53 @@ def find_duplicates(
     if not matching_prefix_groups:
         return []
 
+    # Stage 2.5: sample hashing for large files (> 64 KB) to avoid full I/O on false matches.
+    sample_candidates: dict[tuple[int, str], list[str]] = {}
+    needs_sample: list[tuple[int, str]] = []
+    for (size, prefix_digest), paths in matching_prefix_groups.items():
+        if size <= _PREFIX_SIZE * 8:
+            for p in paths:
+                sample_candidates.setdefault((size, prefix_digest), []).append(p)
+            continue
+        needs_sample.extend((size, path) for path in paths)
+
+    if needs_sample:
+        def _process_sample(item: tuple[int, str]) -> tuple[int, str, str | None]:
+            size, path = item
+            if stop_event is not None and stop_event.is_set():
+                return size, path, None
+            return size, path, _hash_sample(path, size)
+
+        sample_workers = min(max_workers, len(needs_sample))
+        if sample_workers > 1:
+            with ThreadPoolExecutor(max_workers=sample_workers) as pool:
+                for size, path, s_hash in pool.map(_process_sample, needs_sample):
+                    if stop_event is not None and stop_event.is_set():
+                        return []
+                    if s_hash is not None:
+                        sample_candidates.setdefault((size, s_hash), []).append(path)
+        else:
+            for size, path in needs_sample:
+                if stop_event is not None and stop_event.is_set():
+                    return []
+                s_hash = _hash_sample(path, size)
+                if s_hash is not None:
+                    sample_candidates.setdefault((size, s_hash), []).append(path)
+
+    matching_sample_groups = {k: paths for k, paths in sample_candidates.items() if len(paths) > 1}
+    if not matching_sample_groups:
+        return []
+
     # Stage 3: full SHA-256 checksum for candidate duplicates.
     by_full_hash: dict[tuple[int, str], list[str]] = {}
     processed = 0
-    total_candidates = sum(len(paths) for paths in matching_prefix_groups.values())
+    total_candidates = sum(len(paths) for paths in matching_sample_groups.values())
 
     needs_full_hash: list[tuple[int, str]] = []
-    for (size, prefix_digest), paths in matching_prefix_groups.items():
+    for (size, sample_digest), paths in matching_sample_groups.items():
         if size <= _PREFIX_SIZE:
             # A file no larger than the prefix is already fully hashed.
-            by_full_hash.setdefault((size, prefix_digest), []).extend(paths)
+            by_full_hash.setdefault((size, sample_digest), []).extend(paths)
             processed += len(paths)
             if progress_cb is not None:
                 progress_cb(processed, total_candidates)
@@ -246,3 +326,20 @@ def find_duplicates(
         return heapq.nlargest(max_groups, groups, key=lambda g: g.reclaimable)
     groups.sort(key=lambda g: g.reclaimable, reverse=True)
     return groups
+
+
+def summarize_duplicates(groups: list[DuplicateGroup]) -> dict:
+    """Calculate summary statistics across duplicate groups."""
+    total_groups = len(groups)
+    total_duplicate_files = sum(g.duplicate_count for g in groups)
+    total_files = sum(len(g.files) for g in groups)
+    reclaimable = sum(g.reclaimable for g in groups)
+    largest_group = max(groups, key=lambda g: g.reclaimable) if groups else None
+    return {
+        "total_groups": total_groups,
+        "total_duplicate_files": total_duplicate_files,
+        "total_files": total_files,
+        "reclaimable_bytes": reclaimable,
+        "largest_group_reclaimable": largest_group.reclaimable if largest_group else 0,
+    }
+
