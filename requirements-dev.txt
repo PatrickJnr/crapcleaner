@@ -7,5 +7,5 @@ tomli>=2; python_version < "3.11"
 # Pinned to a minor series: CI enforces these, so an unrelated release of either
 # must not be able to turn the build red, and a contributor running them locally
 # should see what CI sees.
-ruff~=0.16.0
-mypy~=2.3.0
+ruff~=0.17.3
+mypy~=2.4.1
